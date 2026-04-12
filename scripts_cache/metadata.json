@@ -1,0 +1,35 @@
+{
+  "scripts": [
+    {
+      "id": "kyc_bank_statement_v1",
+      "layout_hash": "372fb404b5a38a0d75b025c03a9d6b466afb9a0e163f60e02f06d13d3edd30ce",
+      "fields": [
+        "statement_date",
+        "account_holder_name",
+        "account_holder_address",
+        "account_number",
+        "transaction_date",
+        "transaction_description",
+        "transaction_type",
+        "transaction_amount",
+        "balance"
+      ],
+      "doc_type": "kyc_bank_statement",
+      "confidence_threshold": 0.95,
+      "created_date": "2026-04-12T19:02:30.765628",
+      "last_used": "2026-04-12T19:35:32.350991",
+      "source": "generated",
+      "fuzzy_match_keywords": [
+        "statement_date",
+        "account_holder_name",
+        "account_holder_address",
+        "account_number",
+        "transaction_date",
+        "transaction_description",
+        "transaction_type",
+        "transaction_amount",
+        "balance"
+      ]
+    }
+  ]
+}
