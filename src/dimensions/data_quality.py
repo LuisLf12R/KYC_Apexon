@@ -292,11 +292,19 @@ class DataQualityDimension:
             findings.append('[INFO] No documents found (N/A for this dataset)')
             return 100, findings
         
-        # Filter PoA documents for this customer
-        poa_docs = documents[
-            (documents['customer_id'] == customer_id) &
-            (documents['document_category'].isin(['POA', 'ADDRESS']))
-        ]
+        # Filter PoA documents for this customer - FIXED: Handle missing document_category
+        if 'document_category' in documents.columns:
+            poa_docs = documents[
+                (documents['customer_id'] == customer_id) &
+                (documents['document_category'].isin(['POA', 'ADDRESS']))
+            ]
+        else:
+            poa_types = ['UTILITY_BILL', 'BANK_STATEMENT', 'COUNCIL_TAX_BILL', 'LEASE_AGREEMENT', 
+                        'GOVERNMENT_CORRESPONDENCE', 'INSURANCE_CERTIFICATE', 'TAX_NOTICE']
+            poa_docs = documents[
+                (documents['customer_id'] == customer_id) &
+                (documents['document_type'].isin(poa_types))
+            ]
         
         if poa_docs.empty:
             findings.append('[WARN] No PoA documents found')
@@ -314,7 +322,7 @@ class DataQualityDimension:
                 continue
             
             if issue_date < min_issue_date:
-                findings.append(f'[WARN] PoA document stale: {issue_date.date()} (> 3 months old)')
+                findings.append(f'[WARN] PoA document stale: {issue_date.date()} (more than 3 months old)')
                 score -= 10
             else:
                 findings.append(f'[OK] PoA document current ({(self.evaluation_date - issue_date).days} days old)')

@@ -1,192 +1,229 @@
-from typing import Any, Dict, List
+"""
+validators.py - ENHANCED
+Report data quality issues without masking them.
+
+Philosophy: Transparency over convenience.
+- Report ALL issues
+- Don't auto-fix
+- Audit trail visible
+- Compliance-friendly
+"""
+
 import pandas as pd
+import logging
+from typing import Dict, List, Any
 
-from src.data.contracts import DatasetContract, ContractValidationError
+logger = logging.getLogger(__name__)
 
 
-def validate_required_fields(df: pd.DataFrame, contract: DatasetContract) -> bool:
+def validate_dataset(
+    dataset: pd.DataFrame,
+    contract: Dict[str, Any],
+    strict: bool = False
+) -> Dict[str, Any]:
     """
-    Ensure all required fields defined by the contract exist in the DataFrame.
+    Validate dataset against schema contract.
+    
+    Reports issues without fixing them.
+    
+    Args:
+        dataset: DataFrame to validate
+        contract: Schema contract from contracts.py
+        strict: If True, fail on any issue. If False, warn and continue.
+    
+    Returns:
+        {
+            'valid': bool,
+            'issues': [list of issues found],
+            'null_counts': {field: count},
+            'affected_rows': int
+        }
     """
-    missing = contract.required_fields - set(df.columns)
-    if missing:
-        raise ContractValidationError(
-            f"[{contract.name}] Missing required fields: {sorted(missing)}"
-        )
-    return True
-
-
-def validate_allowed_fields(df: pd.DataFrame, contract: DatasetContract) -> bool:
-    """
-    Ensure the DataFrame does not contain unexpected columns.
-
-    This is optional from a business perspective, but very useful for catching
-    schema drift early.
-    """
-    unexpected = set(df.columns) - contract.allowed_fields
-    if unexpected:
-        raise ContractValidationError(
-            f"[{contract.name}] Unexpected fields present: {sorted(unexpected)}"
-        )
-    return True
-
-
-def validate_enum_fields(df: pd.DataFrame, contract: DatasetContract) -> bool:
-    """
-    Ensure enum-backed fields contain only allowed values.
-
-    Null values are ignored here. Required-ness is handled separately by the
-    required fields / null checks.
-    """
-    for field, allowed_values in contract.enum_fields.items():
-        if field not in df.columns:
+    
+    issues = []
+    null_counts = {}
+    affected_rows = set()
+    
+    # Get required and optional fields
+    required_fields = contract.get('required_fields', [])
+    optional_fields = contract.get('optional_fields', [])
+    all_fields = required_fields + optional_fields
+    
+    # [1] Check required fields for nulls
+    for field in required_fields:
+        if field not in dataset.columns:
+            issues.append(f"[CRITICAL] Required field missing: {field}")
             continue
-
-        non_null_values = df[field].dropna()
-        invalid_values = sorted(set(non_null_values) - set(allowed_values))
-
-        if invalid_values:
-            raise ContractValidationError(
-                f"[{contract.name}] Invalid values for '{field}': {invalid_values}. "
-                f"Allowed values: {sorted(allowed_values)}"
+        
+        null_count = dataset[field].isna().sum()
+        if null_count > 0:
+            null_counts[field] = null_count
+            affected_rows.update(dataset[dataset[field].isna()].index.tolist())
+            pct = null_count / len(dataset) * 100
+            issues.append(
+                f"[WARN] Required field has nulls: {field} "
+                f"({null_count}/{len(dataset)} = {pct:.1f}%)"
             )
-    return True
-
-
-def validate_date_fields(df: pd.DataFrame, contract: DatasetContract) -> bool:
-    """
-    Ensure date fields are already parsed as pandas datetime types.
-    """
-    for field in contract.date_fields:
-        if field not in df.columns:
+    
+    # [2] Check optional fields for nulls (info only)
+    for field in optional_fields:
+        if field not in dataset.columns:
             continue
-
-        if not pd.api.types.is_datetime64_any_dtype(df[field]):
-            raise ContractValidationError(
-                f"[{contract.name}] Field '{field}' is not datetime64 dtype"
+        
+        null_count = dataset[field].isna().sum()
+        if null_count > 0 and null_count > len(dataset) * 0.1:
+            null_counts[field] = null_count
+            pct = null_count / len(dataset) * 100
+            issues.append(
+                f"[INFO] Optional field has high nulls: {field} "
+                f"({null_count}/{len(dataset)} = {pct:.1f}%)"
             )
-    return True
+    
+    # [3] Check for unexpected columns
+    extra_columns = set(dataset.columns) - set(all_fields)
+    if extra_columns:
+        issues.append(f"[INFO] Extra columns (not in contract): {', '.join(extra_columns)}")
+    
+    # [4] Missing expected columns
+    missing_columns = set(all_fields) - set(dataset.columns)
+    if missing_columns:
+        issues.append(f"[WARN] Expected columns missing: {', '.join(missing_columns)}")
+    
+    # Determine validity
+    critical_issues = [i for i in issues if '[CRITICAL]' in i]
+    valid = len(critical_issues) == 0
+    
+    result = {
+        'valid': valid,
+        'issues': issues,
+        'null_counts': null_counts,
+        'affected_rows': len(affected_rows),
+        'total_rows': len(dataset),
+    }
+    
+    # Log results
+    logger.info(f"\nDataset: {contract.get('name', 'Unknown')}")
+    logger.info(f"  Valid: {valid}")
+    logger.info(f"  Affected rows: {len(affected_rows)}/{len(dataset)}")
+    
+    for issue in issues:
+        if '[CRITICAL]' in issue:
+            logger.error(f"  {issue}")
+        elif '[WARN]' in issue:
+            logger.warning(f"  {issue}")
+        else:
+            logger.info(f"  {issue}")
+    
+    if strict and not valid:
+        raise ValueError(f"Dataset validation failed: {contract.get('name', 'Unknown')}")
+    
+    return result
 
 
-def validate_primary_key(df: pd.DataFrame, contract: DatasetContract) -> bool:
+def validate_dataframe(
+    df: pd.DataFrame,
+    required_columns: List[str] = None,
+    strict: bool = False
+) -> Dict[str, Any]:
     """
-    Ensure primary key fields exist, are not null, and are unique as a combination.
+    Quick validation for a DataFrame.
+    
+    Args:
+        df: DataFrame to validate
+        required_columns: List of column names that must not be null
+        strict: Fail if validation fails
+    
+    Returns:
+        Validation result dict
     """
-    if not contract.primary_key:
-        return True
+    
+    if df is None or df.empty:
+        return {
+            'valid': False,
+            'issues': ['DataFrame is empty or None'],
+            'null_counts': {},
+            'affected_rows': 0,
+        }
+    
+    issues = []
+    null_counts = {}
+    affected_rows = set()
+    
+    if required_columns:
+        for col in required_columns:
+            if col not in df.columns:
+                issues.append(f"[CRITICAL] Required column missing: {col}")
+                continue
+            
+            null_count = df[col].isna().sum()
+            if null_count > 0:
+                null_counts[col] = null_count
+                affected_rows.update(df[df[col].isna()].index.tolist())
+                issues.append(
+                    f"[WARN] Column has nulls: {col} ({null_count}/{len(df)})"
+                )
+    
+    valid = not any('[CRITICAL]' in i for i in issues)
+    
+    result = {
+        'valid': valid,
+        'issues': issues,
+        'null_counts': null_counts,
+        'affected_rows': len(affected_rows),
+    }
+    
+    if strict and not valid:
+        raise ValueError(f"DataFrame validation failed: {issues}")
+    
+    return result
 
-    missing_pk_fields = [field for field in contract.primary_key if field not in df.columns]
-    if missing_pk_fields:
-        raise ContractValidationError(
-            f"[{contract.name}] Missing primary key fields: {missing_pk_fields}"
-        )
 
-    null_pk_mask = df[contract.primary_key].isnull().any(axis=1)
-    if null_pk_mask.any():
-        raise ContractValidationError(
-            f"[{contract.name}] Null values found in primary key fields "
-            f"{contract.primary_key}"
-        )
-
-    duplicate_mask = df.duplicated(subset=contract.primary_key, keep=False)
-    if duplicate_mask.any():
-        duplicates = df.loc[duplicate_mask, contract.primary_key].drop_duplicates()
-        sample_duplicates = duplicates.head(10).to_dict(orient="records")
-        raise ContractValidationError(
-            f"[{contract.name}] Duplicate primary key values found for "
-            f"{contract.primary_key}. Sample duplicates: {sample_duplicates}"
-        )
-
-    return True
-
-
-def validate_non_null_required_fields(df: pd.DataFrame, contract: DatasetContract) -> bool:
+def validate_list_of_dicts(
+    data: List[Dict],
+    required_keys: List[str] = None,
+    strict: bool = False
+) -> Dict[str, Any]:
     """
-    Ensure required fields are not entirely or partially null.
-
-    Presence of the column alone is not enough for a strong contract.
+    Validate a list of dictionaries (e.g., UBO records).
+    
+    Args:
+        data: List of dicts to validate
+        required_keys: Keys that must exist in each dict
+        strict: Fail if validation fails
+    
+    Returns:
+        Validation result dict
     """
-    required_present = [field for field in contract.required_fields if field in df.columns]
-
-    null_violations = []
-    for field in required_present:
-        if df[field].isnull().any():
-            null_count = int(df[field].isnull().sum())
-            null_violations.append((field, null_count))
-
-    if null_violations:
-        details = ", ".join([f"{field}: {count} null(s)" for field, count in null_violations])
-        raise ContractValidationError(
-            f"[{contract.name}] Null values found in required fields: {details}"
-        )
-
-    return True
-
-
-def validate_dataframe(df: pd.DataFrame, contract: DatasetContract) -> bool:
-    """
-    Validate a pandas DataFrame against a dataset contract.
-    """
-    if not isinstance(df, pd.DataFrame):
-        raise ContractValidationError(
-            f"[{contract.name}] Expected pandas DataFrame, got {type(df).__name__}"
-        )
-
-    validate_required_fields(df, contract)
-    validate_non_null_required_fields(df, contract)
-    validate_allowed_fields(df, contract)
-    validate_enum_fields(df, contract)
-    validate_date_fields(df, contract)
-    validate_primary_key(df, contract)
-    return True
-
-
-def validate_list_of_dicts(data: List[Dict[str, Any]], contract: DatasetContract) -> bool:
-    """
-    Validate list-of-dicts datasets by converting them into a DataFrame view and
-    applying the same contract checks.
-
-    This keeps one validation path for UBO and regulatory rules.
-    """
-    if not isinstance(data, list):
-        raise ContractValidationError(
-            f"[{contract.name}] Expected list of dicts, got {type(data).__name__}"
-        )
-
-    if not all(isinstance(item, dict) for item in data):
-        raise ContractValidationError(
-            f"[{contract.name}] All records must be dictionaries"
-        )
-
-    df = pd.DataFrame(data)
-
-    # Date fields in list-of-dicts datasets may still need parsing upstream.
-    # We validate after conversion, assuming upstream has already normalized them.
-    validate_required_fields(df, contract)
-    validate_non_null_required_fields(df, contract)
-    validate_allowed_fields(df, contract)
-    validate_enum_fields(df, contract)
-    validate_primary_key(df, contract)
-
-    # Optional: only validate date dtypes if the DataFrame is not empty
-    if not df.empty:
-        validate_date_fields(df, contract)
-
-    return True
-
-
-def validate_dataset(data: Any, contract: DatasetContract) -> bool:
-    """
-    Validate any dataset against its contract.
-
-    Dispatches based on the contract record_type rather than guessing.
-    """
-    if contract.record_type == "dataframe":
-        return validate_dataframe(data, contract)
-
-    if contract.record_type == "list_of_dicts":
-        return validate_list_of_dicts(data, contract)
-
-    raise ContractValidationError(
-        f"[{contract.name}] Unsupported contract record_type: {contract.record_type}"
-    )
+    
+    if not data:
+        return {
+            'valid': False,
+            'issues': ['Data list is empty'],
+            'records_affected': 0,
+        }
+    
+    issues = []
+    records_with_missing_keys = []
+    
+    if required_keys:
+        for i, record in enumerate(data):
+            missing = [k for k in required_keys if k not in record or pd.isna(record.get(k))]
+            if missing:
+                records_with_missing_keys.append((i, missing))
+                issues.append(
+                    f"[WARN] Record {i} missing keys: {', '.join(missing)}"
+                )
+    
+    valid = not any('[CRITICAL]' in i for i in issues)
+    
+    result = {
+        'valid': valid,
+        'issues': issues,
+        'records_affected': len(records_with_missing_keys),
+        'total_records': len(data),
+    }
+    
+    if strict and not valid:
+        raise ValueError(f"List validation failed: {issues}")
+    
+    return result

@@ -280,13 +280,16 @@ class BeneficialOwnershipDimension:
             ubo_name = str(ubo.get('ubo_name', '')).upper()
             
             # Check if this UBO name appears in screening records
-            matching_screenings = screenings[
-                screenings.get('match_name', '').str.upper().str.contains(ubo_name, na=False, regex=False)
-            ]
+            if 'match_name' in screenings.columns:
+                matching_screenings = screenings[
+                    screenings['match_name'].str.upper().str.contains(ubo_name, na=False, regex=False)
+                ]
+            else:
+                matching_screenings = screenings.iloc[0:0]
             
             if not matching_screenings.empty:
                 screened_count += 1
-        
+                
         if screened_count == 0:
             return 'NO_UBOS_SCREENED'
         elif screened_count == len(ubos):
