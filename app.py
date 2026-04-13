@@ -393,79 +393,112 @@ with tab2:
     else:
         st.header("Batch Compliance Results")
 
+        batch_size = st.slider("Customers to evaluate", min_value=10, max_value=500, value=100, step=10)
+
         if st.button("📊 Run Batch Evaluation", use_container_width=True):
-            with st.spinner("Evaluating batch..."):
+            customer_ids = st.session_state.customers_df['customer_id'].head(batch_size).tolist()
+            results = []
+            errors = []
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+
+            for i, cid in enumerate(customer_ids):
                 try:
-                    customer_ids = st.session_state.customers_df['customer_id'].head(100).tolist()
-                    results_df = st.session_state.kyc_engine.evaluate_batch(customer_ids)
-
-                    total = len(results_df)
-                    compliant = len(results_df[results_df['overall_status'] == 'Compliant'])
-                    minor_gaps = len(results_df[results_df['overall_status'] == 'Compliant with Minor Gaps'])
-                    non_compliant = len(results_df[results_df['overall_status'] == 'Non-Compliant'])
-
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("Total Evaluated", total)
-                    with col2:
-                        st.metric("✅ Compliant", f"{compliant} ({compliant/total*100:.1f}%)")
-                    with col3:
-                        st.metric("⚠️ Minor Gaps", f"{minor_gaps} ({minor_gaps/total*100:.1f}%)")
-                    with col4:
-                        st.metric("❌ Non-Compliant", f"{non_compliant} ({non_compliant/total*100:.1f}%)")
-
-                    st.metric("Average Score", f"{results_df['overall_score'].mean():.1f}/100")
-
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        fig = go.Figure(data=[go.Pie(
-                            labels=['Compliant', 'Minor Gaps', 'Non-Compliant'],
-                            values=[compliant, minor_gaps, non_compliant],
-                            marker=dict(colors=['#28a745', '#ffc107', '#dc3545'])
-                        )])
-                        fig.update_layout(title="Compliance Distribution")
-                        st.plotly_chart(fig, use_container_width=True)
-
-                    with col2:
-                        avg_scores = {
-                            'AML': results_df['aml_screening_score'].mean(),
-                            'Identity': results_df['identity_verification_score'].mean(),
-                            'Activity': results_df['account_activity_score'].mean(),
-                            'PoA': results_df['proof_of_address_score'].mean(),
-                            'UBO': results_df['beneficial_ownership_score'].mean(),
-                            'Data Quality': results_df['data_quality_score'].mean()
-                        }
-                        fig = go.Figure(data=[go.Bar(
-                            x=list(avg_scores.keys()), y=list(avg_scores.values()),
-                            marker_color='rgba(102, 126, 234, 0.7)',
-                            text=[f'{v:.1f}' for v in avg_scores.values()],
-                            textposition='outside'
-                        )])
-                        fig.update_layout(title="Average Dimension Scores", yaxis_title="Score", height=400)
-                        st.plotly_chart(fig, use_container_width=True)
-
-                    st.subheader("Top Performers")
-                    st.dataframe(results_df.nlargest(10, 'overall_score')[
-                        ['customer_id', 'overall_score', 'overall_status']
-                    ], use_container_width=True, hide_index=True)
-
-                    st.subheader("Risk Areas")
-                    st.dataframe(results_df.nsmallest(10, 'overall_score')[
-                        ['customer_id', 'overall_score', 'overall_status']
-                    ], use_container_width=True, hide_index=True)
-
-                    # Download button
-                    csv_buf = io.StringIO()
-                    results_df.to_csv(csv_buf, index=False)
-                    st.download_button(
-                        "⬇️ Download Full Results CSV",
-                        csv_buf.getvalue(),
-                        file_name=f"kyc_batch_results_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                        mime="text/csv"
-                    )
-
+                    r = st.session_state.kyc_engine.evaluate_customer(str(cid))
+                    results.append(r)
                 except Exception as e:
-                    st.error(f"❌ Error: {str(e)}")
+                    errors.append({'customer_id': cid, 'error': str(e)})
+                progress_bar.progress((i + 1) / len(customer_ids))
+                if i % 10 == 0:
+                    status_text.text(f"Evaluating {i+1}/{len(customer_ids)}...")
+
+            status_text.empty()
+            progress_bar.empty()
+
+            if errors:
+                st.warning(f"⚠️ {len(errors)} customers skipped due to data issues.")
+
+            if not results:
+                st.error("No customers could be evaluated. Check your data.")
+            else:
+                score_cols = [
+                    'customer_id', 'aml_screening_score', 'identity_verification_score',
+                    'account_activity_score', 'proof_of_address_score',
+                    'beneficial_ownership_score', 'data_quality_score',
+                    'overall_score', 'overall_status'
+                ]
+                results_df = pd.DataFrame(results)
+                results_df = results_df[[c for c in score_cols if c in results_df.columns]]
+
+                # Fix NaN — replace with 0 for scores, 'Unknown' for status
+                score_num_cols = [c for c in results_df.columns if c.endswith('_score')]
+                results_df[score_num_cols] = results_df[score_num_cols].fillna(0)
+                results_df['overall_status'] = results_df['overall_status'].fillna('Unknown')
+                results_df['overall_score'] = results_df['overall_score'].fillna(0)
+
+                total = len(results_df)
+                compliant = len(results_df[results_df['overall_status'] == 'Compliant'])
+                minor_gaps = len(results_df[results_df['overall_status'] == 'Compliant with Minor Gaps'])
+                non_compliant = len(results_df[results_df['overall_status'] == 'Non-Compliant'])
+
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Total Evaluated", total)
+                with col2:
+                    st.metric("✅ Compliant", f"{compliant} ({compliant/total*100:.1f}%)")
+                with col3:
+                    st.metric("⚠️ Minor Gaps", f"{minor_gaps} ({minor_gaps/total*100:.1f}%)")
+                with col4:
+                    st.metric("❌ Non-Compliant", f"{non_compliant} ({non_compliant/total*100:.1f}%)")
+
+                st.metric("Average Score", f"{results_df['overall_score'].mean():.1f}/100")
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    fig = go.Figure(data=[go.Pie(
+                        labels=['Compliant', 'Minor Gaps', 'Non-Compliant'],
+                        values=[compliant, minor_gaps, non_compliant],
+                        marker=dict(colors=['#28a745', '#ffc107', '#dc3545'])
+                    )])
+                    fig.update_layout(title="Compliance Distribution")
+                    st.plotly_chart(fig, use_container_width=True)
+
+                with col2:
+                    avg_scores = {
+                        'AML': results_df['aml_screening_score'].mean(),
+                        'Identity': results_df['identity_verification_score'].mean(),
+                        'Activity': results_df['account_activity_score'].mean(),
+                        'PoA': results_df['proof_of_address_score'].mean(),
+                        'UBO': results_df['beneficial_ownership_score'].mean(),
+                        'Data Quality': results_df['data_quality_score'].mean()
+                    }
+                    fig = go.Figure(data=[go.Bar(
+                        x=list(avg_scores.keys()), y=list(avg_scores.values()),
+                        marker_color='rgba(102, 126, 234, 0.7)',
+                        text=[f'{v:.1f}' for v in avg_scores.values()],
+                        textposition='outside'
+                    )])
+                    fig.update_layout(title="Average Dimension Scores", yaxis_title="Score", height=400)
+                    st.plotly_chart(fig, use_container_width=True)
+
+                st.subheader("Top Performers")
+                st.dataframe(results_df.nlargest(10, 'overall_score')[
+                    ['customer_id', 'overall_score', 'overall_status']
+                ], use_container_width=True, hide_index=True)
+
+                st.subheader("Risk Areas")
+                st.dataframe(results_df.nsmallest(10, 'overall_score')[
+                    ['customer_id', 'overall_score', 'overall_status']
+                ], use_container_width=True, hide_index=True)
+
+                csv_buf = io.StringIO()
+                results_df.to_csv(csv_buf, index=False)
+                st.download_button(
+                    "⬇️ Download Full Results CSV",
+                    csv_buf.getvalue(),
+                    file_name=f"kyc_batch_results_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                    mime="text/csv"
+                )
 
 # ============================================================================
 # TAB 3: SYSTEM INFO
@@ -513,100 +546,327 @@ with tab3:
         st.metric("Data Source", "Uploaded or pre-loaded")
 
 # ============================================================================
-# TAB 4: DATA MANAGEMENT
+# TAB 4: DATA MANAGEMENT — MULTI-FORMAT INGESTION PIPELINE
 # ============================================================================
 
+# ---- Ingestion helpers (defined once, used in Tab 4) ----
+
+ACCEPTED_TYPES = ['csv', 'xlsx', 'xls', 'json', 'png', 'jpg', 'jpeg', 'tiff', 'bmp', 'pdf']
+
+AUTO_DETECT = "🤖 Auto-detect (AI decides)"
+
+DATASET_OPTIONS = [
+    'customers',
+    'screenings',
+    'id_verifications',
+    'transactions',
+    'documents',
+    'beneficial_ownership',
+]
+
+KYC_SCHEMAS_HINT = {
+    'customers': 'customer_id, entity_type, jurisdiction, risk_rating, account_open_date, last_kyc_review_date, country_of_origin',
+    'screenings': 'customer_id, screening_date, screening_result, match_name, list_reference, hit_status',
+    'id_verifications': 'customer_id, document_type, document_number, issue_date, expiry_date, verification_date, document_status',
+    'transactions': 'customer_id, last_txn_date, txn_count, total_volume',
+    'documents': 'customer_id, document_type, issue_date, expiry_date, document_category',
+    'beneficial_ownership': 'customer_id, ubo_name, ownership_percentage, nationality, date_identified',
+}
+
+
+def read_structured_file(file_obj, filename: str) -> pd.DataFrame:
+    """Load CSV, Excel, or JSON into a DataFrame."""
+    ext = Path(filename).suffix.lower()
+    if ext == '.csv':
+        return pd.read_csv(file_obj)
+    elif ext in ('.xlsx', '.xls'):
+        return pd.read_excel(file_obj)
+    elif ext == '.json':
+        content = json.load(file_obj)
+        if isinstance(content, list):
+            return pd.DataFrame(content)
+        elif isinstance(content, dict):
+            # Try common wrappers: {"data": [...]} or {"records": [...]}
+            for key in ['data', 'records', 'customers', 'results']:
+                if key in content and isinstance(content[key], list):
+                    return pd.DataFrame(content[key])
+            return pd.DataFrame([content])
+    raise ValueError(f"Unsupported format: {ext}")
+
+
+def ocr_file(file_bytes: bytes, filename: str) -> str:
+    """Run Google Vision OCR on an image or PDF file. Returns extracted text."""
+    from google.cloud import vision as gv
+    client = gv.ImageAnnotatorClient()
+
+    ext = Path(filename).suffix.lower()
+
+    if ext == '.pdf':
+        # For PDFs: try pdfminer first, fall back to Vision on first page bytes
+        try:
+            from pdfminer.high_level import extract_text
+            text = extract_text(io.BytesIO(file_bytes))
+            if text and len(text.strip()) > 50:
+                return text
+        except Exception:
+            pass
+        # Fall back: send raw bytes to Vision (works for image-based PDFs)
+        image = gv.Image(content=file_bytes)
+    else:
+        image = gv.Image(content=file_bytes)
+
+    response = client.document_text_detection(image=image)
+    if response.error.message:
+        raise RuntimeError(f"Google Vision error: {response.error.message}")
+
+    return response.full_text_annotation.text if response.full_text_annotation else ""
+
+
+def llm_structure_text(raw_text: str, dataset_type: str, filename: str) -> pd.DataFrame:
+    """
+    Send raw OCR/document text to Claude.
+    Ask it to return a JSON array of records matching the target KYC schema.
+    Returns a DataFrame.
+    """
+    import anthropic as ac
+    client = ac.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
+
+    schema_hint = KYC_SCHEMAS_HINT.get(dataset_type, 'any relevant fields')
+
+    system = """You are a KYC data extraction AI. 
+Given raw text from a compliance document, extract ALL records and return them as a JSON array.
+Each record must follow the target schema as closely as possible.
+If a field is missing, use null.
+Return ONLY a valid JSON array — no preamble, no markdown, no explanation."""
+
+    user = f"""Target dataset type: {dataset_type}
+Expected fields: {schema_hint}
+Source file: {filename}
+
+Raw document text:
+{raw_text[:6000]}
+
+Extract all records and return as a JSON array matching the schema above."""
+
+    response = client.messages.create(
+        model="claude-opus-4-20250514",
+        max_tokens=4000,
+        system=system,
+        messages=[{"role": "user", "content": user}]
+    )
+
+    raw = response.content[0].text.strip()
+    # Strip markdown fences if present
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+        raw = raw.strip()
+
+    records = json.loads(raw)
+    if isinstance(records, dict):
+        records = [records]
+
+    return pd.DataFrame(records)
+
+
+def autodetect_dataset_type(sample_text: str, filename: str) -> str:
+    """
+    Ask Claude to decide which KYC dataset type a file belongs to.
+    Returns one of the DATASET_OPTIONS strings.
+    """
+    import anthropic as ac
+    client = ac.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
+
+    options = ', '.join(DATASET_OPTIONS)
+    response = client.messages.create(
+        model="claude-opus-4-20250514",
+        max_tokens=50,
+        system=f"""You are a KYC data classifier. 
+Given a filename and sample content, decide which dataset type it belongs to.
+Valid options: {options}
+Return ONLY the dataset type string — nothing else.""",
+        messages=[{"role": "user", "content": f"Filename: {filename}\n\nSample content:\n{sample_text[:1500]}"}]
+    )
+    detected = response.content[0].text.strip().lower().replace(' ', '_')
+    return detected if detected in DATASET_OPTIONS else 'customers'
+
+
+def process_any_file(file_obj, filename: str, dataset_type: str) -> tuple:
+    """
+    Route file to correct processor based on extension.
+    If dataset_type is AUTO_DETECT, asks Claude to classify first.
+    Returns (DataFrame, method_used, dataset_type, message).
+    """
+    ext = Path(filename).suffix.lower()
+    structured_exts = {'.csv', '.xlsx', '.xls', '.json'}
+
+    if ext in structured_exts:
+        df = read_structured_file(file_obj, filename)
+        # Auto-detect from column names if needed
+        if dataset_type == AUTO_DETECT:
+            sample = df.head(3).to_string()
+            dataset_type = autodetect_dataset_type(sample, filename)
+        df = clean_dataframe(df, dataset_type)
+        return df, 'direct', dataset_type, f"Loaded {len(df)} rows directly"
+
+    else:
+        file_bytes = file_obj.read()
+        raw_text = ocr_file(file_bytes, filename)
+        if not raw_text or len(raw_text.strip()) < 20:
+            raise ValueError("OCR returned no usable text. Try a clearer image.")
+        # Auto-detect from OCR text if needed
+        if dataset_type == AUTO_DETECT:
+            dataset_type = autodetect_dataset_type(raw_text, filename)
+        df = llm_structure_text(raw_text, dataset_type, filename)
+        df = clean_dataframe(df, dataset_type)
+        return df, 'ocr+llm', dataset_type, f"OCR+LLM extracted {len(df)} records from {len(raw_text)} chars"
+
+
+# ---- Tab 4 UI ----
+
 with tab4:
-    st.header("📁 Data Management")
-    st.markdown("Upload your raw data files here. The platform will clean and load them automatically.")
+    st.header("📁 Data Management — Universal Ingestion")
+    st.markdown(
+        "Upload **any file format** for each KYC dataset. "
+        "Structured files (CSV, Excel, JSON) load directly. "
+        "Images and PDFs go through **Google Vision OCR → Claude AI** to extract structured records automatically."
+    )
 
-    st.subheader("Upload Data Files")
-    st.info("Upload CSV files for each dataset. Column names will be auto-normalized.")
+    st.info(
+        "**Accepted formats:** CSV · Excel (.xlsx) · JSON · PNG · JPG · TIFF · PDF  \n"
+        "Drop as many files as you want. Set dataset type per file, or leave on **Auto-detect** and Claude will classify each one."
+    )
 
-    col1, col2 = st.columns(2)
+    # ── BATCH UPLOADER ──────────────────────────────────────────────────────
+    st.subheader("📦 Batch File Upload")
 
-    with col1:
-        customers_file = st.file_uploader("👤 Customers CSV", type=['csv'], key="up_customers")
-        screenings_file = st.file_uploader("🛡️ AML Screenings CSV", type=['csv'], key="up_screenings")
-        id_file = st.file_uploader("🪪 ID Verifications CSV", type=['csv'], key="up_id")
+    batch_files = st.file_uploader(
+        "Drop all your files here (any format, any number)",
+        type=ACCEPTED_TYPES,
+        accept_multiple_files=True,
+        key="batch_uploader"
+    )
 
-    with col2:
-        transactions_file = st.file_uploader("💳 Transactions CSV", type=['csv'], key="up_transactions")
-        documents_file = st.file_uploader("📄 Documents CSV", type=['csv'], key="up_documents")
-        ubo_file = st.file_uploader("🏢 Beneficial Ownership CSV", type=['csv'], key="up_ubo")
+    if batch_files:
+        st.markdown(f"**{len(batch_files)} file(s) selected.** Set dataset type for each, or leave on Auto-detect.")
+
+        file_type_map = {}
+        type_options = [AUTO_DETECT] + DATASET_OPTIONS
+
+        # Grid: 2 files per row
+        for i in range(0, len(batch_files), 2):
+            cols = st.columns(2)
+            for j, col in enumerate(cols):
+                idx = i + j
+                if idx >= len(batch_files):
+                    break
+                f = batch_files[idx]
+                ext = Path(f.name).suffix.lower()
+                is_unstructured = ext not in {'.csv', '.xlsx', '.xls', '.json'}
+                icon = "🖼️" if is_unstructured else "📋"
+                with col:
+                    dtype = st.selectbox(
+                        f"{icon} {f.name}",
+                        type_options,
+                        key=f"btype_{idx}",
+                        help=f"Size: {f.size // 1024} KB · Format: {ext}"
+                    )
+                    if dtype != AUTO_DETECT:
+                        st.caption(f"`{KYC_SCHEMAS_HINT.get(dtype, '')}`")
+                    file_type_map[idx] = (f, dtype)
 
     st.divider()
 
-    if st.button("🧹 Clean & Load Data into Engine", type="primary", use_container_width=True):
+    if st.button("⚡ Process & Load All Files", type="primary", use_container_width=True):
 
-        uploaded = {
-            'customers': customers_file,
-            'screenings': screenings_file,
-            'id_verifications': id_file,
-            'transactions': transactions_file,
-            'documents': documents_file,
-            'beneficial_ownership': ubo_file,
-        }
-
-        has_any = any(f is not None for f in uploaded.values())
-
-        if not has_any:
-            st.error("Please upload at least the Customers CSV to proceed.")
+        if not batch_files:
+            st.error("Please upload at least one file above.")
         else:
-            cleaned = {}
-            preview_data = {}
+            cleaned_datasets = {}
+            processing_log = []
 
-            with st.spinner("Cleaning data..."):
-                for dataset_name, file_obj in uploaded.items():
-                    if file_obj is not None:
-                        try:
-                            df_raw = pd.read_csv(file_obj)
-                            df_clean = clean_dataframe(df_raw, dataset_name)
-                            cleaned[dataset_name] = df_clean
-                            preview_data[dataset_name] = df_clean
-                            st.success(f"✅ {dataset_name}: {len(df_clean)} rows cleaned")
-                        except Exception as e:
-                            st.error(f"❌ {dataset_name}: {str(e)}")
+            progress = st.progress(0)
+            status_text = st.empty()
+            total = len(batch_files)
 
-            if cleaned:
-                # Save to temp dir
-                with st.spinner("Saving cleaned files..."):
-                    tmp_dir = save_to_temp_dir(cleaned)
-                    st.info(f"Saved to temp directory: `{tmp_dir}`")
+            for i, (idx, (file_obj, dataset_type)) in enumerate(file_type_map.items()):
+                filename = file_obj.name
+                ext = Path(filename).suffix.lower()
+                is_unstructured = ext not in {'.csv', '.xlsx', '.xls', '.json'}
+                method_label = "🔍 OCR+AI" if is_unstructured else "📋 Direct"
+                auto_label = " (auto-detect)" if dataset_type == AUTO_DETECT else ""
 
-                # Reinitialize engine
-                with st.spinner("Loading KYC Engine with new data..."):
+                status_text.text(f"{method_label}{auto_label}: {filename} ({i+1}/{total})")
+
+                try:
+                    df, method, detected_type, msg = process_any_file(file_obj, filename, dataset_type)
+
+                    # Files of the same dataset type get merged
+                    if detected_type in cleaned_datasets:
+                        cleaned_datasets[detected_type] = pd.concat(
+                            [cleaned_datasets[detected_type], df], ignore_index=True
+                        ).drop_duplicates()
+                    else:
+                        cleaned_datasets[detected_type] = df
+
+                    auto_flag = " (auto-detected)" if dataset_type == AUTO_DETECT else ""
+                    st.success(f"{'🤖' if method == 'ocr+llm' else '✅'} **{filename}** → `{detected_type}`{auto_flag} — {msg}")
+                    processing_log.append({
+                        'File': filename, 'Dataset': detected_type,
+                        'Method': method, 'Rows': len(df), 'Status': 'OK'
+                    })
+
+                except Exception as e:
+                    st.error(f"❌ **{filename}**: {str(e)}")
+                    processing_log.append({
+                        'File': filename, 'Dataset': dataset_type,
+                        'Method': 'error', 'Rows': 0, 'Status': str(e)[:80]
+                    })
+
+                progress.progress((i + 1) / total)
+
+            status_text.empty()
+
+            if cleaned_datasets:
+                with st.spinner("Saving and reloading KYC Engine..."):
+                    tmp_dir = save_to_temp_dir(cleaned_datasets)
                     engine, customers = load_engine(tmp_dir)
+
                     if engine is not None and customers is not None and len(customers) > 0:
                         st.session_state.kyc_engine = engine
                         st.session_state.customers_df = customers
                         st.session_state.engines_initialized = True
                         st.session_state.data_dir = tmp_dir
-                        st.success(f"🎉 Engine loaded! {len(customers)} customers ready for evaluation.")
-                        st.rerun()
+                        st.success(f"🎉 Engine reloaded — **{len(customers)} customers** ready for evaluation.")
+                        st.balloons()
                     else:
-                        st.error("Engine failed to initialize. Check that your Customers CSV has a `customer_id` column.")
+                        st.warning(
+                            "Files processed but engine could not initialize. "
+                            "Ensure at least the **customers** dataset includes a `customer_id` column."
+                        )
 
-                # Previews
-                st.subheader("Data Previews")
-                for name, df in preview_data.items():
-                    with st.expander(f"{name} ({len(df)} rows, {len(df.columns)} columns)"):
-                        st.dataframe(df.head(5), use_container_width=True)
+                st.subheader("Processing Summary")
+                st.dataframe(pd.DataFrame(processing_log), use_container_width=True, hide_index=True)
+
+                st.subheader("Dataset Previews")
+                for name, df in cleaned_datasets.items():
+                    with st.expander(f"{name} — {len(df)} rows · {len(df.columns)} columns"):
+                        st.dataframe(df.head(10), use_container_width=True)
 
     st.divider()
 
     st.subheader("⬇️ Download Cleaned Files")
-    st.markdown("After loading data, download the cleaned CSVs for backup.")
-
     if st.session_state.engines_initialized and st.session_state.data_dir:
         data_dir = Path(st.session_state.data_dir)
         csv_files = list(data_dir.glob("*.csv"))
         if csv_files:
-            for csv_file in csv_files:
+            cols = st.columns(min(len(csv_files), 3))
+            for i, csv_file in enumerate(csv_files):
                 df = pd.read_csv(csv_file)
                 buf = io.StringIO()
                 df.to_csv(buf, index=False)
-                st.download_button(
+                cols[i % 3].download_button(
                     f"⬇️ {csv_file.name}",
                     buf.getvalue(),
                     file_name=csv_file.name,
