@@ -1,0 +1,28 @@
+DATA QUALITY ANALYSIS REPORT
+============================
+
+Summary:
+- Total customers: 5120
+- Screenings generated: 5120
+- ID verifications generated: 6656
+- Beneficial owners generated: 1000
+
+Issues found:
+- Overdue reviews: 20 customers
+- Jurisdiction mismatches: 1331 customers
+- Missing verifications: 791 customers
+- Expired documents: 268 customers
+- False positive rates: 67.3%
+- Suspicious transaction patterns: 256 customers
+
+Compliance gaps:
+- 361 HIGH-risk customers with stale screenings
+- 1211 customers with missing UBOs
+
+Recommendations:
+1. Re-screen overdue HIGH-risk customers immediately
+2. Verify identity for customers with no VERIFIED document
+3. Review suspicious transaction patterns for structuring indicators
+4. Collect beneficial ownership details for corporates lacking UBOs
+
+JSON suggestions are stored in data_quality_suggestions.json
