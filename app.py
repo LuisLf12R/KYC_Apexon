@@ -655,15 +655,9 @@ def render_main():
                     try:
                         r = st.session_state.kyc_engine.evaluate_customer(str(cid))
                         results.append(r)
-                        log("CUSTOMER_EVALUATED", customer_id=str(cid), batch_id=batch_id,
-                            snapshot={"overall_score": r.get("overall_score"),
-                                      "overall_status": r.get("overall_status")})
-                        if r.get("overall_status") == "Non-Compliant":
-                            log("FLAG_RAISED", customer_id=str(cid), batch_id=batch_id,
-                                details={"score": r.get("overall_score"), "source": "batch"})
                     except Exception as e:
                         errors.append({"id": cid, "error": str(e)})
-                    if i % 10 == 0:
+                    if i % 50 == 0:
                         bar.progress((i + 1) / len(customer_ids))
                         txt.text(f"{i+1}/{len(customer_ids)}")
 
@@ -691,10 +685,21 @@ def render_main():
                 st.session_state.batch_run_at = datetime.now().strftime("%Y-%m-%d %H:%M")
 
                 non_c = len(rdf[rdf["overall_status"] == "Non-Compliant"])
+                flagged_ids = rdf[rdf["overall_status"] == "Non-Compliant"]["customer_id"].tolist()
+
                 log("BATCH_RUN_COMPLETE", batch_id=batch_id,
-                    details={"evaluated": len(results), "errors": len(errors),
-                             "non_compliant": non_c,
-                             "avg_score": float(rdf["overall_score"].mean())})
+                    details={
+                        "evaluated": len(results),
+                        "errors": len(errors),
+                        "non_compliant": non_c,
+                        "minor_gaps": len(rdf[rdf["overall_status"] == "Compliant with Minor Gaps"]),
+                        "compliant": len(rdf[rdf["overall_status"] == "Compliant"]),
+                        "avg_score": float(rdf["overall_score"].mean()),
+                        "flagged_customer_ids": flagged_ids,
+                        "error_customer_ids": [e["id"] for e in errors],
+                        "note": "Individual scores not logged per-customer for performance. "
+                                "Full results available in batch CSV download."
+                    })
                 st.rerun()
 
             rdf = st.session_state.batch_results
@@ -838,7 +843,6 @@ def render_main():
                         log("ENGINE_RELOAD", details={"customers": len(customers),
                                                        "datasets": list(cleaned.keys())})
                         st.success(f"Engine loaded — {len(customers)} customers ready.")
-                        st.balloons()
                     else:
                         st.warning("Engine could not initialize. Ensure customers dataset "
                                    "has a customer_id column.")

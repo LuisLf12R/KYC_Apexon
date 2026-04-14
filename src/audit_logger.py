@@ -215,7 +215,9 @@ class AuditLogger:
         self.current_hash = event_hash
 
         self.events.append(event_content)
-        self._write_temp()
+        # Write temp file every 10 events to avoid I/O overhead on large batches
+        if len(self.events) % 10 == 0:
+            self._write_temp()
 
         return event_content
 
