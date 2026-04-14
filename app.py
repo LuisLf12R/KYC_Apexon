@@ -161,7 +161,8 @@ _DEFAULTS = {
     "last_activity": None, "timeout_warning_logged": False, "pii_masked": True,
     "kyc_engine": None, "engines_initialized": False, "customers_df": None,
     "data_dir": None, "batch_results": None, "batch_id": None, "batch_run_at": None,
-    "customer_history": {},  # {customer_id: [list of evaluation snapshots]}
+    "customer_history": {},
+    "data_source_label": None,
 }
 for k, v in _DEFAULTS.items():
     if k not in st.session_state:
@@ -421,18 +422,42 @@ def render_login():
                 st.session_state.pii_masked = True
                 logger.log("LOGIN", details={"username": user["username"],
                                               "role": user["role"], "pii_masked_on_login": True})
-                default_dir = Path.cwd() / "Data Clean"
-                if default_dir.exists():
-                    engine, customers = load_engine(default_dir)
-                    if engine is not None:
-                        st.session_state.kyc_engine = engine
-                        st.session_state.customers_df = customers
-                        st.session_state.engines_initialized = True
-                        st.session_state.data_dir = default_dir
+                _try_autoload_engine()
                 st.rerun()
             else:
                 st.error("Invalid credentials.")
         st.caption("Sessions expire after 15 minutes of inactivity (FFIEC / PSD2 standard).")
+
+
+def _try_autoload_engine():
+    """
+    On login, try to load data in this order:
+    1. Default 'Data Clean/' folder (committed to repo)
+    2. Temp dir from a previous session this deployment (kyc_data_clean/)
+    Silently skips if neither exists or neither has customers.
+    """
+    # 1. Default dir
+    default_dir = Path.cwd() / "Data Clean"
+    if default_dir.exists():
+        engine, customers = load_engine(default_dir)
+        if engine is not None and customers is not None and len(customers) > 0:
+            st.session_state.kyc_engine = engine
+            st.session_state.customers_df = customers
+            st.session_state.engines_initialized = True
+            st.session_state.data_dir = default_dir
+            st.session_state.data_source_label = "Data Clean/ (default)"
+            return
+
+    # 2. Temp dir from previous upload/clean in this deployment
+    tmp_dir = Path(tempfile.gettempdir()) / "kyc_data_clean"
+    if tmp_dir.exists() and any(tmp_dir.glob("*.csv")):
+        engine, customers = load_engine(tmp_dir)
+        if engine is not None and customers is not None and len(customers) > 0:
+            st.session_state.kyc_engine = engine
+            st.session_state.customers_df = customers
+            st.session_state.engines_initialized = True
+            st.session_state.data_dir = tmp_dir
+            st.session_state.data_source_label = "Previously cleaned data (auto-loaded)"
 
 
 # ╔══════════════════════════════════════════════════════════════════════════════
@@ -490,7 +515,10 @@ def render_main():
     s1, s2, s3, s4 = st.columns(4)
     with s1:
         if st.session_state.engines_initialized:
-            st.success(f"Engine Ready — {len(st.session_state.customers_df)} customers")
+            label = st.session_state.get("data_source_label", "")
+            st.success(f"Engine Ready — {len(st.session_state.customers_df)} customers  \n"
+                       f"<span style='font-size:11px;color:gray'>{label}</span>",
+                       )
         else:
             st.warning("No data — use Data Management")
     with s2:
@@ -737,15 +765,25 @@ def render_main():
     with tab2:
         touch()
         if not st.session_state.engines_initialized:
-            st.warning("No data loaded. Go to the Data Management tab to upload files.")
+            st.warning("No data loaded yet. Go to Data Management to upload files — "
+                       "or if you cleaned data in a previous session on this deployment, "
+                       "sign out and back in to auto-load it.")
         else:
             st.markdown("### Batch Compliance Evaluation")
 
+            # Data source indicator
+            source = st.session_state.get("data_source_label", "Loaded data")
+            ncust = len(st.session_state.customers_df)
+            st.success(
+                f"**{ncust} customers ready** — Source: {source}  \n"
+                "Data is loaded directly from the engine. No download or re-upload required."
+            )
+
             if st.session_state.batch_results is not None:
-                st.success(
-                    f"Showing results from batch **{st.session_state.batch_id}** "
+                st.info(
+                    f"Last batch: **{st.session_state.batch_id}** "
                     f"run at {st.session_state.batch_run_at}. "
-                    "Click below to re-evaluate."
+                    "Results shown below. Click the button to re-run with current data."
                 )
 
             if st.button("Run Full Batch Evaluation", type="primary"):
@@ -948,6 +986,7 @@ def render_main():
                         st.session_state.engines_initialized = True
                         st.session_state.data_dir = tmp_dir
                         st.session_state.batch_results = None
+                        st.session_state.data_source_label = f"Uploaded & cleaned ({', '.join(cleaned.keys())})"
                         log("ENGINE_RELOAD", details={"customers": len(customers),
                                                        "datasets": list(cleaned.keys())})
                         st.success(f"Engine loaded — {len(customers)} customers ready.")
