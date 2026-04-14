@@ -161,6 +161,7 @@ _DEFAULTS = {
     "last_activity": None, "timeout_warning_logged": False, "pii_masked": True,
     "kyc_engine": None, "engines_initialized": False, "customers_df": None,
     "data_dir": None, "batch_results": None, "batch_id": None, "batch_run_at": None,
+    "customer_history": {},  # {customer_id: [list of evaluation snapshots]}
 }
 for k, v in _DEFAULTS.items():
     if k not in st.session_state:
@@ -515,11 +516,11 @@ def render_main():
             st.warning("No data loaded. Go to the Data Management tab to upload files.")
         else:
             st.markdown("### Search & Evaluate Customer")
-            col1, col2 = st.columns([4, 1])
-            with col1:
-                cid_input = st.text_input("Customer ID", placeholder="C00001")
-            with col2:
-                eval_btn = st.button("Evaluate", type="primary", use_container_width=True)
+
+            # Fixed layout: input full width, button below it
+            cid_input = st.text_input("Customer ID", placeholder="C00001",
+                                       label_visibility="collapsed")
+            eval_btn = st.button("Evaluate Customer", type="primary", use_container_width=True)
 
             if eval_btn and cid_input:
                 cid = cid_input.strip().upper()
@@ -530,32 +531,122 @@ def render_main():
                         status = result.get("overall_status", "Unknown")
                         score = result.get("overall_score", 0)
 
+                        # Log with full snapshot
+                        snapshot = {k: result.get(k) for k in [
+                            "overall_score", "overall_status",
+                            "aml_screening_score", "identity_verification_score",
+                            "account_activity_score", "proof_of_address_score",
+                            "beneficial_ownership_score", "data_quality_score",
+                        ]}
                         log("CUSTOMER_VIEW", customer_id=cid,
-                            details={"tab": "individual_evaluation"},
-                            snapshot={k: result.get(k) for k in [
-                                "overall_score", "overall_status",
-                                "aml_screening_score", "identity_verification_score",
-                                "account_activity_score", "proof_of_address_score",
-                                "beneficial_ownership_score", "data_quality_score",
-                            ]})
+                            details={"tab": "individual_evaluation"}, snapshot=snapshot)
 
                         if status == "Non-Compliant":
                             log("FLAG_RAISED", customer_id=cid,
                                 details={"score": score, "triggered_by": "individual_evaluation"})
 
+                        # Save to customer history
+                        history_entry = {
+                            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "evaluated_by": user["username"],
+                            "overall_score": score,
+                            "overall_status": status,
+                            "aml_screening_score": result.get("aml_screening_score", 0),
+                            "identity_verification_score": result.get("identity_verification_score", 0),
+                            "account_activity_score": result.get("account_activity_score", 0),
+                            "proof_of_address_score": result.get("proof_of_address_score", 0),
+                            "beneficial_ownership_score": result.get("beneficial_ownership_score", 0),
+                            "data_quality_score": result.get("data_quality_score", 0),
+                        }
+                        if cid not in st.session_state.customer_history:
+                            st.session_state.customer_history[cid] = []
+                        st.session_state.customer_history[cid].append(history_entry)
+
+                        # Score metrics
                         m1, m2, m3 = st.columns(3)
                         m1.metric("Overall Score", f"{score}/100")
-                        m2.metric("Status", status)
-                        m3.metric("Customer", cid)
+                        m2.metric("Customer ID", cid)
+                        m3.metric("Evaluations this session",
+                                  len(st.session_state.customer_history.get(cid, [])))
+
+                        st.divider()
+
+                        # ── Detailed status block ──────────────────────────────
+                        dim_map = [
+                            ("aml_screening",         "AML Screening",         25),
+                            ("identity_verification", "Identity Verification", 20),
+                            ("account_activity",      "Account Activity",      15),
+                            ("proof_of_address",      "Proof of Address",      15),
+                            ("beneficial_ownership",  "Beneficial Ownership",  15),
+                            ("data_quality",          "Data Quality",          10),
+                        ]
+
+                        # Categorize dimensions
+                        passing, minor_gaps, failing = [], [], []
+                        for dk, label, weight in dim_map:
+                            s = result.get(f"{dk}_score", 0)
+                            finding = result.get(f"{dk}_details", {}).get("finding", "No detail available")
+                            entry = {"label": label, "score": s, "weight": weight, "finding": finding}
+                            if s >= 70:
+                                passing.append(entry)
+                            elif s >= 50:
+                                minor_gaps.append(entry)
+                            else:
+                                failing.append(entry)
 
                         if status == "Compliant":
-                            st.success("Compliant")
+                            st.success("**Compliant** — All dimensions meet required thresholds.")
+
                         elif "Minor" in status:
-                            st.warning("Compliant with Minor Gaps")
-                        else:
-                            st.error("Non-Compliant")
+                            st.warning(f"**Compliant with Minor Gaps** — Score: {score}/100")
+                            st.markdown(
+                                "The customer meets the minimum compliance threshold but has "
+                                "weaknesses in the following dimensions that require attention:"
+                            )
+                            # Show the gap dimensions prominently
+                            for e in minor_gaps + failing:
+                                color = COLORS["minor"] if e["score"] >= 50 else COLORS["non_compliant"]
+                                st.markdown(
+                                    f"<div style='border-left: 4px solid {color}; "
+                                    f"padding: 8px 12px; margin: 6px 0; "
+                                    f"background: rgba(255,255,255,0.03); border-radius: 4px;'>"
+                                    f"<strong>{e['label']}</strong> ({e['weight']}% weight) — "
+                                    f"Score: <strong>{e['score']}/100</strong><br>"
+                                    f"<span style='color:gray;font-size:13px'>{e['finding']}</span>"
+                                    f"</div>",
+                                    unsafe_allow_html=True
+                                )
+                            if passing:
+                                with st.expander(f"Passing dimensions ({len(passing)})"):
+                                    for e in passing:
+                                        st.markdown(
+                                            f"**{e['label']}** — {e['score']}/100 — {e['finding']}"
+                                        )
+
+                        else:  # Non-Compliant
+                            st.error(f"**Non-Compliant** — Score: {score}/100")
+                            st.markdown("The following dimensions are **failing or critical:**")
+                            for e in failing + minor_gaps:
+                                st.markdown(
+                                    f"<div style='border-left: 4px solid {COLORS['non_compliant']}; "
+                                    f"padding: 8px 12px; margin: 6px 0; "
+                                    f"background: rgba(255,255,255,0.03); border-radius: 4px;'>"
+                                    f"<strong>{e['label']}</strong> ({e['weight']}% weight) — "
+                                    f"Score: <strong>{e['score']}/100</strong><br>"
+                                    f"<span style='color:gray;font-size:13px'>{e['finding']}</span>"
+                                    f"</div>",
+                                    unsafe_allow_html=True
+                                )
+                            if passing:
+                                with st.expander(f"Passing dimensions ({len(passing)})"):
+                                    for e in passing:
+                                        st.markdown(
+                                            f"**{e['label']}** — {e['score']}/100 — {e['finding']}"
+                                        )
+
                             if role in ("Analyst", "Manager", "Admin"):
-                                st.markdown("**Remediation**")
+                                st.divider()
+                                st.markdown("**Remediation Actions**")
                                 rc1, rc2 = st.columns(2)
                                 with rc1:
                                     reason = st.selectbox("Reason Code",
@@ -582,16 +673,15 @@ def render_main():
                                             log("CLEAR_PROPOSED", customer_id=cid,
                                                 details={"reason_code": reason, "note": note_text,
                                                          "requires_manager_approval": True})
-                                            st.success("Clear proposed. Awaiting manager approval. Logged.")
+                                            st.success("Clear proposed. Awaiting manager approval.")
 
-                        dims = {
-                            "AML (25%)":       result.get("aml_screening_score", 0),
-                            "Identity (20%)":  result.get("identity_verification_score", 0),
-                            "Activity (15%)":  result.get("account_activity_score", 0),
-                            "Address (15%)":   result.get("proof_of_address_score", 0),
-                            "Ownership (15%)": result.get("beneficial_ownership_score", 0),
-                            "Quality (10%)":   result.get("data_quality_score", 0),
-                        }
+                        st.divider()
+
+                        # ── Dimension chart ────────────────────────────────────
+                        dims = {e["label"]: e["score"] for e in passing + minor_gaps + failing}
+                        # Sort by score ascending so worst shows at top
+                        dims = dict(sorted(dims.items(), key=lambda x: x[1]))
+
                         fig = go.Figure(go.Bar(
                             x=list(dims.values()), y=list(dims.keys()), orientation="h",
                             marker_color=[COLORS["compliant"] if s >= 70 else
@@ -599,26 +689,44 @@ def render_main():
                                           COLORS["non_compliant"] for s in dims.values()],
                             text=list(dims.values()), textposition="outside"
                         ))
-                        fig.update_layout(xaxis=dict(range=[0, 115]), height=320,
-                                          margin=dict(l=10, r=10, t=20, b=10),
-                                          plot_bgcolor="rgba(0,0,0,0)",
-                                          paper_bgcolor="rgba(0,0,0,0)")
+                        fig.update_layout(
+                            xaxis=dict(range=[0, 115], title="Score"),
+                            height=300,
+                            margin=dict(l=10, r=10, t=20, b=10),
+                            plot_bgcolor="rgba(0,0,0,0)",
+                            paper_bgcolor="rgba(0,0,0,0)"
+                        )
                         st.plotly_chart(fig, use_container_width=True)
 
-                        findings = []
-                        for dk, label in [
-                            ("aml_screening", "AML Screening"),
-                            ("identity_verification", "Identity Verification"),
-                            ("account_activity", "Account Activity"),
-                            ("proof_of_address", "Proof of Address"),
-                            ("beneficial_ownership", "Beneficial Ownership"),
-                            ("data_quality", "Data Quality"),
-                        ]:
-                            d = result.get(f"{dk}_details", {})
-                            findings.append({"Dimension": label,
-                                              "Score": result.get(f"{dk}_score", 0),
-                                              "Finding": d.get("finding", "N/A")})
-                        st.dataframe(pd.DataFrame(findings), use_container_width=True, hide_index=True)
+                        # ── Customer history ───────────────────────────────────
+                        history = st.session_state.customer_history.get(cid, [])
+                        if len(history) > 1:
+                            st.markdown("#### Evaluation History — This Session")
+                            hist_df = pd.DataFrame(history)
+                            # Highlight score changes
+                            st.dataframe(hist_df, use_container_width=True, hide_index=True)
+
+                            # Show score trend if multiple runs
+                            scores = [h["overall_score"] for h in history]
+                            timestamps = [h["timestamp"] for h in history]
+                            fig2 = go.Figure(go.Scatter(
+                                x=timestamps, y=scores,
+                                mode="lines+markers",
+                                marker=dict(size=8, color=COLORS["blue"]),
+                                line=dict(color=COLORS["blue"]),
+                                text=[f"{s}/100" for s in scores],
+                                textposition="top center"
+                            ))
+                            fig2.update_layout(
+                                title=f"Score Trend — {cid}",
+                                yaxis=dict(range=[0, 110], title="Score"),
+                                xaxis_title="Evaluation Time",
+                                height=250,
+                                margin=dict(l=10, r=10, t=40, b=10),
+                                plot_bgcolor="rgba(0,0,0,0)",
+                                paper_bgcolor="rgba(0,0,0,0)"
+                            )
+                            st.plotly_chart(fig2, use_container_width=True)
 
                     except Exception as e:
                         st.error(f"Evaluation error: {e}")
