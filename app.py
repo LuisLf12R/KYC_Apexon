@@ -1,608 +1,318 @@
 """
-app.py
-KYC Compliance Dashboard - Full Platform Edition
-- Streamlit on Railway
-- API keys from environment variables
-- Data Management: upload raw files, clean, reload engine
-- Document OCR: upload image, Google Vision + Claude LLM
+app.py — KYC Compliance Platform
+Apexon Case Study 02 | Full Platform Edition
+
+Features:
+- User authentication with role-based access (Viewer / Analyst / Manager / Admin)
+- 15-minute inactivity timeout (FFIEC / PSD2 / global KYC standard)
+- 13-minute inactivity warning (logged to audit trail)
+- Full audit trail with per-event SHA-256 hash chaining across sessions
+- Prompt registry with versioned prompts
+- Universal file ingestion: CSV, Excel, JSON, PNG, JPG, TIFF, PDF
+- OCR (Google Vision) + LLM (Claude) structured extraction
+- KYC engine evaluation across 6 compliance dimensions
+- Audit viewer with filterable event table and integrity verification
+- PII masking toggle (role-aware)
 """
 
 import streamlit as st
 import pandas as pd
 import json
-from pathlib import Path
-import sys
-import os
 import io
+import os
+import sys
 import tempfile
-from datetime import datetime
-import plotly.graph_objects as go
-from dotenv import load_dotenv
+import uuid
 import base64
+from pathlib import Path
+from datetime import datetime, timezone
+from dotenv import load_dotenv
+import plotly.graph_objects as go
 
 load_dotenv()
 
 st.set_page_config(
-    page_title="KYC Compliance Dashboard",
+    page_title="KYC Compliance Platform",
     page_icon="🏦",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed",
 )
 
-# ============================================================================
-# INITIALIZE API KEYS FROM ENVIRONMENT
-# ============================================================================
+# ── Constants ─────────────────────────────────────────────────────────────────
+
+INACTIVITY_WARNING_SEC = 13 * 60
+INACTIVITY_TIMEOUT_SEC = 15 * 60
+RULESET_VERSION = "kyc-ruleset-v1.0"
+ACCEPTED_TYPES = ["csv", "xlsx", "xls", "json", "png", "jpg", "jpeg", "tiff", "bmp", "pdf"]
+DATASET_OPTIONS = ["customers", "screenings", "id_verifications", "transactions", "documents", "beneficial_ownership"]
+AUTO_DETECT = "Auto-detect (AI classifies)"
+LOW_CONFIDENCE_THRESHOLD = 0.6
+
+KYC_SCHEMAS_HINT = {
+    "customers": "customer_id, entity_type, jurisdiction, risk_rating, account_open_date, last_kyc_review_date, country_of_origin",
+    "screenings": "customer_id, screening_date, screening_result, match_name, list_reference, hit_status",
+    "id_verifications": "customer_id, document_type, document_number, issue_date, expiry_date, verification_date, document_status",
+    "transactions": "customer_id, last_txn_date, txn_count, total_volume",
+    "documents": "customer_id, document_type, issue_date, expiry_date, document_category",
+    "beneficial_ownership": "customer_id, ubo_name, ownership_percentage, nationality, date_identified",
+}
+
+FALSE_POSITIVE_CODES = [
+    "OCR Error — Extraction Misread",
+    "Name Match Cleared — Verified Different Person",
+    "Address Variant Accepted — Same Location Different Format",
+    "Acceptable Risk Exception — Approved by Policy",
+    "Duplicate Record — Same Customer Different ID",
+    "Expired Document — Renewal Confirmed",
+    "Other — See Notes",
+]
+
+# Okabe-Ito colorblind-safe palette
+COLORS = {
+    "compliant":     "#009E73",
+    "minor":         "#E69F00",
+    "non_compliant": "#D55E00",
+    "blue":          "#0072B2",
+    "purple":        "#CC79A7",
+    "sky":           "#56B4E9",
+    "gray":          "#999999",
+}
+
+# ── API keys ──────────────────────────────────────────────────────────────────
 
 @st.cache_resource
 def init_api_keys():
     try:
-        claude_key = os.getenv('ANTHROPIC_API_KEY')
+        claude_key = os.getenv("ANTHROPIC_API_KEY")
         if not claude_key:
             return False, "ANTHROPIC_API_KEY not configured"
-        os.environ['ANTHROPIC_API_KEY'] = claude_key
-
+        os.environ["ANTHROPIC_API_KEY"] = claude_key
         google_key_json = None
-
-        google_path = os.getenv('GOOGLE_VISION_JSON_PATH')
+        google_path = os.getenv("GOOGLE_VISION_JSON_PATH")
         if google_path and Path(google_path).exists():
             with open(google_path) as f:
                 google_key_json = json.load(f)
-
         if not google_key_json:
-            google_base64 = os.getenv('GOOGLE_VISION_JSON_BASE64')
-            if google_base64:
-                try:
-                    decoded = base64.b64decode(google_base64).decode('utf-8')
-                    google_key_json = json.loads(decoded)
-                except Exception as e:
-                    return False, f"Invalid base64 Google Vision key: {str(e)}"
-
+            b64 = os.getenv("GOOGLE_VISION_JSON_BASE64")
+            if b64:
+                google_key_json = json.loads(base64.b64decode(b64).decode("utf-8"))
         if not google_key_json:
-            google_json = os.getenv('GOOGLE_VISION_JSON')
-            if google_json:
-                try:
-                    google_key_json = json.loads(google_json)
-                except Exception as e:
-                    return False, f"Invalid JSON Google Vision key: {str(e)}"
-
+            raw = os.getenv("GOOGLE_VISION_JSON")
+            if raw:
+                google_key_json = json.loads(raw)
         if not google_key_json:
             return False, "Google Vision API key not configured"
-
-        creds_path = Path(tempfile.gettempdir()) / '.kyc_google_creds.json'
-        with open(creds_path, 'w') as f:
+        creds_path = Path(tempfile.gettempdir()) / ".kyc_google_creds.json"
+        with open(creds_path, "w") as f:
             json.dump(google_key_json, f)
-        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = str(creds_path)
-
-        return True, "API keys loaded successfully"
-
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(creds_path)
+        return True, "OK"
     except Exception as e:
-        return False, f"Error loading API keys: {str(e)}"
-
+        return False, str(e)
 
 keys_ok, keys_msg = init_api_keys()
-
 if not keys_ok:
-    st.error(f"❌ Configuration Error: {keys_msg}")
-    st.warning("""
-    **For Local Testing:** Create a `.env` file with:
-    ```
-    ANTHROPIC_API_KEY=sk-ant-...
-    GOOGLE_VISION_JSON_PATH=/path/to/service-account.json
-    ```
-    **For Railway:** Add environment variables in Railway dashboard.
-    """)
+    st.error(f"Configuration Error: {keys_msg}")
     st.stop()
 
-# ============================================================================
-# SESSION STATE INITIALIZATION
-# ============================================================================
+# ── Prompt registry ───────────────────────────────────────────────────────────
 
-for key, default in {
-    'kyc_engine': None,
-    'engines_initialized': False,
-    'customers_df': None,
-    'data_dir': None,
-}.items():
-    if key not in st.session_state:
-        st.session_state[key] = default
-
-
-# ============================================================================
-# KYC ENGINE LOADER (supports custom data directory)
-# ============================================================================
-
-def load_engine(data_dir: Path):
-    """Load KYC engine from given data directory."""
+@st.cache_resource
+def load_prompt_registry():
+    prompts = {}
     try:
-        sys.path.insert(0, str(Path.cwd() / 'src'))
+        reg = Path.cwd() / "prompts" / "registry.json"
+        if reg.exists():
+            with open(reg) as f:
+                registry = json.load(f)
+            for entry in registry.get("prompts", []):
+                if entry.get("active"):
+                    pf = Path.cwd() / "prompts" / entry["file"]
+                    if pf.exists():
+                        with open(pf) as f:
+                            prompts[entry["id"]] = json.load(f)
+    except Exception:
+        pass
+    return prompts
+
+PROMPTS = load_prompt_registry()
+
+def get_prompt(pid):
+    return PROMPTS.get(pid, {})
+
+# ── User management ───────────────────────────────────────────────────────────
+
+@st.cache_data
+def load_users():
+    try:
+        p = Path.cwd() / "users.json"
+        if p.exists():
+            with open(p) as f:
+                data = json.load(f)
+            return {u["username"]: u for u in data.get("users", []) if u.get("active", True)}
+    except Exception:
+        pass
+    return {"admin": {"user_id": "fallback", "username": "admin", "password": "admin123",
+                       "role": "Admin", "full_name": "Administrator"}}
+
+def authenticate(username, password):
+    users = load_users()
+    u = users.get(username.strip().lower())
+    if u and u.get("password") == password:
+        return u
+    return None
+
+# ── Session state defaults ────────────────────────────────────────────────────
+
+_DEFAULTS = {
+    "authenticated": False, "current_user": None, "audit_logger": None,
+    "last_activity": None, "timeout_warning_logged": False, "pii_masked": True,
+    "kyc_engine": None, "engines_initialized": False, "customers_df": None,
+    "data_dir": None, "batch_results": None, "batch_id": None, "batch_run_at": None,
+}
+for k, v in _DEFAULTS.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
+
+# ── Audit helpers ─────────────────────────────────────────────────────────────
+
+def get_logger():
+    return st.session_state.get("audit_logger")
+
+def log(action_type, details=None, customer_id=None, batch_id=None, snapshot=None, prompt_id=None):
+    lg = get_logger()
+    if lg:
+        lg.log(action_type, details=details, customer_id=customer_id,
+               batch_id=batch_id, snapshot=snapshot, prompt_id=prompt_id)
+
+def touch():
+    st.session_state.last_activity = datetime.now(timezone.utc)
+
+# ── Timeout ───────────────────────────────────────────────────────────────────
+
+def check_timeout():
+    if not st.session_state.authenticated:
+        return False
+    last = st.session_state.last_activity
+    if last is None:
+        return True
+    elapsed = (datetime.now(timezone.utc) - last).total_seconds()
+    if elapsed >= INACTIVITY_TIMEOUT_SEC:
+        log("SESSION_EXPIRED", details={"elapsed_seconds": int(elapsed),
+                                         "reason": "15-min FFIEC/PSD2 inactivity limit"})
+        _force_logout()
+        return False
+    if elapsed >= INACTIVITY_WARNING_SEC and not st.session_state.timeout_warning_logged:
+        log("SESSION_TIMEOUT_WARNING", details={"elapsed_seconds": int(elapsed),
+             "note": "Logged so auditors can understand re-login patterns within short time windows."})
+        st.session_state.timeout_warning_logged = True
+    return True
+
+def _force_logout():
+    lg = get_logger()
+    final = lg.export_json() if lg else None
+    for k in list(st.session_state.keys()):
+        if k != "_final_log":
+            del st.session_state[k]
+    for k, v in _DEFAULTS.items():
+        st.session_state[k] = v
+    if final:
+        st.session_state["_final_log"] = final
+
+# ── PII masking ───────────────────────────────────────────────────────────────
+
+def can_unmask():
+    u = st.session_state.current_user
+    return u and u.get("role") in ("Manager", "Admin")
+
+def mask(value, field_type="default"):
+    if not st.session_state.pii_masked or can_unmask():
+        return str(value) if value is not None else "N/A"
+    masks = {
+        "ssn": "***-**-****", "dob": "**/**/****",
+        "account": f"****{str(value)[-4:]}" if value and len(str(value)) >= 4 else "****",
+        "name": f"{str(value)[0]}***" if value else "***",
+        "address": "[MASKED]", "default": "[MASKED]",
+    }
+    return masks.get(field_type, masks["default"])
+
+# ── Engine loader ─────────────────────────────────────────────────────────────
+
+def load_engine(data_dir):
+    try:
+        sys.path.insert(0, str(Path.cwd() / "src"))
         from kyc_engine import KYCComplianceEngine
         engine = KYCComplianceEngine(data_clean_dir=data_dir)
         return engine, engine.customers
     except Exception as e:
         return None, str(e)
 
+# ── Data cleaning ─────────────────────────────────────────────────────────────
 
-# Try default Data Clean/ on startup
-if not st.session_state.engines_initialized:
-    default_data_dir = Path.cwd() / 'Data Clean'
-    if default_data_dir.exists():
-        engine, customers = load_engine(default_data_dir)
-        if engine is not None:
-            st.session_state.kyc_engine = engine
-            st.session_state.customers_df = customers
-            st.session_state.engines_initialized = True
-            st.session_state.data_dir = default_data_dir
-
-
-# ============================================================================
-# DATA CLEANING UTILITIES
-# ============================================================================
-
-def clean_dataframe(df: pd.DataFrame, dataset_type: str) -> pd.DataFrame:
-    """
-    Generic cleaner: normalize columns, parse dates, strip whitespace.
-    Maps common column name variants to expected names.
-    """
-    # Normalize column names
-    df.columns = [c.strip().lower().replace(' ', '_').replace('-', '_') for c in df.columns]
-
-    # Column aliases for common variants
+def clean_dataframe(df, dataset_type):
+    df.columns = [c.strip().lower().replace(" ", "_").replace("-", "_") for c in df.columns]
     ALIASES = {
-        'customers': {
-            'id': 'customer_id', 'cust_id': 'customer_id', 'client_id': 'customer_id',
-            'type': 'entity_type', 'entity': 'entity_type',
-            'country': 'jurisdiction', 'region': 'jurisdiction',
-            'risk': 'risk_rating', 'risk_level': 'risk_rating',
-            'open_date': 'account_open_date', 'account_date': 'account_open_date',
-            'kyc_date': 'last_kyc_review_date', 'last_review': 'last_kyc_review_date',
-            'origin': 'country_of_origin',
-        },
-        'screenings': {
-            'id': 'customer_id', 'cust_id': 'customer_id',
-            'date': 'screening_date', 'screen_date': 'screening_date',
-            'result': 'screening_result', 'status': 'screening_result',
-            'match': 'match_name', 'matched_name': 'match_name',
-            'list': 'list_reference', 'list_ref': 'list_reference',
-            'hit': 'hit_status',
-        },
-        'id_verifications': {
-            'id': 'customer_id', 'cust_id': 'customer_id',
-            'doc_type': 'document_type', 'type': 'document_type',
-            'issue': 'issue_date', 'issued': 'issue_date',
-            'expiry': 'expiry_date', 'expires': 'expiry_date', 'expiration': 'expiry_date',
-            'verify_date': 'verification_date', 'verified_date': 'verification_date',
-            'status': 'document_status', 'doc_status': 'document_status',
-        },
-        'transactions': {
-            'id': 'customer_id', 'cust_id': 'customer_id',
-            'last_date': 'last_txn_date', 'last_transaction': 'last_txn_date',
-            'count': 'txn_count', 'num_txn': 'txn_count', 'transactions': 'txn_count',
-            'volume': 'total_volume', 'amount': 'total_volume', 'total': 'total_volume',
-        },
-        'documents': {
-            'id': 'customer_id', 'cust_id': 'customer_id',
-            'doc_type': 'document_type', 'type': 'document_type',
-            'issue': 'issue_date', 'issued': 'issue_date',
-            'expiry': 'expiry_date', 'expires': 'expiry_date',
-            'category': 'document_category', 'doc_category': 'document_category',
-        },
-        'beneficial_ownership': {
-            'id': 'customer_id', 'cust_id': 'customer_id',
-            'name': 'ubo_name', 'owner_name': 'ubo_name', 'beneficial_owner': 'ubo_name',
-            'ownership': 'ownership_percentage', 'pct': 'ownership_percentage', 'percent': 'ownership_percentage',
-            'nationality': 'nationality',
-            'date': 'date_identified', 'identified': 'date_identified',
-        },
+        "customers": {"id": "customer_id", "cust_id": "customer_id", "type": "entity_type",
+                      "country": "jurisdiction", "risk": "risk_rating", "risk_level": "risk_rating",
+                      "open_date": "account_open_date", "kyc_date": "last_kyc_review_date"},
+        "screenings": {"id": "customer_id", "date": "screening_date", "result": "screening_result",
+                       "match": "match_name", "list": "list_reference", "hit": "hit_status"},
+        "id_verifications": {"id": "customer_id", "doc_type": "document_type", "issue": "issue_date",
+                              "expiry": "expiry_date", "verify_date": "verification_date",
+                              "status": "document_status"},
+        "transactions": {"id": "customer_id", "last_date": "last_txn_date",
+                         "count": "txn_count", "volume": "total_volume"},
+        "documents": {"id": "customer_id", "doc_type": "document_type",
+                      "issue": "issue_date", "expiry": "expiry_date"},
+        "beneficial_ownership": {"id": "customer_id", "name": "ubo_name",
+                                  "ownership": "ownership_percentage", "date": "date_identified"},
     }
-
-    aliases = ALIASES.get(dataset_type, {})
-    df = df.rename(columns=aliases)
-
-    # Parse date columns
-    date_keywords = ['date', 'expiry', 'expiration', 'issued', 'verified']
+    df = df.rename(columns=ALIASES.get(dataset_type, {}))
     for col in df.columns:
-        if any(kw in col for kw in date_keywords):
-            df[col] = pd.to_datetime(df[col], errors='coerce')
-
-    # Strip string whitespace
-    for col in df.select_dtypes(include='object').columns:
+        if any(k in col for k in ["date", "expiry", "expiration"]):
+            df[col] = pd.to_datetime(df[col], errors="coerce")
+    for col in df.select_dtypes(include="object").columns:
         df[col] = df[col].str.strip()
-
-    # Normalize string values to uppercase where expected
-    upper_cols = ['screening_result', 'hit_status', 'document_status', 'risk_rating']
-    for col in upper_cols:
+    for col in ["screening_result", "hit_status", "document_status", "risk_rating"]:
         if col in df.columns:
             df[col] = df[col].str.upper()
-
     return df
 
-
-def save_to_temp_dir(dataframes: dict) -> Path:
-    """Save cleaned DataFrames to a temp directory. Returns path."""
-    tmp_dir = Path(tempfile.gettempdir()) / 'kyc_data_clean'
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-
-    filename_map = {
-        'customers': 'customers_clean.csv',
-        'screenings': 'screenings_clean.csv',
-        'id_verifications': 'id_verifications_clean.csv',
-        'transactions': 'transactions_clean.csv',
-        'documents': 'documents_clean.csv',
-        'beneficial_ownership': 'beneficial_ownership_clean.csv',
+def save_to_temp(dataframes):
+    tmp = Path(tempfile.gettempdir()) / "kyc_data_clean"
+    tmp.mkdir(parents=True, exist_ok=True)
+    name_map = {
+        "customers": "customers_clean.csv", "screenings": "screenings_clean.csv",
+        "id_verifications": "id_verifications_clean.csv", "transactions": "transactions_clean.csv",
+        "documents": "documents_clean.csv", "beneficial_ownership": "beneficial_ownership_clean.csv",
     }
-
     for key, df in dataframes.items():
         if isinstance(df, pd.DataFrame) and not df.empty:
-            filename = filename_map.get(key, f'{key}_clean.csv')
-            df.to_csv(tmp_dir / filename, index=False)
+            df.to_csv(tmp / name_map.get(key, f"{key}_clean.csv"), index=False)
+    return tmp
 
-    return tmp_dir
+# ── Ingestion pipeline ────────────────────────────────────────────────────────
 
-
-# ============================================================================
-# SIDEBAR
-# ============================================================================
-
-with st.sidebar:
-    st.title("⚙️ System Status")
-
-    if st.session_state.engines_initialized:
-        st.success("✅ System Ready")
-        if st.session_state.customers_df is not None:
-            st.info(f"📊 {len(st.session_state.customers_df)} customers loaded")
-        st.metric("API Keys", "✅ Configured")
-        if st.session_state.data_dir:
-            st.caption(f"Data: {st.session_state.data_dir}")
-    else:
-        st.warning("⚠️ No data loaded — use Data Management tab to upload files")
-
-    st.divider()
-
-    st.subheader("📋 About")
-    st.markdown("""
-    **KYC Compliance Dashboard**
-
-    6-Dimension Compliance Evaluation:
-    - AML Screening (25%)
-    - Identity Verification (20%)
-    - Account Activity (15%)
-    - Proof of Address (15%)
-    - Beneficial Ownership (15%)
-    - Data Quality (10%)
-    """)
-
-    st.divider()
-    st.subheader("🚀 Deployment")
-    st.markdown("**Running on:** Railway\n\n**Framework:** Streamlit")
-
-
-# ============================================================================
-# MAIN DASHBOARD
-# ============================================================================
-
-st.title("🏦 KYC Compliance Dashboard")
-st.markdown("Production Edition — Real-time Compliance Evaluation")
-
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "🔍 Individual Evaluation",
-    "📊 Batch Results",
-    "⚙️ System Info",
-    "📁 Data Management",
-    "🔬 Document OCR & AI"
-])
-
-# ============================================================================
-# TAB 1: INDIVIDUAL EVALUATION
-# ============================================================================
-
-with tab1:
-    if not st.session_state.engines_initialized:
-        st.warning("⚠️ No data loaded. Go to the **Data Management** tab to upload your files.")
-    else:
-        st.header("Search & Evaluate Customer")
-
-        col1, col2 = st.columns([4, 1])
-        with col1:
-            customer_id = st.text_input("Enter Customer ID", placeholder="C00001", key="customer_search")
-        with col2:
-            search_button = st.button("🔍 Evaluate", use_container_width=True)
-
-        if search_button and customer_id:
-            customer_id = customer_id.upper()
-            with st.spinner(f"Evaluating {customer_id}..."):
-                try:
-                    result = st.session_state.kyc_engine.evaluate_customer(customer_id)
-
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("Overall Score", f"{result['overall_score']}/100",
-                                  delta=f"Status: {result['overall_status']}")
-                    with col2:
-                        st.metric("Entity Type", result.get('entity_type', 'N/A'))
-                    with col3:
-                        st.metric("Risk Rating", result.get('risk_rating', 'N/A'))
-
-                    status = result['overall_status']
-                    if status == 'Compliant':
-                        st.success(f"✅ {status}")
-                    elif 'Minor' in status:
-                        st.warning(f"⚠️ {status}")
-                    else:
-                        st.error(f"❌ {status}")
-
-                    st.subheader("Dimension Breakdown")
-                    dimensions_data = {
-                        'Dimension': ['AML Screening', 'Identity Verification', 'Account Activity',
-                                      'Proof of Address', 'Beneficial Ownership', 'Data Quality'],
-                        'Score': [
-                            result['aml_screening_score'], result['identity_verification_score'],
-                            result['account_activity_score'], result['proof_of_address_score'],
-                            result['beneficial_ownership_score'], result['data_quality_score']
-                        ],
-                        'Weight': [25, 20, 15, 15, 15, 10],
-                        'Details': [
-                            result['aml_screening_details'].get('finding', 'N/A'),
-                            result['identity_verification_details'].get('finding', 'N/A'),
-                            result['account_activity_details'].get('finding', 'N/A'),
-                            result['proof_of_address_details'].get('finding', 'N/A'),
-                            result['beneficial_ownership_details'].get('finding', 'N/A'),
-                            result['data_quality_details'].get('finding', 'N/A'),
-                        ]
-                    }
-                    dimensions_df = pd.DataFrame(dimensions_data)
-
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        fig = go.Figure(data=[go.Bar(
-                            x=dimensions_df['Dimension'], y=dimensions_df['Score'],
-                            marker_color=['#28a745' if x >= 70 else '#ffc107' if x >= 50 else '#dc3545'
-                                          for x in dimensions_df['Score']],
-                            text=dimensions_df['Score'], textposition='outside'
-                        )])
-                        fig.update_layout(title="Dimension Scores", yaxis_title="Score",
-                                          height=400, xaxis_tickangle=-45)
-                        st.plotly_chart(fig, use_container_width=True)
-
-                    with col2:
-                        fig = go.Figure(data=[go.Pie(
-                            labels=['Compliant', 'Minor Gaps', 'Non-Compliant'],
-                            values=[
-                                100 if status == 'Compliant' else 0,
-                                100 if 'Minor' in status else 0,
-                                100 if 'Non' in status else 0
-                            ],
-                            marker=dict(colors=['#28a745', '#ffc107', '#dc3545'])
-                        )])
-                        fig.update_layout(title="Compliance Status", height=400)
-                        st.plotly_chart(fig, use_container_width=True)
-
-                    st.subheader("Detailed Findings")
-                    st.dataframe(dimensions_df[['Dimension', 'Score', 'Weight', 'Details']],
-                                 use_container_width=True, hide_index=True)
-
-                except Exception as e:
-                    st.error(f"❌ Error evaluating customer: {str(e)}")
-
-# ============================================================================
-# TAB 2: BATCH RESULTS
-# ============================================================================
-
-with tab2:
-    if not st.session_state.engines_initialized:
-        st.warning("⚠️ No data loaded. Go to the **Data Management** tab to upload your files.")
-    else:
-        st.header("Batch Compliance Results")
-
-        batch_size = st.slider("Customers to evaluate", min_value=10, max_value=500, value=100, step=10)
-
-        if st.button("📊 Run Batch Evaluation", use_container_width=True):
-            customer_ids = st.session_state.customers_df['customer_id'].head(batch_size).tolist()
-            results = []
-            errors = []
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-
-            for i, cid in enumerate(customer_ids):
-                try:
-                    r = st.session_state.kyc_engine.evaluate_customer(str(cid))
-                    results.append(r)
-                except Exception as e:
-                    errors.append({'customer_id': cid, 'error': str(e)})
-                progress_bar.progress((i + 1) / len(customer_ids))
-                if i % 10 == 0:
-                    status_text.text(f"Evaluating {i+1}/{len(customer_ids)}...")
-
-            status_text.empty()
-            progress_bar.empty()
-
-            if errors:
-                st.warning(f"⚠️ {len(errors)} customers skipped due to data issues.")
-
-            if not results:
-                st.error("No customers could be evaluated. Check your data.")
-            else:
-                score_cols = [
-                    'customer_id', 'aml_screening_score', 'identity_verification_score',
-                    'account_activity_score', 'proof_of_address_score',
-                    'beneficial_ownership_score', 'data_quality_score',
-                    'overall_score', 'overall_status'
-                ]
-                results_df = pd.DataFrame(results)
-                results_df = results_df[[c for c in score_cols if c in results_df.columns]]
-
-                # Fix NaN — replace with 0 for scores, 'Unknown' for status
-                score_num_cols = [c for c in results_df.columns if c.endswith('_score')]
-                results_df[score_num_cols] = results_df[score_num_cols].fillna(0)
-                results_df['overall_status'] = results_df['overall_status'].fillna('Unknown')
-                results_df['overall_score'] = results_df['overall_score'].fillna(0)
-
-                total = len(results_df)
-                compliant = len(results_df[results_df['overall_status'] == 'Compliant'])
-                minor_gaps = len(results_df[results_df['overall_status'] == 'Compliant with Minor Gaps'])
-                non_compliant = len(results_df[results_df['overall_status'] == 'Non-Compliant'])
-
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("Total Evaluated", total)
-                with col2:
-                    st.metric("✅ Compliant", f"{compliant} ({compliant/total*100:.1f}%)")
-                with col3:
-                    st.metric("⚠️ Minor Gaps", f"{minor_gaps} ({minor_gaps/total*100:.1f}%)")
-                with col4:
-                    st.metric("❌ Non-Compliant", f"{non_compliant} ({non_compliant/total*100:.1f}%)")
-
-                st.metric("Average Score", f"{results_df['overall_score'].mean():.1f}/100")
-
-                col1, col2 = st.columns(2)
-                with col1:
-                    fig = go.Figure(data=[go.Pie(
-                        labels=['Compliant', 'Minor Gaps', 'Non-Compliant'],
-                        values=[compliant, minor_gaps, non_compliant],
-                        marker=dict(colors=['#28a745', '#ffc107', '#dc3545'])
-                    )])
-                    fig.update_layout(title="Compliance Distribution")
-                    st.plotly_chart(fig, use_container_width=True)
-
-                with col2:
-                    avg_scores = {
-                        'AML': results_df['aml_screening_score'].mean(),
-                        'Identity': results_df['identity_verification_score'].mean(),
-                        'Activity': results_df['account_activity_score'].mean(),
-                        'PoA': results_df['proof_of_address_score'].mean(),
-                        'UBO': results_df['beneficial_ownership_score'].mean(),
-                        'Data Quality': results_df['data_quality_score'].mean()
-                    }
-                    fig = go.Figure(data=[go.Bar(
-                        x=list(avg_scores.keys()), y=list(avg_scores.values()),
-                        marker_color='rgba(102, 126, 234, 0.7)',
-                        text=[f'{v:.1f}' for v in avg_scores.values()],
-                        textposition='outside'
-                    )])
-                    fig.update_layout(title="Average Dimension Scores", yaxis_title="Score", height=400)
-                    st.plotly_chart(fig, use_container_width=True)
-
-                st.subheader("Top Performers")
-                st.dataframe(results_df.nlargest(10, 'overall_score')[
-                    ['customer_id', 'overall_score', 'overall_status']
-                ], use_container_width=True, hide_index=True)
-
-                st.subheader("Risk Areas")
-                st.dataframe(results_df.nsmallest(10, 'overall_score')[
-                    ['customer_id', 'overall_score', 'overall_status']
-                ], use_container_width=True, hide_index=True)
-
-                csv_buf = io.StringIO()
-                results_df.to_csv(csv_buf, index=False)
-                st.download_button(
-                    "⬇️ Download Full Results CSV",
-                    csv_buf.getvalue(),
-                    file_name=f"kyc_batch_results_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                    mime="text/csv"
-                )
-
-# ============================================================================
-# TAB 3: SYSTEM INFO
-# ============================================================================
-
-with tab3:
-    st.header("System Information")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("📊 Data Loaded")
-        if st.session_state.engines_initialized and st.session_state.customers_df is not None:
-            engine = st.session_state.kyc_engine
-            st.metric("Customers", len(st.session_state.customers_df))
-            st.metric("AML Screenings", len(engine.screenings) if engine.screenings is not None else 0)
-            st.metric("ID Verifications", len(engine.id_verifications) if engine.id_verifications is not None else 0)
-            st.metric("Transactions", len(engine.transactions) if engine.transactions is not None else 0)
-        else:
-            st.info("No data loaded yet.")
-
-    with col2:
-        st.subheader("🎯 KYC Dimensions")
-        st.markdown("""
-        1. **AML Screening** (25%) — Sanctions list checks
-        2. **Identity Verification** (20%) — Document verification
-        3. **Account Activity** (15%) — Transaction patterns
-        4. **Proof of Address** (15%) — Address verification
-        5. **Beneficial Ownership** (15%) — UBO documentation
-        6. **Data Quality** (10%) — Data completeness
-        """)
-
-    st.divider()
-    st.subheader("🚀 Platform")
-    st.markdown("""
-    **Hosting:** Railway | **Framework:** Streamlit | **Python:** 3.9+
-    **API Keys:** Loaded from environment variables — zero manual setup on demo day.
-    """)
-
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Evaluation", "Real-time")
-    with col2:
-        st.metric("Batch Size", "100 customers")
-    with col3:
-        st.metric("Data Source", "Uploaded or pre-loaded")
-
-# ============================================================================
-# TAB 4: DATA MANAGEMENT — MULTI-FORMAT INGESTION PIPELINE
-# ============================================================================
-
-# ---- Ingestion helpers (defined once, used in Tab 4) ----
-
-ACCEPTED_TYPES = ['csv', 'xlsx', 'xls', 'json', 'png', 'jpg', 'jpeg', 'tiff', 'bmp', 'pdf']
-
-AUTO_DETECT = "🤖 Auto-detect (AI decides)"
-
-DATASET_OPTIONS = [
-    'customers',
-    'screenings',
-    'id_verifications',
-    'transactions',
-    'documents',
-    'beneficial_ownership',
-]
-
-KYC_SCHEMAS_HINT = {
-    'customers': 'customer_id, entity_type, jurisdiction, risk_rating, account_open_date, last_kyc_review_date, country_of_origin',
-    'screenings': 'customer_id, screening_date, screening_result, match_name, list_reference, hit_status',
-    'id_verifications': 'customer_id, document_type, document_number, issue_date, expiry_date, verification_date, document_status',
-    'transactions': 'customer_id, last_txn_date, txn_count, total_volume',
-    'documents': 'customer_id, document_type, issue_date, expiry_date, document_category',
-    'beneficial_ownership': 'customer_id, ubo_name, ownership_percentage, nationality, date_identified',
-}
-
-
-def read_structured_file(file_obj, filename: str) -> pd.DataFrame:
-    """Load CSV, Excel, or JSON into a DataFrame."""
+def read_structured(file_obj, filename):
     ext = Path(filename).suffix.lower()
-    if ext == '.csv':
+    if ext == ".csv":
         return pd.read_csv(file_obj)
-    elif ext in ('.xlsx', '.xls'):
+    elif ext in (".xlsx", ".xls"):
         return pd.read_excel(file_obj)
-    elif ext == '.json':
+    elif ext == ".json":
         content = json.load(file_obj)
         if isinstance(content, list):
             return pd.DataFrame(content)
-        elif isinstance(content, dict):
-            # Try common wrappers: {"data": [...]} or {"records": [...]}
-            for key in ['data', 'records', 'customers', 'results']:
-                if key in content and isinstance(content[key], list):
-                    return pd.DataFrame(content[key])
-            return pd.DataFrame([content])
-    raise ValueError(f"Unsupported format: {ext}")
+        for key in ["data", "records", "customers", "results"]:
+            if key in content and isinstance(content[key], list):
+                return pd.DataFrame(content[key])
+        return pd.DataFrame([content])
+    raise ValueError(f"Unsupported: {ext}")
 
-
-def ocr_file(file_bytes: bytes, filename: str) -> str:
-    """Run Google Vision OCR on an image or PDF file. Returns extracted text."""
+def ocr_file(file_bytes, filename):
     from google.cloud import vision as gv
     client = gv.ImageAnnotatorClient()
-
-    ext = Path(filename).suffix.lower()
-
-    if ext == '.pdf':
-        # For PDFs: try pdfminer first, fall back to Vision on first page bytes
+    if Path(filename).suffix.lower() == ".pdf":
         try:
             from pdfminer.high_level import extract_text
             text = extract_text(io.BytesIO(file_bytes))
@@ -610,477 +320,774 @@ def ocr_file(file_bytes: bytes, filename: str) -> str:
                 return text
         except Exception:
             pass
-        # Fall back: send raw bytes to Vision (works for image-based PDFs)
-        image = gv.Image(content=file_bytes)
-    else:
-        image = gv.Image(content=file_bytes)
+    resp = client.document_text_detection(image=gv.Image(content=file_bytes))
+    if resp.error.message:
+        raise RuntimeError(f"Vision API: {resp.error.message}")
+    return resp.full_text_annotation.text if resp.full_text_annotation else ""
 
-    response = client.document_text_detection(image=image)
-    if response.error.message:
-        raise RuntimeError(f"Google Vision error: {response.error.message}")
-
-    return response.full_text_annotation.text if response.full_text_annotation else ""
-
-
-def llm_structure_text(raw_text: str, dataset_type: str, filename: str) -> pd.DataFrame:
-    """
-    Send raw OCR/document text to Claude.
-    Ask it to return a JSON array of records matching the target KYC schema.
-    Returns a DataFrame.
-    """
+def llm_structure(raw_text, dataset_type, filename):
     import anthropic as ac
-    client = ac.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
-
-    schema_hint = KYC_SCHEMAS_HINT.get(dataset_type, 'any relevant fields')
-
-    system = """You are a KYC data extraction AI. 
-Given raw text from a compliance document, extract ALL records and return them as a JSON array.
-Each record must follow the target schema as closely as possible.
-If a field is missing, use null.
-Return ONLY a valid JSON array — no preamble, no markdown, no explanation."""
-
-    user = f"""Target dataset type: {dataset_type}
-Expected fields: {schema_hint}
-Source file: {filename}
-
-Raw document text:
-{raw_text[:6000]}
-
-Extract all records and return as a JSON array matching the schema above."""
-
-    response = client.messages.create(
-        model="claude-opus-4-20250514",
-        max_tokens=4000,
-        system=system,
-        messages=[{"role": "user", "content": user}]
+    cfg = get_prompt("kyc-structuring-v1.0")
+    system = cfg.get("system", "Extract KYC records and return a JSON array.")
+    tmpl = cfg.get("user_template", "{ocr_text}")
+    user = tmpl.format(dataset_type=dataset_type,
+                       schema_hint=KYC_SCHEMAS_HINT.get(dataset_type, ""),
+                       filename=filename, ocr_text=raw_text[:6000])
+    mcfg = cfg.get("model_settings", {})
+    client = ac.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    resp = client.messages.create(
+        model=mcfg.get("model", "claude-opus-4-20250514"),
+        max_tokens=mcfg.get("max_tokens", 4000),
+        system=system, messages=[{"role": "user", "content": user}]
     )
-
-    raw = response.content[0].text.strip()
-    # Strip markdown fences if present
+    raw = resp.content[0].text.strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1]
         if raw.startswith("json"):
             raw = raw[4:]
         raw = raw.strip()
-
     records = json.loads(raw)
     if isinstance(records, dict):
         records = [records]
-
     return pd.DataFrame(records)
 
-
-def autodetect_dataset_type(sample_text: str, filename: str) -> str:
-    """
-    Ask Claude to decide which KYC dataset type a file belongs to.
-    Returns one of the DATASET_OPTIONS strings.
-    """
+def autodetect(sample, filename):
     import anthropic as ac
-    client = ac.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
-
-    options = ', '.join(DATASET_OPTIONS)
-    response = client.messages.create(
-        model="claude-opus-4-20250514",
-        max_tokens=50,
-        system=f"""You are a KYC data classifier. 
-Given a filename and sample content, decide which dataset type it belongs to.
-Valid options: {options}
-Return ONLY the dataset type string — nothing else.""",
-        messages=[{"role": "user", "content": f"Filename: {filename}\n\nSample content:\n{sample_text[:1500]}"}]
+    cfg = get_prompt("autodetect-v1.0")
+    system = cfg.get("system", f"Classify into: {', '.join(DATASET_OPTIONS)}. Return type only.")
+    tmpl = cfg.get("user_template", "Filename: {filename}\n\nSample:\n{sample}")
+    mcfg = cfg.get("model_settings", {})
+    client = ac.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    resp = client.messages.create(
+        model=mcfg.get("model", "claude-opus-4-20250514"),
+        max_tokens=mcfg.get("max_tokens", 50),
+        system=system,
+        messages=[{"role": "user", "content": tmpl.format(filename=filename, sample=sample[:1500])}]
     )
-    detected = response.content[0].text.strip().lower().replace(' ', '_')
-    return detected if detected in DATASET_OPTIONS else 'customers'
+    detected = resp.content[0].text.strip().lower().replace(" ", "_")
+    return detected if detected in DATASET_OPTIONS else "customers"
 
-
-def process_any_file(file_obj, filename: str, dataset_type: str) -> tuple:
-    """
-    Route file to correct processor based on extension.
-    If dataset_type is AUTO_DETECT, asks Claude to classify first.
-    Returns (DataFrame, method_used, dataset_type, message).
-    """
+def process_file(file_obj, filename, dataset_type):
     ext = Path(filename).suffix.lower()
-    structured_exts = {'.csv', '.xlsx', '.xls', '.json'}
-
-    if ext in structured_exts:
-        df = read_structured_file(file_obj, filename)
-        # Auto-detect from column names if needed
+    if ext in {".csv", ".xlsx", ".xls", ".json"}:
+        df = read_structured(file_obj, filename)
         if dataset_type == AUTO_DETECT:
-            sample = df.head(3).to_string()
-            dataset_type = autodetect_dataset_type(sample, filename)
+            dataset_type = autodetect(df.head(3).to_string(), filename)
+            log("AUTODETECT_RUN", prompt_id="autodetect-v1.0",
+                details={"filename": filename, "detected": dataset_type})
         df = clean_dataframe(df, dataset_type)
-        return df, 'direct', dataset_type, f"Loaded {len(df)} rows directly"
-
+        return df, "direct", dataset_type, f"Loaded {len(df)} rows"
     else:
         file_bytes = file_obj.read()
+        log("OCR_RUN", prompt_id="kyc-analysis-v1.0",
+            details={"filename": filename, "bytes": len(file_bytes)})
         raw_text = ocr_file(file_bytes, filename)
         if not raw_text or len(raw_text.strip()) < 20:
-            raise ValueError("OCR returned no usable text. Try a clearer image.")
-        # Auto-detect from OCR text if needed
+            raise ValueError("No usable text from OCR.")
         if dataset_type == AUTO_DETECT:
-            dataset_type = autodetect_dataset_type(raw_text, filename)
-        df = llm_structure_text(raw_text, dataset_type, filename)
+            dataset_type = autodetect(raw_text, filename)
+            log("AUTODETECT_RUN", prompt_id="autodetect-v1.0",
+                details={"filename": filename, "detected": dataset_type})
+        log("LLM_CALL", prompt_id="kyc-structuring-v1.0",
+            details={"filename": filename, "dataset_type": dataset_type, "chars": len(raw_text)})
+        df = llm_structure(raw_text, dataset_type, filename)
         df = clean_dataframe(df, dataset_type)
-        return df, 'ocr+llm', dataset_type, f"OCR+LLM extracted {len(df)} records from {len(raw_text)} chars"
+        return df, "ocr+llm", dataset_type, f"Extracted {len(df)} records from {len(raw_text)} chars"
 
 
-# ---- Tab 4 UI ----
+# ╔══════════════════════════════════════════════════════════════════════════════
+# LOGIN
+# ╚══════════════════════════════════════════════════════════════════════════════
 
-with tab4:
-    st.header("📁 Data Management — Universal Ingestion")
-    st.markdown(
-        "Upload **any file format** for each KYC dataset. "
-        "Structured files (CSV, Excel, JSON) load directly. "
-        "Images and PDFs go through **Google Vision OCR → Claude AI** to extract structured records automatically."
-    )
+def render_login():
+    st.markdown('<meta http-equiv="refresh" content="60">', unsafe_allow_html=True)
 
-    st.info(
-        "**Accepted formats:** CSV · Excel (.xlsx) · JSON · PNG · JPG · TIFF · PDF  \n"
-        "Drop as many files as you want. Set dataset type per file, or leave on **Auto-detect** and Claude will classify each one."
-    )
+    if st.session_state.get("_final_log"):
+        st.warning("Session expired. Download your audit log.")
+        st.download_button("Download Audit Log",
+                           st.session_state["_final_log"],
+                           file_name=f"audit_expired_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                           mime="application/json")
+        st.divider()
 
-    # ── BATCH UPLOADER ──────────────────────────────────────────────────────
-    st.subheader("📦 Batch File Upload")
+    _, col, _ = st.columns([2, 1, 2])
+    with col:
+        st.markdown("## 🏦 KYC Compliance Platform")
+        st.markdown("*Apexon — Case Study 02*")
+        st.divider()
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        if st.button("Sign In", type="primary", use_container_width=True):
+            user = authenticate(username, password)
+            if user:
+                sys.path.insert(0, str(Path.cwd() / "src"))
+                from audit_logger import AuditLogger
+                logger = AuditLogger(user)
+                st.session_state.authenticated = True
+                st.session_state.current_user = user
+                st.session_state.audit_logger = logger
+                st.session_state.last_activity = datetime.now(timezone.utc)
+                st.session_state.timeout_warning_logged = False
+                st.session_state.pii_masked = True
+                logger.log("LOGIN", details={"username": user["username"], "role": user["role"],
+                                              "pii_masked_on_login": True})
+                default_dir = Path.cwd() / "Data Clean"
+                if default_dir.exists():
+                    engine, customers = load_engine(default_dir)
+                    if engine is not None:
+                        st.session_state.kyc_engine = engine
+                        st.session_state.customers_df = customers
+                        st.session_state.engines_initialized = True
+                        st.session_state.data_dir = default_dir
+                st.rerun()
+            else:
+                st.error("Invalid credentials.")
+        st.caption("Sessions expire after 15 minutes of inactivity (FFIEC / PSD2 standard).")
 
-    batch_files = st.file_uploader(
-        "Drop all your files here (any format, any number)",
-        type=ACCEPTED_TYPES,
-        accept_multiple_files=True,
-        key="batch_uploader"
-    )
 
-    if batch_files:
-        st.markdown(f"**{len(batch_files)} file(s) selected.** Set dataset type for each, or leave on Auto-detect.")
+# ╔══════════════════════════════════════════════════════════════════════════════
+# MAIN APP
+# ╚══════════════════════════════════════════════════════════════════════════════
 
-        file_type_map = {}
-        type_options = [AUTO_DETECT] + DATASET_OPTIONS
+def render_main():
+    user = st.session_state.current_user
+    role = user["role"]
+    logger = get_logger()
 
-        # Grid: 2 files per row
-        for i in range(0, len(batch_files), 2):
-            cols = st.columns(2)
-            for j, col in enumerate(cols):
-                idx = i + j
-                if idx >= len(batch_files):
-                    break
-                f = batch_files[idx]
-                ext = Path(f.name).suffix.lower()
-                is_unstructured = ext not in {'.csv', '.xlsx', '.xls', '.json'}
-                icon = "🖼️" if is_unstructured else "📋"
-                with col:
-                    dtype = st.selectbox(
-                        f"{icon} {f.name}",
-                        type_options,
-                        key=f"btype_{idx}",
-                        help=f"Size: {f.size // 1024} KB · Format: {ext}"
-                    )
-                    if dtype != AUTO_DETECT:
-                        st.caption(f"`{KYC_SCHEMAS_HINT.get(dtype, '')}`")
-                    file_type_map[idx] = (f, dtype)
+    # Auto-refresh for timeout enforcement
+    st.markdown('<meta http-equiv="refresh" content="60">', unsafe_allow_html=True)
+
+    # Inactivity warning
+    if st.session_state.timeout_warning_logged:
+        elapsed = (datetime.now(timezone.utc) - st.session_state.last_activity).total_seconds()
+        remaining = max(0, INACTIVITY_TIMEOUT_SEC - elapsed)
+        st.warning(
+            f"Session expires in {int(remaining // 60)}m {int(remaining % 60)}s due to inactivity. "
+            "Click anywhere to continue. This event is logged.",
+            icon="⚠️"
+        )
+
+    # Top bar
+    c1, c2, c3, c4 = st.columns([4, 2, 2, 1])
+    with c1:
+        st.markdown("### 🏦 KYC Compliance Platform")
+    with c2:
+        elapsed_min = 0
+        if st.session_state.last_activity:
+            elapsed_min = int((datetime.now(timezone.utc) - st.session_state.last_activity).total_seconds() // 60)
+        st.markdown(f"**{user['full_name']}** · {role}  \n"
+                    f"<span style='color:gray;font-size:12px'>{elapsed_min}m elapsed</span>",
+                    unsafe_allow_html=True)
+    with c3:
+        if can_unmask():
+            new_state = st.toggle("Mask PII", value=st.session_state.pii_masked, key="pii_toggle")
+            if new_state != st.session_state.pii_masked:
+                st.session_state.pii_masked = new_state
+                log("PII_MASK_TOGGLED", details={"new_state": "masked" if new_state else "visible"})
+                touch()
+        else:
+            st.markdown("<span style='color:gray;font-size:12px'>PII Masked</span>", unsafe_allow_html=True)
+    with c4:
+        if st.button("Sign Out"):
+            touch()
+            log("LOGOUT", details={"voluntary": True})
+            final = logger.export_json() if logger else None
+            st.session_state["_final_log"] = final
+            _force_logout()
+            st.rerun()
 
     st.divider()
 
-    if st.button("⚡ Process & Load All Files", type="primary", use_container_width=True):
-
-        if not batch_files:
-            st.error("Please upload at least one file above.")
+    # Status strip
+    s1, s2, s3, s4 = st.columns(4)
+    with s1:
+        if st.session_state.engines_initialized:
+            st.success(f"Engine Ready — {len(st.session_state.customers_df)} customers")
         else:
-            cleaned_datasets = {}
-            processing_log = []
+            st.warning("No data — use Data Management")
+    with s2:
+        st.info(f"Ruleset: {RULESET_VERSION}")
+    with s3:
+        st.info(f"Audit events: {logger.event_count() if logger else 0}")
+    with s4:
+        st.info(f"Prompts loaded: {len(PROMPTS)}")
 
-            progress = st.progress(0)
-            status_text = st.empty()
-            total = len(batch_files)
+    st.divider()
 
-            for i, (idx, (file_obj, dataset_type)) in enumerate(file_type_map.items()):
-                filename = file_obj.name
-                ext = Path(filename).suffix.lower()
-                is_unstructured = ext not in {'.csv', '.xlsx', '.xls', '.json'}
-                method_label = "🔍 OCR+AI" if is_unstructured else "📋 Direct"
-                auto_label = " (auto-detect)" if dataset_type == AUTO_DETECT else ""
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "Individual Evaluation", "Batch Results", "Data Management",
+        "Document OCR & AI", "System Info", "Audit Trail",
+    ])
 
-                status_text.text(f"{method_label}{auto_label}: {filename} ({i+1}/{total})")
+    # ── TAB 1: INDIVIDUAL ────────────────────────────────────────────────────
+    with tab1:
+        touch()
+        if not st.session_state.engines_initialized:
+            st.warning("No data loaded. Go to Data Management.")
+            st.stop()
 
+        st.markdown("### Search & Evaluate Customer")
+        col1, col2 = st.columns([4, 1])
+        with col1:
+            cid_input = st.text_input("Customer ID", placeholder="C00001")
+        with col2:
+            eval_btn = st.button("Evaluate", type="primary", use_container_width=True)
+
+        if eval_btn and cid_input:
+            cid = cid_input.strip().upper()
+            touch()
+            with st.spinner(f"Evaluating {cid}..."):
                 try:
-                    df, method, detected_type, msg = process_any_file(file_obj, filename, dataset_type)
+                    result = st.session_state.kyc_engine.evaluate_customer(cid)
+                    status = result.get("overall_status", "Unknown")
+                    score = result.get("overall_score", 0)
 
-                    # Files of the same dataset type get merged
-                    if detected_type in cleaned_datasets:
-                        cleaned_datasets[detected_type] = pd.concat(
-                            [cleaned_datasets[detected_type], df], ignore_index=True
-                        ).drop_duplicates()
+                    # Log with full snapshot — "what was shown at this moment"
+                    log("CUSTOMER_VIEW", customer_id=cid,
+                        details={"tab": "individual_evaluation"},
+                        snapshot={k: result.get(k) for k in [
+                            "overall_score", "overall_status",
+                            "aml_screening_score", "identity_verification_score",
+                            "account_activity_score", "proof_of_address_score",
+                            "beneficial_ownership_score", "data_quality_score",
+                        ]})
+
+                    if status == "Non-Compliant":
+                        log("FLAG_RAISED", customer_id=cid,
+                            details={"score": score, "triggered_by": "individual_evaluation"})
+
+                    # Metrics
+                    m1, m2, m3 = st.columns(3)
+                    m1.metric("Overall Score", f"{score}/100")
+                    m2.metric("Status", status)
+                    m3.metric("Customer", cid)
+
+                    if status == "Compliant":
+                        st.success("Compliant")
+                    elif "Minor" in status:
+                        st.warning("Compliant with Minor Gaps")
                     else:
-                        cleaned_datasets[detected_type] = df
+                        st.error("Non-Compliant")
+                        if role in ("Analyst", "Manager", "Admin"):
+                            st.markdown("**Remediation**")
+                            rc1, rc2 = st.columns(2)
+                            with rc1:
+                                reason = st.selectbox("Reason Code",
+                                                      ["— Select —"] + FALSE_POSITIVE_CODES,
+                                                      key=f"r_{cid}")
+                            with rc2:
+                                note_text = st.text_input("Note (required)", key=f"n_{cid}")
+                            ec1, ec2 = st.columns(2)
+                            with ec1:
+                                if st.button("Escalate", key=f"esc_{cid}"):
+                                    if not note_text.strip():
+                                        st.error("Note required to escalate.")
+                                    else:
+                                        touch()
+                                        log("CUSTOMER_ESCALATED", customer_id=cid,
+                                            details={"note": note_text, "score": score})
+                                        st.success(f"{cid} escalated. Logged.")
+                            with ec2:
+                                if st.button("Propose Clear", key=f"clr_{cid}"):
+                                    if reason == "— Select —" or not note_text.strip():
+                                        st.error("Reason code and note required.")
+                                    else:
+                                        touch()
+                                        log("CLEAR_PROPOSED", customer_id=cid,
+                                            details={"reason_code": reason, "note": note_text,
+                                                     "requires_manager_approval": True})
+                                        st.success("Clear proposed. Awaiting manager approval. Logged.")
 
-                    auto_flag = " (auto-detected)" if dataset_type == AUTO_DETECT else ""
-                    st.success(f"{'🤖' if method == 'ocr+llm' else '✅'} **{filename}** → `{detected_type}`{auto_flag} — {msg}")
-                    processing_log.append({
-                        'File': filename, 'Dataset': detected_type,
-                        'Method': method, 'Rows': len(df), 'Status': 'OK'
-                    })
+                    # Dimension chart
+                    dims = {
+                        "AML (25%)": result.get("aml_screening_score", 0),
+                        "Identity (20%)": result.get("identity_verification_score", 0),
+                        "Activity (15%)": result.get("account_activity_score", 0),
+                        "Address (15%)": result.get("proof_of_address_score", 0),
+                        "Ownership (15%)": result.get("beneficial_ownership_score", 0),
+                        "Data Quality (10%)": result.get("data_quality_score", 0),
+                    }
+                    fig = go.Figure(go.Bar(
+                        x=list(dims.values()), y=list(dims.keys()), orientation="h",
+                        marker_color=[COLORS["compliant"] if s >= 70 else
+                                      COLORS["minor"] if s >= 50 else
+                                      COLORS["non_compliant"] for s in dims.values()],
+                        text=list(dims.values()), textposition="outside"
+                    ))
+                    fig.update_layout(xaxis=dict(range=[0, 115]), height=320,
+                                      margin=dict(l=10, r=10, t=20, b=10),
+                                      plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
+                    st.plotly_chart(fig, use_container_width=True)
+
+                    # Findings
+                    findings = []
+                    for dk, label in [
+                        ("aml_screening", "AML Screening"),
+                        ("identity_verification", "Identity Verification"),
+                        ("account_activity", "Account Activity"),
+                        ("proof_of_address", "Proof of Address"),
+                        ("beneficial_ownership", "Beneficial Ownership"),
+                        ("data_quality", "Data Quality"),
+                    ]:
+                        d = result.get(f"{dk}_details", {})
+                        findings.append({"Dimension": label,
+                                          "Score": result.get(f"{dk}_score", 0),
+                                          "Finding": d.get("finding", "N/A")})
+                    st.dataframe(pd.DataFrame(findings), use_container_width=True, hide_index=True)
 
                 except Exception as e:
-                    st.error(f"❌ **{filename}**: {str(e)}")
-                    processing_log.append({
-                        'File': filename, 'Dataset': dataset_type,
-                        'Method': 'error', 'Rows': 0, 'Status': str(e)[:80]
-                    })
+                    st.error(f"Evaluation error: {e}")
 
-                progress.progress((i + 1) / total)
+    # ── TAB 2: BATCH ─────────────────────────────────────────────────────────
+    with tab2:
+        touch()
+        if not st.session_state.engines_initialized:
+            st.warning("No data loaded. Go to Data Management.")
+            st.stop()
 
-            status_text.empty()
+        st.markdown("### Batch Compliance Evaluation")
 
-            if cleaned_datasets:
-                with st.spinner("Saving and reloading KYC Engine..."):
-                    tmp_dir = save_to_temp_dir(cleaned_datasets)
+        if st.session_state.batch_results is not None:
+            st.success(
+                f"Results from batch **{st.session_state.batch_id}** "
+                f"run at {st.session_state.batch_run_at}. "
+                "Click below to re-run."
+            )
+
+        if st.button("Run Full Batch Evaluation", type="primary"):
+            touch()
+            customer_ids = st.session_state.customers_df["customer_id"].tolist()
+            batch_id = str(uuid.uuid4())[:8].upper()
+            log("BATCH_RUN_START", batch_id=batch_id,
+                details={"total": len(customer_ids), "initiated_by": user["username"]})
+
+            results, errors = [], []
+            bar = st.progress(0)
+            txt = st.empty()
+
+            for i, cid in enumerate(customer_ids):
+                try:
+                    r = st.session_state.kyc_engine.evaluate_customer(str(cid))
+                    results.append(r)
+                    log("CUSTOMER_EVALUATED", customer_id=str(cid), batch_id=batch_id,
+                        snapshot={"overall_score": r.get("overall_score"),
+                                  "overall_status": r.get("overall_status")})
+                    if r.get("overall_status") == "Non-Compliant":
+                        log("FLAG_RAISED", customer_id=str(cid), batch_id=batch_id,
+                            details={"score": r.get("overall_score"), "source": "batch"})
+                except Exception as e:
+                    errors.append({"id": cid, "error": str(e)})
+                if i % 10 == 0:
+                    bar.progress((i + 1) / len(customer_ids))
+                    txt.text(f"{i+1}/{len(customer_ids)}")
+
+            bar.empty(); txt.empty()
+
+            cols = ["customer_id", "aml_screening_score", "identity_verification_score",
+                    "account_activity_score", "proof_of_address_score",
+                    "beneficial_ownership_score", "data_quality_score",
+                    "overall_score", "overall_status"]
+            rdf = pd.DataFrame(results)
+            rdf = rdf[[c for c in cols if c in rdf.columns]]
+            num_cols = [c for c in rdf.columns if c.endswith("_score")]
+            rdf[num_cols] = rdf[num_cols].fillna(0)
+            rdf["overall_status"] = rdf["overall_status"].fillna("Unknown")
+            rdf["overall_score"] = rdf["overall_score"].fillna(0)
+
+            # Sort: non-compliant first
+            order = {"Non-Compliant": 0, "Compliant with Minor Gaps": 1, "Compliant": 2, "Unknown": 3}
+            rdf["_s"] = rdf["overall_status"].map(order).fillna(3)
+            rdf = rdf.sort_values(["_s", "overall_score"]).drop(columns=["_s"])
+
+            st.session_state.batch_results = rdf
+            st.session_state.batch_id = batch_id
+            st.session_state.batch_run_at = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+            non_c = len(rdf[rdf["overall_status"] == "Non-Compliant"])
+            log("BATCH_RUN_COMPLETE", batch_id=batch_id,
+                details={"evaluated": len(results), "errors": len(errors),
+                         "non_compliant": non_c,
+                         "avg_score": float(rdf["overall_score"].mean())})
+            st.rerun()
+
+        rdf = st.session_state.batch_results
+        if rdf is not None:
+            total = len(rdf)
+            nc = len(rdf[rdf["overall_status"] == "Non-Compliant"])
+            mn = len(rdf[rdf["overall_status"] == "Compliant with Minor Gaps"])
+            co = len(rdf[rdf["overall_status"] == "Compliant"])
+
+            m1, m2, m3, m4, m5 = st.columns(5)
+            m1.metric("Total", total)
+            m2.metric("Non-Compliant", nc, delta=f"{nc/total*100:.1f}%", delta_color="inverse")
+            m3.metric("Minor Gaps", mn)
+            m4.metric("Compliant", co)
+            m5.metric("Avg Score", f"{rdf['overall_score'].mean():.1f}")
+
+            ch1, ch2 = st.columns(2)
+            with ch1:
+                fig = go.Figure(go.Bar(
+                    x=["Non-Compliant", "Minor Gaps", "Compliant"],
+                    y=[nc, mn, co],
+                    marker_color=[COLORS["non_compliant"], COLORS["minor"], COLORS["compliant"]],
+                    text=[nc, mn, co], textposition="outside"
+                ))
+                fig.update_layout(title="Compliance Distribution", height=300,
+                                   plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
+                st.plotly_chart(fig, use_container_width=True)
+
+            with ch2:
+                avgs = {
+                    "AML": rdf["aml_screening_score"].mean(),
+                    "Identity": rdf["identity_verification_score"].mean(),
+                    "Activity": rdf["account_activity_score"].mean(),
+                    "Address": rdf["proof_of_address_score"].mean(),
+                    "Ownership": rdf["beneficial_ownership_score"].mean(),
+                    "Quality": rdf["data_quality_score"].mean(),
+                }
+                fig = go.Figure(go.Bar(
+                    x=list(avgs.keys()), y=list(avgs.values()),
+                    marker_color=COLORS["blue"],
+                    text=[f"{v:.1f}" for v in avgs.values()], textposition="outside"
+                ))
+                fig.update_layout(title="Avg Dimension Scores", yaxis=dict(range=[0, 115]),
+                                   height=300, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
+                st.plotly_chart(fig, use_container_width=True)
+
+            st.markdown("#### All Results — Non-Compliant First")
+            st.dataframe(rdf, use_container_width=True, hide_index=True)
+
+            buf = io.StringIO()
+            rdf.to_csv(buf, index=False)
+            st.download_button("Download CSV", buf.getvalue(),
+                               file_name=f"batch_{st.session_state.batch_id}.csv",
+                               mime="text/csv")
+
+    # ── TAB 3: DATA MANAGEMENT ───────────────────────────────────────────────
+    with tab3:
+        touch()
+        st.markdown("### Data Management — Universal Ingestion")
+        st.info("CSV, Excel, JSON load directly. Images and PDFs go through OCR then Claude AI. "
+                "Set dataset type per file or use Auto-detect.")
+
+        batch_files = st.file_uploader(
+            "Drop all files here",
+            type=ACCEPTED_TYPES, accept_multiple_files=True, key="batch_uploader"
+        )
+
+        file_type_map = {}
+        if batch_files:
+            type_options = [AUTO_DETECT] + DATASET_OPTIONS
+            st.markdown(f"**{len(batch_files)} file(s)**")
+            for i in range(0, len(batch_files), 2):
+                cols = st.columns(2)
+                for j, col in enumerate(cols):
+                    idx = i + j
+                    if idx >= len(batch_files):
+                        break
+                    f = batch_files[idx]
+                    is_unstr = Path(f.name).suffix.lower() not in {".csv", ".xlsx", ".xls", ".json"}
+                    with col:
+                        dtype = st.selectbox(
+                            f"{'OCR' if is_unstr else 'Direct'}: {f.name}",
+                            type_options, key=f"bt_{idx}"
+                        )
+                        if dtype != AUTO_DETECT:
+                            st.caption(f"`{KYC_SCHEMAS_HINT.get(dtype, '')}`")
+                        file_type_map[idx] = (f, dtype)
+
+        st.divider()
+        if st.button("Process & Load All Files", type="primary", use_container_width=True):
+            touch()
+            if not batch_files:
+                st.error("Upload at least one file.")
+            else:
+                cleaned = {}
+                proc_log = []
+                bar = st.progress(0)
+                txt = st.empty()
+                total = len(batch_files)
+
+                for i, (idx, (fo, dtype)) in enumerate(file_type_map.items()):
+                    fn = fo.name
+                    txt.text(f"Processing {fn} ({i+1}/{total})")
+                    log("FILE_UPLOAD", details={"filename": fn, "size": fo.size,
+                                                "type_selected": dtype})
+                    try:
+                        df, method, det_type, msg = process_file(fo, fn, dtype)
+                        if det_type in cleaned:
+                            cleaned[det_type] = pd.concat(
+                                [cleaned[det_type], df], ignore_index=True
+                            ).drop_duplicates()
+                        else:
+                            cleaned[det_type] = df
+                        log("DATA_CLEAN", details={"filename": fn, "method": method,
+                                                    "detected_type": det_type, "rows": len(df)})
+                        st.success(f"{'OCR+AI' if method == 'ocr+llm' else 'Direct'}: {fn} → `{det_type}` — {msg}")
+                        proc_log.append({"File": fn, "Dataset": det_type,
+                                         "Method": method, "Rows": len(df), "Status": "OK"})
+                    except Exception as e:
+                        st.error(f"{fn}: {e}")
+                        proc_log.append({"File": fn, "Dataset": dtype,
+                                         "Method": "error", "Rows": 0, "Status": str(e)[:80]})
+                    bar.progress((i + 1) / total)
+
+                bar.empty(); txt.empty()
+
+                if cleaned:
+                    tmp_dir = save_to_temp(cleaned)
                     engine, customers = load_engine(tmp_dir)
-
                     if engine is not None and customers is not None and len(customers) > 0:
                         st.session_state.kyc_engine = engine
                         st.session_state.customers_df = customers
                         st.session_state.engines_initialized = True
                         st.session_state.data_dir = tmp_dir
-                        st.success(f"🎉 Engine reloaded — **{len(customers)} customers** ready for evaluation.")
+                        st.session_state.batch_results = None
+                        log("ENGINE_RELOAD", details={"customers": len(customers),
+                                                       "datasets": list(cleaned.keys())})
+                        st.success(f"Engine loaded — {len(customers)} customers ready.")
                         st.balloons()
                     else:
-                        st.warning(
-                            "Files processed but engine could not initialize. "
-                            "Ensure at least the **customers** dataset includes a `customer_id` column."
-                        )
+                        st.warning("Engine could not initialize. Ensure customers dataset has customer_id.")
 
-                st.subheader("Processing Summary")
-                st.dataframe(pd.DataFrame(processing_log), use_container_width=True, hide_index=True)
+                if proc_log:
+                    st.dataframe(pd.DataFrame(proc_log), use_container_width=True, hide_index=True)
 
-                st.subheader("Dataset Previews")
-                for name, df in cleaned_datasets.items():
-                    with st.expander(f"{name} — {len(df)} rows · {len(df.columns)} columns"):
-                        st.dataframe(df.head(10), use_container_width=True)
-
-    st.divider()
-
-    st.subheader("⬇️ Download Cleaned Files")
-    if st.session_state.engines_initialized and st.session_state.data_dir:
-        data_dir = Path(st.session_state.data_dir)
-        csv_files = list(data_dir.glob("*.csv"))
-        if csv_files:
-            cols = st.columns(min(len(csv_files), 3))
-            for i, csv_file in enumerate(csv_files):
+        st.divider()
+        st.markdown("#### Download Cleaned Files")
+        if st.session_state.data_dir:
+            for csv_file in Path(st.session_state.data_dir).glob("*.csv"):
                 df = pd.read_csv(csv_file)
                 buf = io.StringIO()
                 df.to_csv(buf, index=False)
-                cols[i % 3].download_button(
-                    f"⬇️ {csv_file.name}",
-                    buf.getvalue(),
-                    file_name=csv_file.name,
-                    mime="text/csv",
-                    key=f"dl_{csv_file.stem}"
-                )
-        else:
-            st.info("No cleaned files available yet.")
-    else:
-        st.info("Load data first to enable downloads.")
+                st.download_button(csv_file.name, buf.getvalue(),
+                                   file_name=csv_file.name, mime="text/csv",
+                                   key=f"dl_{csv_file.stem}")
 
-# ============================================================================
-# TAB 5: DOCUMENT OCR & AI ANALYSIS
-# ============================================================================
+    # ── TAB 4: OCR & AI ──────────────────────────────────────────────────────
+    with tab4:
+        touch()
+        st.markdown("### Document OCR & AI Analysis")
+        st.markdown("Upload a compliance document. Fields are extracted with citations. "
+                    "Confidence below 60% auto-flags for mandatory human review.")
 
-with tab5:
-    st.header("🔬 Document OCR & AI Analysis")
-    st.markdown("Upload a compliance document image. The platform will extract text via Google Vision OCR, then analyze it with Claude AI.")
+        oc1, oc2 = st.columns([1, 1])
+        with oc1:
+            uploaded_img = st.file_uploader("Upload document",
+                                             type=["png", "jpg", "jpeg", "tiff", "bmp", "pdf"],
+                                             key="ocr_up")
+            doc_type = st.selectbox("Document Type", [
+                "Identity Document (Passport / ID)",
+                "Proof of Address", "Corporate Document",
+                "Beneficial Ownership Declaration",
+                "AML Screening Result", "Other"
+            ])
+            cid_ocr = st.text_input("Customer ID (for linking)", placeholder="C00001")
+        with oc2:
+            if uploaded_img:
+                st.image(uploaded_img, use_column_width=True)
 
-    col1, col2 = st.columns([1, 1])
-
-    with col1:
-        st.subheader("📤 Upload Document")
-        uploaded_image = st.file_uploader(
-            "Upload document image",
-            type=['png', 'jpg', 'jpeg', 'tiff', 'bmp', 'gif'],
-            key="ocr_upload"
-        )
-
-        doc_type = st.selectbox("Document Type", [
-            "Identity Document (Passport / ID)",
-            "Proof of Address (Utility Bill / Bank Statement)",
-            "Corporate Document",
-            "Beneficial Ownership Declaration",
-            "AML Screening Result",
-            "Other"
-        ])
-
-        customer_id_ocr = st.text_input("Customer ID (optional, for linking)", placeholder="C00001")
-
-        run_ocr = st.button("🔍 Run OCR + AI Analysis", type="primary", use_container_width=True)
-
-    with col2:
-        if uploaded_image:
-            st.subheader("Preview")
-            st.image(uploaded_image, use_column_width=True)
-
-    if run_ocr and uploaded_image:
-        # Step 1: Google Vision OCR
-        with st.spinner("Running Google Vision OCR..."):
-            try:
-                from google.cloud import vision
-                client = vision.ImageAnnotatorClient()
-
-                image_bytes = uploaded_image.read()
-                image = vision.Image(content=image_bytes)
-                response = client.text_detection(image=image)
-
-                if response.error.message:
-                    st.error(f"Google Vision error: {response.error.message}")
-                    extracted_text = ""
-                else:
-                    texts = response.text_annotations
-                    extracted_text = texts[0].description if texts else ""
-                    ocr_confidence = None
-                    if response.full_text_annotation.pages:
-                        confidences = [
-                            block.confidence
-                            for page in response.full_text_annotation.pages
-                            for block in page.blocks
-                        ]
-                        ocr_confidence = sum(confidences) / len(confidences) if confidences else None
-
-                    st.success(f"✅ OCR complete — {len(extracted_text)} characters extracted")
-
-            except Exception as e:
-                st.error(f"❌ OCR failed: {str(e)}")
-                extracted_text = ""
-                ocr_confidence = None
-
-        if extracted_text:
-            # Show raw OCR text
-            with st.expander("📝 Raw OCR Text"):
-                st.text_area("Extracted Text", extracted_text, height=200, disabled=True)
-
-            if ocr_confidence is not None:
-                st.metric("OCR Confidence", f"{ocr_confidence*100:.1f}%")
-
-            # Step 2: Claude LLM Analysis
-            with st.spinner("Sending to Claude AI for compliance analysis..."):
+        if st.button("Run OCR + AI Analysis", type="primary") and uploaded_img:
+            touch()
+            log("FILE_UPLOAD", details={"filename": uploaded_img.name, "size": uploaded_img.size,
+                                         "doc_type": doc_type, "linked_customer": cid_ocr or None})
+            with st.spinner("Running OCR..."):
                 try:
-                    import anthropic
-                    client_llm = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
-
-                    system_prompt = """You are a KYC compliance specialist AI. 
-Analyze extracted document text and return a structured JSON object with these fields:
-{
-  "document_type": "detected document type",
-  "customer_name": "full name if found",
-  "customer_id": "ID/reference number if found",
-  "document_number": "document number if found",
-  "date_of_birth": "DOB if found",
-  "issue_date": "issue date if found",
-  "expiry_date": "expiry date if found",
-  "address": "address if found",
-  "nationality": "nationality/country if found",
-  "issuing_authority": "issuing body if found",
-  "compliance_flags": ["list of compliance concerns if any"],
-  "data_completeness": "percentage of key fields found (0-100)",
-  "risk_indicators": ["any suspicious elements noted"],
-  "extraction_summary": "brief 2-sentence summary of findings"
-}
-Return ONLY the JSON object. No preamble, no markdown fences."""
-
-                    user_prompt = f"""Document Type Context: {doc_type}
-Customer ID Context: {customer_id_ocr if customer_id_ocr else 'Not provided'}
-
-Extracted OCR Text:
-{extracted_text[:3000]}
-
-Extract all compliance-relevant fields from this document text."""
-
-                    response = client_llm.messages.create(
-                        model="claude-opus-4-20250514",
-                        max_tokens=1500,
-                        messages=[{"role": "user", "content": user_prompt}],
-                        system=system_prompt
-                    )
-
-                    raw_response = response.content[0].text.strip()
-
-                    try:
-                        analysis = json.loads(raw_response)
-                        st.success("✅ AI Analysis complete")
-                        st.subheader("🧠 AI Extraction Results")
-
-                        # Key fields
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            st.metric("Document Type", analysis.get('document_type', 'Unknown'))
-                        with col2:
-                            st.metric("Data Completeness", f"{analysis.get('data_completeness', '?')}%")
-                        with col3:
-                            flags = analysis.get('compliance_flags', [])
-                            st.metric("Compliance Flags", len(flags))
-
-                        # Extracted fields table
-                        fields = {
-                            'Customer Name': analysis.get('customer_name'),
-                            'Document Number': analysis.get('document_number'),
-                            'Date of Birth': analysis.get('date_of_birth'),
-                            'Issue Date': analysis.get('issue_date'),
-                            'Expiry Date': analysis.get('expiry_date'),
-                            'Address': analysis.get('address'),
-                            'Nationality': analysis.get('nationality'),
-                            'Issuing Authority': analysis.get('issuing_authority'),
-                        }
-                        fields_df = pd.DataFrame([
-                            {'Field': k, 'Extracted Value': v or 'Not found'}
-                            for k, v in fields.items()
-                        ])
-                        st.dataframe(fields_df, use_container_width=True, hide_index=True)
-
-                        # Compliance flags
-                        if flags:
-                            st.warning("⚠️ Compliance Flags Detected:")
-                            for flag in flags:
-                                st.markdown(f"- {flag}")
-                        else:
-                            st.success("✅ No compliance flags detected")
-
-                        # Risk indicators
-                        risks = analysis.get('risk_indicators', [])
-                        if risks:
-                            st.error("🚨 Risk Indicators:")
-                            for risk in risks:
-                                st.markdown(f"- {risk}")
-
-                        # Summary
-                        st.subheader("📋 Summary")
-                        st.info(analysis.get('extraction_summary', 'No summary available'))
-
-                        # Full JSON download
-                        analysis['ocr_text'] = extracted_text
-                        analysis['document_type_context'] = doc_type
-                        analysis['customer_id_context'] = customer_id_ocr
-                        analysis['analysis_timestamp'] = datetime.now().isoformat()
-
-                        st.download_button(
-                            "⬇️ Download Full Analysis JSON",
-                            json.dumps(analysis, indent=2),
-                            file_name=f"ocr_analysis_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
-                            mime="application/json"
-                        )
-
-                    except json.JSONDecodeError:
-                        st.warning("Could not parse JSON response — showing raw output:")
-                        st.text_area("Raw AI Response", raw_response, height=300)
-
+                    fbytes = uploaded_img.read()
+                    log("OCR_RUN", customer_id=cid_ocr or None, prompt_id="kyc-analysis-v1.0",
+                        details={"filename": uploaded_img.name})
+                    extracted = ocr_file(fbytes, uploaded_img.name)
+                    if not extracted or len(extracted.strip()) < 10:
+                        st.error("No text extracted.")
+                        st.stop()
+                    st.success(f"OCR: {len(extracted)} characters extracted")
                 except Exception as e:
-                    st.error(f"❌ AI analysis failed: {str(e)}")
+                    st.error(f"OCR failed: {e}")
+                    st.stop()
+
+            with st.spinner("Analyzing with Claude AI..."):
+                try:
+                    import anthropic as ac
+                    cfg = get_prompt("kyc-analysis-v1.0")
+                    system = cfg.get("system", "Extract KYC fields with citations.")
+                    tmpl = cfg.get("user_template", "{ocr_text}")
+                    mcfg = cfg.get("model_settings", {})
+                    msg = tmpl.format(doc_type=doc_type,
+                                      customer_id=cid_ocr or "Not provided",
+                                      ocr_text=extracted[:3000])
+                    log("LLM_CALL", customer_id=cid_ocr or None, prompt_id="kyc-analysis-v1.0",
+                        details={"doc_type": doc_type, "filename": uploaded_img.name,
+                                 "model": mcfg.get("model", "claude-opus-4-20250514")})
+                    client = ac.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+                    resp = client.messages.create(
+                        model=mcfg.get("model", "claude-opus-4-20250514"),
+                        max_tokens=mcfg.get("max_tokens", 1500),
+                        system=system,
+                        messages=[{"role": "user", "content": msg}]
+                    )
+                    analysis = json.loads(resp.content[0].text.strip())
+                    conf = analysis.get("overall_confidence", 0)
+
+                    am1, am2, am3 = st.columns(3)
+                    am1.metric("Document Type", analysis.get("document_type", "Unknown"))
+                    am2.metric("Confidence", f"{conf*100:.0f}%",
+                               delta="Requires review" if conf < LOW_CONFIDENCE_THRESHOLD else None,
+                               delta_color="inverse" if conf < LOW_CONFIDENCE_THRESHOLD else "normal")
+                    am3.metric("Flags", len(analysis.get("compliance_flags", [])))
+
+                    if conf < LOW_CONFIDENCE_THRESHOLD:
+                        st.warning(f"Confidence {conf*100:.0f}% below {LOW_CONFIDENCE_THRESHOLD*100:.0f}% threshold. "
+                                   "Auto-flagged for mandatory human review.")
+                        log("FLAG_RAISED", customer_id=cid_ocr or None,
+                            details={"reason": "confidence_below_threshold",
+                                     "confidence": conf, "threshold": LOW_CONFIDENCE_THRESHOLD,
+                                     "filename": uploaded_img.name})
+
+                    field_pairs = [
+                        ("customer_name", "Name", "name"),
+                        ("document_number", "Document Number", "default"),
+                        ("date_of_birth", "Date of Birth", "dob"),
+                        ("issue_date", "Issue Date", "default"),
+                        ("expiry_date", "Expiry Date", "default"),
+                        ("address", "Address", "address"),
+                        ("nationality", "Nationality", "default"),
+                        ("issuing_authority", "Issuing Authority", "default"),
+                    ]
+                    rows = []
+                    for key, label, mask_type in field_pairs:
+                        val = analysis.get(key)
+                        rows.append({
+                            "Field": label,
+                            "Value": mask(val, mask_type) if val else "Not found",
+                            "Citation": analysis.get(f"{key}_citation", ""),
+                            "Confidence": f"{analysis.get(f'{key}_confidence', 0)*100:.0f}%",
+                        })
+                    st.markdown("#### Extracted Fields with Citations")
+                    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+                    for section, label, color in [
+                        ("compliance_flags", "Compliance Flags", "warning"),
+                        ("risk_indicators", "Risk Indicators", "error"),
+                        ("discrepancies", "Discrepancies", "error"),
+                    ]:
+                        items = analysis.get(section, [])
+                        if items:
+                            getattr(st, color)(f"{label}:")
+                            for item in items:
+                                st.markdown(f"- {item}")
+
+                    st.info(analysis.get("extraction_summary", ""))
+
+                    analysis["meta"] = {
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "prompt_version": "kyc-analysis-v1.0",
+                        "confidence_threshold": LOW_CONFIDENCE_THRESHOLD,
+                        "auto_flagged": conf < LOW_CONFIDENCE_THRESHOLD,
+                        "analyzed_by": user["username"],
+                        "note": "All LLM outputs are recommendations. Human decision is authoritative record."
+                    }
+                    st.download_button("Download Analysis JSON",
+                                       json.dumps(analysis, indent=2),
+                                       file_name=f"ocr_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
+                                       mime="application/json")
+                except Exception as e:
+                    st.error(f"AI analysis failed: {e}")
+
+    # ── TAB 5: SYSTEM INFO ───────────────────────────────────────────────────
+    with tab5:
+        touch()
+        st.markdown("### System Information")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("**Datasets**")
+            if st.session_state.engines_initialized:
+                eng = st.session_state.kyc_engine
+                st.metric("Customers", len(st.session_state.customers_df))
+                st.metric("Screenings", len(eng.screenings) if eng.screenings is not None else 0)
+                st.metric("ID Verifications", len(eng.id_verifications) if eng.id_verifications is not None else 0)
+                st.metric("Transactions", len(eng.transactions) if eng.transactions is not None else 0)
+            else:
+                st.info("No datasets loaded.")
+        with c2:
+            st.markdown("**Active Prompts**")
+            for pid, p in PROMPTS.items():
+                st.markdown(f"- `{pid}` v{p.get('version', '?')} ({p.get('created_at', '')[:10]})")
+        st.divider()
+        st.markdown(f"""
+        **Hosting:** Railway | **Framework:** Streamlit | **Ruleset:** `{RULESET_VERSION}`  
+        **Timeout:** {INACTIVITY_TIMEOUT_SEC // 60} min (FFIEC / PSD2 standard) | **Warning at:** {INACTIVITY_WARNING_SEC // 60} min  
+        PII clears from memory on session end. Audit trail stores metadata only, not raw PII.
+        """)
+
+    # ── TAB 6: AUDIT TRAIL ───────────────────────────────────────────────────
+    with tab6:
+        touch()
+        log("AUDIT_VIEWER_OPENED", details={"opened_by": user["username"]})
+        st.markdown("### Audit Trail")
+        st.markdown("Every event is SHA-256 hash-chained. Chains link across sessions. "
+                    "Use Verify button to prove log integrity.")
+
+        if logger is None or logger.event_count() == 0:
+            st.info("No audit events in this session yet.")
         else:
-            st.warning("No text extracted from the image. Try a clearer image.")
+            edf = logger.get_events_df()
+            fc1, fc2, fc3 = st.columns(3)
+            with fc1:
+                fa = st.selectbox("Action", ["All"] + sorted(edf["Action"].unique().tolist()))
+            with fc2:
+                fc = st.text_input("Customer ID")
+            with fc3:
+                fu = st.selectbox("User", ["All"] + sorted(edf["User"].unique().tolist()))
 
-    elif run_ocr and not uploaded_image:
-        st.warning("Please upload an image first.")
+            filtered = edf.copy()
+            if fa != "All":
+                filtered = filtered[filtered["Action"] == fa]
+            if fc.strip():
+                filtered = filtered[filtered["Customer ID"].str.contains(fc.strip().upper(), na=False)]
+            if fu != "All":
+                filtered = filtered[filtered["User"] == fu]
 
-# ============================================================================
-# FOOTER
-# ============================================================================
+            st.markdown(f"**{len(filtered)} of {logger.event_count()} events**")
+            st.dataframe(filtered, use_container_width=True, hide_index=True)
+
+            st.divider()
+            v1, v2 = st.columns(2)
+            with v1:
+                if st.button("Verify Log Integrity"):
+                    touch()
+                    sys.path.insert(0, str(Path.cwd() / "src"))
+                    from audit_logger import verify_session_log
+                    result = verify_session_log(logger.finalize())
+                    if result["valid"]:
+                        st.success(result["details"])
+                    else:
+                        st.error(result["details"])
+            with v2:
+                log_json = logger.export_json()
+                log("AUDIT_EXPORTED", details={"events": logger.event_count(),
+                                                "by": user["username"]})
+                st.download_button(
+                    "Download Session Audit Log",
+                    log_json,
+                    file_name=f"audit_{user['user_id']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                    mime="application/json"
+                )
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────
+
+if not st.session_state.authenticated:
+    render_login()
+else:
+    if not check_timeout():
+        render_login()
+    else:
+        render_main()
 
 st.divider()
-st.markdown(f"""
-<div style='text-align: center; color: gray; font-size: 12px;'>
-    Apexon KYC Compliance Platform | Railway Edition | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-</div>
-""", unsafe_allow_html=True)
+st.markdown(
+    f"<div style='text-align:center;color:gray;font-size:11px'>"
+    f"Apexon KYC Compliance Platform | {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}"
+    f"</div>",
+    unsafe_allow_html=True
+)
