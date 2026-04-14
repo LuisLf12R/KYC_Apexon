@@ -515,10 +515,8 @@ def render_main():
     s1, s2, s3, s4 = st.columns(4)
     with s1:
         if st.session_state.engines_initialized:
-            label = st.session_state.get("data_source_label", "")
-            st.success(f"Engine Ready — {len(st.session_state.customers_df)} customers  \n"
-                       f"<span style='font-size:11px;color:gray'>{label}</span>",
-                       )
+            n = len(st.session_state.customers_df)
+            st.success(f"Engine Ready — {n:,} customers loaded")
         else:
             st.warning("No data — use Data Management")
     with s2:
@@ -765,25 +763,18 @@ def render_main():
     with tab2:
         touch()
         if not st.session_state.engines_initialized:
-            st.warning("No data loaded yet. Go to Data Management to upload files — "
-                       "or if you cleaned data in a previous session on this deployment, "
-                       "sign out and back in to auto-load it.")
+            st.warning("No data loaded yet. Upload your files in the Data Management tab to get started.")
         else:
             st.markdown("### Batch Compliance Evaluation")
 
-            # Data source indicator
-            source = st.session_state.get("data_source_label", "Loaded data")
-            ncust = len(st.session_state.customers_df)
-            st.success(
-                f"**{ncust} customers ready** — Source: {source}  \n"
-                "Data is loaded directly from the engine. No download or re-upload required."
-            )
+            n = len(st.session_state.customers_df)
+            st.success(f"**{n:,} customers ready to evaluate.** Click the button below to run the full batch.")
 
             if st.session_state.batch_results is not None:
                 st.info(
-                    f"Last batch: **{st.session_state.batch_id}** "
-                    f"run at {st.session_state.batch_run_at}. "
-                    "Results shown below. Click the button to re-run with current data."
+                    f"Last run: batch **{st.session_state.batch_id}** "
+                    f"completed at {st.session_state.batch_run_at}. "
+                    "Results are shown below — click the button again to re-run."
                 )
 
             if st.button("Run Full Batch Evaluation", type="primary"):
