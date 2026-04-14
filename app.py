@@ -990,6 +990,7 @@ def render_main():
                         log("ENGINE_RELOAD", details={"customers": len(customers),
                                                        "datasets": list(cleaned.keys())})
                         st.success(f"Engine loaded — {len(customers)} customers ready.")
+                        st.rerun()  # Push updated state to all tabs immediately
                     else:
                         st.warning("Engine could not initialize. Ensure customers dataset "
                                    "has a customer_id column.")
