@@ -152,8 +152,13 @@ def load_users():
             return {u["username"]: u for u in data.get("users", []) if u.get("active", True)}
     except Exception:
         pass
-    return {"admin": {"user_id": "fallback", "username": "admin", "password": "admin123",
-                       "role": "Admin", "full_name": "Administrator"}}
+    return {
+        "admin":    {"user_id": "fallback_admin",   "username": "admin",    "password": "admin123",   "role": "Admin",    "full_name": "Administrator",      "active": True},
+        "manager":  {"user_id": "fallback_mgr",     "username": "manager",  "password": "mgr123",     "role": "Manager",  "full_name": "Compliance Manager", "active": True},
+        "analyst1": {"user_id": "fallback_a1",      "username": "analyst1", "password": "analyst123", "role": "Analyst",  "full_name": "KYC Analyst One",    "active": True},
+        "analyst2": {"user_id": "fallback_a2",      "username": "analyst2", "password": "analyst456", "role": "Analyst",  "full_name": "KYC Analyst Two",    "active": True},
+        "viewer":   {"user_id": "fallback_viewer",  "username": "viewer",   "password": "viewer123",  "role": "Viewer",   "full_name": "Read Only Reviewer", "active": True},
+    }
 
 def authenticate(username, password):
     users = load_users()
@@ -413,7 +418,6 @@ def render_login():
     _, col, _ = st.columns([2, 1, 2])
     with col:
         st.markdown("## 🏦 KYC Compliance Platform")
-        st.markdown("*Apexon — Case Study 02*")
         st.divider()
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
