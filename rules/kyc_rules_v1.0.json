@@ -1,0 +1,139 @@
+{
+  "version": "kyc-rules-v1.0",
+  "effective_date": "2026-04-14",
+  "created_by": "Apexon KYC Platform Team",
+  "description": "Disposition ruleset for KYC compliance engine. Rules are evaluated in order: Reject triggers first, then Review triggers, then score thresholds. Score explains relative strength but disposition controls final outcome.",
+
+  "changelog": [
+    {"version": "1.0", "date": "2026-04-14", "change": "Initial ruleset"}
+  ],
+
+  "disposition_levels": {
+    "REJECT": {
+      "description": "Hard fail. Customer must not be onboarded or must be offboarded. No score threshold can override a Reject.",
+      "color": "#D55E00",
+      "requires_human_action": true,
+      "can_be_cleared_by": "Manager"
+    },
+    "REVIEW": {
+      "description": "Manual review required. Customer is held pending human decision. Analyst proposes, Manager approves.",
+      "color": "#E69F00",
+      "requires_human_action": true,
+      "can_be_cleared_by": "Manager"
+    },
+    "PASS_WITH_NOTES": {
+      "description": "No hard fails or review triggers, but score indicates weaknesses. Proceed with documented caveats.",
+      "color": "#56B4E9",
+      "requires_human_action": false,
+      "can_be_cleared_by": null
+    },
+    "PASS": {
+      "description": "Fully compliant. No triggers hit. Score meets or exceeds threshold.",
+      "color": "#009E73",
+      "requires_human_action": false,
+      "can_be_cleared_by": null
+    }
+  },
+
+  "hard_reject_rules": [
+    {
+      "rule_id": "HR-001",
+      "name": "Confirmed Sanctions Match",
+      "description": "Customer appears on a sanctions list with confirmed hit status. Non-negotiable rejection.",
+      "dimension": "aml_screening",
+      "condition_field": "status",
+      "condition_value": "confirmed_match",
+      "policy_reference": "AML Policy 4.1 — Sanctions Screening"
+    },
+    {
+      "rule_id": "HR-002",
+      "name": "No Identity Documents On File",
+      "description": "Customer has zero identity documents on file. Cannot establish identity.",
+      "dimension": "identity_verification",
+      "condition_field": "status",
+      "condition_value": "no_documents",
+      "policy_reference": "KYC Policy 2.1 — Identity Verification Minimum Standard"
+    },
+    {
+      "rule_id": "HR-003",
+      "name": "All Identity Documents Rejected",
+      "description": "All identity documents submitted have been rejected as invalid. Identity cannot be established.",
+      "dimension": "identity_verification",
+      "condition_field": "status",
+      "condition_value": "all_rejected",
+      "policy_reference": "KYC Policy 2.1 — Identity Verification Minimum Standard"
+    },
+    {
+      "rule_id": "HR-004",
+      "name": "No Screening Record",
+      "description": "No AML screening record exists for this customer. Screening is mandatory before onboarding.",
+      "dimension": "aml_screening",
+      "condition_field": "status",
+      "condition_value": "no_screening_record",
+      "policy_reference": "AML Policy 4.2 — Mandatory Screening Requirement"
+    }
+  ],
+
+  "review_rules": [
+    {
+      "rule_id": "RV-001",
+      "name": "Unresolved Sanctions Match",
+      "description": "Customer has a sanctions match that is not confirmed but has not been cleared as false positive. Requires analyst investigation.",
+      "dimension": "aml_screening",
+      "condition_field": "status",
+      "condition_value": "match_requires_review",
+      "policy_reference": "AML Policy 4.3 — Unresolved Match Handling"
+    },
+    {
+      "rule_id": "RV-002",
+      "name": "All Identity Documents Expired",
+      "description": "Customer has no currently valid identity documents. Re-verification required.",
+      "dimension": "identity_verification",
+      "condition_field": "status",
+      "condition_value": "all_expired",
+      "policy_reference": "KYC Policy 2.3 — Document Expiry Management"
+    },
+    {
+      "rule_id": "RV-003",
+      "name": "Stale AML Screening",
+      "description": "Most recent AML screening is older than 180 days. Re-screening required before disposition can be confirmed.",
+      "dimension": "aml_screening",
+      "condition_field": "status",
+      "condition_value": "stale_screening",
+      "policy_reference": "AML Policy 4.4 — Screening Refresh Frequency"
+    },
+    {
+      "rule_id": "RV-004",
+      "name": "Identity Verification Pending",
+      "description": "Identity verification is in progress but not yet completed. Cannot approve until resolved.",
+      "dimension": "identity_verification",
+      "condition_field": "status",
+      "condition_value": "pending",
+      "policy_reference": "KYC Policy 2.2 — Verification Completion Requirement"
+    },
+    {
+      "rule_id": "RV-005",
+      "name": "Beneficial Ownership Below Minimum Data Quality",
+      "description": "Beneficial ownership data is present but critically incomplete. UBO cannot be confirmed.",
+      "dimension": "beneficial_ownership",
+      "condition_field": "status",
+      "condition_value": "insufficient_ubo_data",
+      "policy_reference": "KYC Policy 3.1 — Beneficial Ownership Minimum Standard"
+    },
+    {
+      "rule_id": "RV-006",
+      "name": "Critical Data Quality Failure",
+      "description": "Core customer record fields are missing or corrupt. Record integrity is in question.",
+      "dimension": "data_quality",
+      "condition_field": "quality_rating",
+      "condition_value": "Poor",
+      "policy_reference": "Data Governance Policy 1.2 — Record Completeness"
+    }
+  ],
+
+  "score_thresholds": {
+    "pass_minimum": 70,
+    "pass_with_notes_minimum": 50,
+    "note": "These thresholds only apply when no Reject or Review triggers are hit. Score still shown for context on all dispositions."
+  }
+}
