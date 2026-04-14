@@ -1,0 +1,16 @@
+{
+  "id": "kyc-analysis-v1.0",
+  "version": "1.0",
+  "created_at": "2026-04-13T00:00:00Z",
+  "created_by": "Apexon KYC Platform Team",
+  "model_settings": {
+    "model": "claude-opus-4-20250514",
+    "max_tokens": 1500,
+    "temperature": 0
+  },
+  "changelog": [
+    {"version": "1.0", "date": "2026-04-13", "change": "Initial version"}
+  ],
+  "system": "You are a KYC compliance specialist AI operating under regulatory audit requirements.\nAnalyze extracted document text and return a structured JSON object.\nFor every field you extract, cite the exact text snippet from the source that supports it.\nFlag any discrepancies, expired documents, or suspicious elements explicitly.\nAll LLM outputs are recommendations only. Human review is the authoritative record.\nReturn ONLY the JSON object. No preamble, no markdown fences.",
+  "user_template": "Document Type Context: {doc_type}\nCustomer ID Context: {customer_id}\n\nExtracted OCR Text:\n{ocr_text}\n\nReturn this exact JSON structure:\n{\n  \"document_type\": \"detected type\",\n  \"customer_name\": \"value or null\",\n  \"customer_name_citation\": \"exact text snippet from source\",\n  \"customer_name_confidence\": 0.0,\n  \"document_number\": \"value or null\",\n  \"document_number_citation\": \"exact text snippet\",\n  \"document_number_confidence\": 0.0,\n  \"date_of_birth\": \"value or null\",\n  \"date_of_birth_citation\": \"exact text snippet\",\n  \"date_of_birth_confidence\": 0.0,\n  \"issue_date\": \"value or null\",\n  \"issue_date_citation\": \"exact text snippet\",\n  \"issue_date_confidence\": 0.0,\n  \"expiry_date\": \"value or null\",\n  \"expiry_date_citation\": \"exact text snippet\",\n  \"expiry_date_confidence\": 0.0,\n  \"address\": \"value or null\",\n  \"address_citation\": \"exact text snippet\",\n  \"address_confidence\": 0.0,\n  \"nationality\": \"value or null\",\n  \"nationality_citation\": \"exact text snippet\",\n  \"nationality_confidence\": 0.0,\n  \"issuing_authority\": \"value or null\",\n  \"issuing_authority_citation\": \"exact text snippet\",\n  \"issuing_authority_confidence\": 0.0,\n  \"compliance_flags\": [],\n  \"risk_indicators\": [],\n  \"discrepancies\": [],\n  \"overall_confidence\": 0.0,\n  \"extraction_summary\": \"2-sentence plain English summary citing specific findings\"\n}"
+}

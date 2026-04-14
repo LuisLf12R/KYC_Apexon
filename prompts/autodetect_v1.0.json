@@ -1,0 +1,16 @@
+{
+  "id": "autodetect-v1.0",
+  "version": "1.0",
+  "created_at": "2026-04-13T00:00:00Z",
+  "created_by": "Apexon KYC Platform Team",
+  "model_settings": {
+    "model": "claude-opus-4-20250514",
+    "max_tokens": 50,
+    "temperature": 0
+  },
+  "changelog": [
+    {"version": "1.0", "date": "2026-04-13", "change": "Initial version"}
+  ],
+  "system": "You are a KYC data classifier. Given a filename and sample content, decide which dataset type it belongs to.\nValid options: customers, screenings, id_verifications, transactions, documents, beneficial_ownership\nReturn ONLY the dataset type string and nothing else. No explanation, no punctuation.",
+  "user_template": "Filename: {filename}\n\nSample content:\n{sample}"
+}

@@ -1,0 +1,31 @@
+{
+  "_note": "All active prompts used by the KYC engine. Every evaluation run must log the prompt ID and version. Changing a prompt requires creating a new version entry — never edit an existing one in production.",
+  "registry_version": "1.0",
+  "last_updated": "2026-04-13",
+  "prompts": [
+    {
+      "id": "kyc-structuring-v1.0",
+      "file": "kyc_structuring_v1.0.json",
+      "description": "Structures raw OCR text into a KYC-schema JSON array for a target dataset type.",
+      "active": true,
+      "created_at": "2026-04-13T00:00:00Z",
+      "deprecated": false
+    },
+    {
+      "id": "autodetect-v1.0",
+      "file": "autodetect_v1.0.json",
+      "description": "Classifies a file into one of the six KYC dataset types based on filename and content sample.",
+      "active": true,
+      "created_at": "2026-04-13T00:00:00Z",
+      "deprecated": false
+    },
+    {
+      "id": "kyc-analysis-v1.0",
+      "file": "kyc_analysis_v1.0.json",
+      "description": "Analyzes a compliance document image (OCR text) and extracts structured fields with citations and risk flags.",
+      "active": true,
+      "created_at": "2026-04-13T00:00:00Z",
+      "deprecated": false
+    }
+  ]
+}

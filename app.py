@@ -1,18 +1,6 @@
 """
 app.py — KYC Compliance Platform
 Apexon Case Study 02 | Full Platform Edition
-
-Features:
-- User authentication with role-based access (Viewer / Analyst / Manager / Admin)
-- 15-minute inactivity timeout (FFIEC / PSD2 / global KYC standard)
-- 13-minute inactivity warning (logged to audit trail)
-- Full audit trail with per-event SHA-256 hash chaining across sessions
-- Prompt registry with versioned prompts
-- Universal file ingestion: CSV, Excel, JSON, PNG, JPG, TIFF, PDF
-- OCR (Google Vision) + LLM (Claude) structured extraction
-- KYC engine evaluation across 6 compliance dimensions
-- Audit viewer with filterable event table and integrity verification
-- PII masking toggle (role-aware)
 """
 
 import streamlit as st
@@ -73,8 +61,6 @@ COLORS = {
     "minor":         "#E69F00",
     "non_compliant": "#D55E00",
     "blue":          "#0072B2",
-    "purple":        "#CC79A7",
-    "sky":           "#56B4E9",
     "gray":          "#999999",
 }
 
@@ -152,12 +138,13 @@ def load_users():
             return {u["username"]: u for u in data.get("users", []) if u.get("active", True)}
     except Exception:
         pass
+    # Fallback includes all roles so Railway works even if users.json is missing
     return {
-        "admin":    {"user_id": "fallback_admin",   "username": "admin",    "password": "admin123",   "role": "Admin",    "full_name": "Administrator",      "active": True},
-        "manager":  {"user_id": "fallback_mgr",     "username": "manager",  "password": "mgr123",     "role": "Manager",  "full_name": "Compliance Manager", "active": True},
-        "analyst1": {"user_id": "fallback_a1",      "username": "analyst1", "password": "analyst123", "role": "Analyst",  "full_name": "KYC Analyst One",    "active": True},
-        "analyst2": {"user_id": "fallback_a2",      "username": "analyst2", "password": "analyst456", "role": "Analyst",  "full_name": "KYC Analyst Two",    "active": True},
-        "viewer":   {"user_id": "fallback_viewer",  "username": "viewer",   "password": "viewer123",  "role": "Viewer",   "full_name": "Read Only Reviewer", "active": True},
+        "admin":    {"user_id": "fb_admin",   "username": "admin",    "password": "admin123",   "role": "Admin",   "full_name": "Administrator"},
+        "manager":  {"user_id": "fb_mgr",     "username": "manager",  "password": "mgr123",     "role": "Manager", "full_name": "Compliance Manager"},
+        "analyst1": {"user_id": "fb_a1",      "username": "analyst1", "password": "analyst123", "role": "Analyst", "full_name": "KYC Analyst One"},
+        "analyst2": {"user_id": "fb_a2",      "username": "analyst2", "password": "analyst456", "role": "Analyst", "full_name": "KYC Analyst Two"},
+        "viewer":   {"user_id": "fb_viewer",  "username": "viewer",   "password": "viewer123",  "role": "Viewer",  "full_name": "Read Only Reviewer"},
     }
 
 def authenticate(username, password):
@@ -397,7 +384,7 @@ def process_file(file_obj, filename, dataset_type):
             details={"filename": filename, "dataset_type": dataset_type, "chars": len(raw_text)})
         df = llm_structure(raw_text, dataset_type, filename)
         df = clean_dataframe(df, dataset_type)
-        return df, "ocr+llm", dataset_type, f"Extracted {len(df)} records from {len(raw_text)} chars"
+        return df, "ocr+llm", dataset_type, f"Extracted {len(df)} records"
 
 
 # ╔══════════════════════════════════════════════════════════════════════════════
@@ -405,10 +392,8 @@ def process_file(file_obj, filename, dataset_type):
 # ╚══════════════════════════════════════════════════════════════════════════════
 
 def render_login():
-    st.markdown('<meta http-equiv="refresh" content="60">', unsafe_allow_html=True)
-
     if st.session_state.get("_final_log"):
-        st.warning("Session expired. Download your audit log.")
+        st.warning("Session expired. Download your audit log before closing.")
         st.download_button("Download Audit Log",
                            st.session_state["_final_log"],
                            file_name=f"audit_expired_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
@@ -433,8 +418,8 @@ def render_login():
                 st.session_state.last_activity = datetime.now(timezone.utc)
                 st.session_state.timeout_warning_logged = False
                 st.session_state.pii_masked = True
-                logger.log("LOGIN", details={"username": user["username"], "role": user["role"],
-                                              "pii_masked_on_login": True})
+                logger.log("LOGIN", details={"username": user["username"],
+                                              "role": user["role"], "pii_masked_on_login": True})
                 default_dir = Path.cwd() / "Data Clean"
                 if default_dir.exists():
                     engine, customers = load_engine(default_dir)
@@ -458,16 +443,13 @@ def render_main():
     role = user["role"]
     logger = get_logger()
 
-    # Auto-refresh for timeout enforcement
-    st.markdown('<meta http-equiv="refresh" content="60">', unsafe_allow_html=True)
-
-    # Inactivity warning
+    # Inactivity warning banner (shown on next interaction after 13 min)
     if st.session_state.timeout_warning_logged:
         elapsed = (datetime.now(timezone.utc) - st.session_state.last_activity).total_seconds()
         remaining = max(0, INACTIVITY_TIMEOUT_SEC - elapsed)
         st.warning(
             f"Session expires in {int(remaining // 60)}m {int(remaining % 60)}s due to inactivity. "
-            "Click anywhere to continue. This event is logged.",
+            "Click anywhere to stay logged in. This event is logged.",
             icon="⚠️"
         )
 
@@ -490,7 +472,8 @@ def render_main():
                 log("PII_MASK_TOGGLED", details={"new_state": "masked" if new_state else "visible"})
                 touch()
         else:
-            st.markdown("<span style='color:gray;font-size:12px'>PII Masked</span>", unsafe_allow_html=True)
+            st.markdown("<span style='color:gray;font-size:12px'>PII Masked</span>",
+                        unsafe_allow_html=True)
     with c4:
         if st.button("Sign Out"):
             touch()
@@ -523,251 +506,254 @@ def render_main():
         "Document OCR & AI", "System Info", "Audit Trail",
     ])
 
-    # ── TAB 1: INDIVIDUAL ────────────────────────────────────────────────────
+    # ════════════════════════════════════════════════════════
+    # TAB 1: INDIVIDUAL EVALUATION
+    # ════════════════════════════════════════════════════════
     with tab1:
         touch()
         if not st.session_state.engines_initialized:
-            st.warning("No data loaded. Go to Data Management.")
-            st.stop()
+            st.warning("No data loaded. Go to the Data Management tab to upload files.")
+        else:
+            st.markdown("### Search & Evaluate Customer")
+            col1, col2 = st.columns([4, 1])
+            with col1:
+                cid_input = st.text_input("Customer ID", placeholder="C00001")
+            with col2:
+                eval_btn = st.button("Evaluate", type="primary", use_container_width=True)
 
-        st.markdown("### Search & Evaluate Customer")
-        col1, col2 = st.columns([4, 1])
-        with col1:
-            cid_input = st.text_input("Customer ID", placeholder="C00001")
-        with col2:
-            eval_btn = st.button("Evaluate", type="primary", use_container_width=True)
+            if eval_btn and cid_input:
+                cid = cid_input.strip().upper()
+                touch()
+                with st.spinner(f"Evaluating {cid}..."):
+                    try:
+                        result = st.session_state.kyc_engine.evaluate_customer(cid)
+                        status = result.get("overall_status", "Unknown")
+                        score = result.get("overall_score", 0)
 
-        if eval_btn and cid_input:
-            cid = cid_input.strip().upper()
-            touch()
-            with st.spinner(f"Evaluating {cid}..."):
-                try:
-                    result = st.session_state.kyc_engine.evaluate_customer(cid)
-                    status = result.get("overall_status", "Unknown")
-                    score = result.get("overall_score", 0)
+                        log("CUSTOMER_VIEW", customer_id=cid,
+                            details={"tab": "individual_evaluation"},
+                            snapshot={k: result.get(k) for k in [
+                                "overall_score", "overall_status",
+                                "aml_screening_score", "identity_verification_score",
+                                "account_activity_score", "proof_of_address_score",
+                                "beneficial_ownership_score", "data_quality_score",
+                            ]})
 
-                    # Log with full snapshot — "what was shown at this moment"
-                    log("CUSTOMER_VIEW", customer_id=cid,
-                        details={"tab": "individual_evaluation"},
-                        snapshot={k: result.get(k) for k in [
-                            "overall_score", "overall_status",
-                            "aml_screening_score", "identity_verification_score",
-                            "account_activity_score", "proof_of_address_score",
-                            "beneficial_ownership_score", "data_quality_score",
-                        ]})
+                        if status == "Non-Compliant":
+                            log("FLAG_RAISED", customer_id=cid,
+                                details={"score": score, "triggered_by": "individual_evaluation"})
 
-                    if status == "Non-Compliant":
-                        log("FLAG_RAISED", customer_id=cid,
-                            details={"score": score, "triggered_by": "individual_evaluation"})
+                        m1, m2, m3 = st.columns(3)
+                        m1.metric("Overall Score", f"{score}/100")
+                        m2.metric("Status", status)
+                        m3.metric("Customer", cid)
 
-                    # Metrics
-                    m1, m2, m3 = st.columns(3)
-                    m1.metric("Overall Score", f"{score}/100")
-                    m2.metric("Status", status)
-                    m3.metric("Customer", cid)
+                        if status == "Compliant":
+                            st.success("Compliant")
+                        elif "Minor" in status:
+                            st.warning("Compliant with Minor Gaps")
+                        else:
+                            st.error("Non-Compliant")
+                            if role in ("Analyst", "Manager", "Admin"):
+                                st.markdown("**Remediation**")
+                                rc1, rc2 = st.columns(2)
+                                with rc1:
+                                    reason = st.selectbox("Reason Code",
+                                                          ["— Select —"] + FALSE_POSITIVE_CODES,
+                                                          key=f"r_{cid}")
+                                with rc2:
+                                    note_text = st.text_input("Note (required)", key=f"n_{cid}")
+                                ec1, ec2 = st.columns(2)
+                                with ec1:
+                                    if st.button("Escalate", key=f"esc_{cid}"):
+                                        if not note_text.strip():
+                                            st.error("Note required to escalate.")
+                                        else:
+                                            touch()
+                                            log("CUSTOMER_ESCALATED", customer_id=cid,
+                                                details={"note": note_text, "score": score})
+                                            st.success(f"{cid} escalated. Logged.")
+                                with ec2:
+                                    if st.button("Propose Clear", key=f"clr_{cid}"):
+                                        if reason == "— Select —" or not note_text.strip():
+                                            st.error("Reason code and note required.")
+                                        else:
+                                            touch()
+                                            log("CLEAR_PROPOSED", customer_id=cid,
+                                                details={"reason_code": reason, "note": note_text,
+                                                         "requires_manager_approval": True})
+                                            st.success("Clear proposed. Awaiting manager approval. Logged.")
 
-                    if status == "Compliant":
-                        st.success("Compliant")
-                    elif "Minor" in status:
-                        st.warning("Compliant with Minor Gaps")
-                    else:
-                        st.error("Non-Compliant")
-                        if role in ("Analyst", "Manager", "Admin"):
-                            st.markdown("**Remediation**")
-                            rc1, rc2 = st.columns(2)
-                            with rc1:
-                                reason = st.selectbox("Reason Code",
-                                                      ["— Select —"] + FALSE_POSITIVE_CODES,
-                                                      key=f"r_{cid}")
-                            with rc2:
-                                note_text = st.text_input("Note (required)", key=f"n_{cid}")
-                            ec1, ec2 = st.columns(2)
-                            with ec1:
-                                if st.button("Escalate", key=f"esc_{cid}"):
-                                    if not note_text.strip():
-                                        st.error("Note required to escalate.")
-                                    else:
-                                        touch()
-                                        log("CUSTOMER_ESCALATED", customer_id=cid,
-                                            details={"note": note_text, "score": score})
-                                        st.success(f"{cid} escalated. Logged.")
-                            with ec2:
-                                if st.button("Propose Clear", key=f"clr_{cid}"):
-                                    if reason == "— Select —" or not note_text.strip():
-                                        st.error("Reason code and note required.")
-                                    else:
-                                        touch()
-                                        log("CLEAR_PROPOSED", customer_id=cid,
-                                            details={"reason_code": reason, "note": note_text,
-                                                     "requires_manager_approval": True})
-                                        st.success("Clear proposed. Awaiting manager approval. Logged.")
+                        dims = {
+                            "AML (25%)":       result.get("aml_screening_score", 0),
+                            "Identity (20%)":  result.get("identity_verification_score", 0),
+                            "Activity (15%)":  result.get("account_activity_score", 0),
+                            "Address (15%)":   result.get("proof_of_address_score", 0),
+                            "Ownership (15%)": result.get("beneficial_ownership_score", 0),
+                            "Quality (10%)":   result.get("data_quality_score", 0),
+                        }
+                        fig = go.Figure(go.Bar(
+                            x=list(dims.values()), y=list(dims.keys()), orientation="h",
+                            marker_color=[COLORS["compliant"] if s >= 70 else
+                                          COLORS["minor"] if s >= 50 else
+                                          COLORS["non_compliant"] for s in dims.values()],
+                            text=list(dims.values()), textposition="outside"
+                        ))
+                        fig.update_layout(xaxis=dict(range=[0, 115]), height=320,
+                                          margin=dict(l=10, r=10, t=20, b=10),
+                                          plot_bgcolor="rgba(0,0,0,0)",
+                                          paper_bgcolor="rgba(0,0,0,0)")
+                        st.plotly_chart(fig, use_container_width=True)
 
-                    # Dimension chart
-                    dims = {
-                        "AML (25%)": result.get("aml_screening_score", 0),
-                        "Identity (20%)": result.get("identity_verification_score", 0),
-                        "Activity (15%)": result.get("account_activity_score", 0),
-                        "Address (15%)": result.get("proof_of_address_score", 0),
-                        "Ownership (15%)": result.get("beneficial_ownership_score", 0),
-                        "Data Quality (10%)": result.get("data_quality_score", 0),
-                    }
-                    fig = go.Figure(go.Bar(
-                        x=list(dims.values()), y=list(dims.keys()), orientation="h",
-                        marker_color=[COLORS["compliant"] if s >= 70 else
-                                      COLORS["minor"] if s >= 50 else
-                                      COLORS["non_compliant"] for s in dims.values()],
-                        text=list(dims.values()), textposition="outside"
-                    ))
-                    fig.update_layout(xaxis=dict(range=[0, 115]), height=320,
-                                      margin=dict(l=10, r=10, t=20, b=10),
-                                      plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
-                    st.plotly_chart(fig, use_container_width=True)
+                        findings = []
+                        for dk, label in [
+                            ("aml_screening", "AML Screening"),
+                            ("identity_verification", "Identity Verification"),
+                            ("account_activity", "Account Activity"),
+                            ("proof_of_address", "Proof of Address"),
+                            ("beneficial_ownership", "Beneficial Ownership"),
+                            ("data_quality", "Data Quality"),
+                        ]:
+                            d = result.get(f"{dk}_details", {})
+                            findings.append({"Dimension": label,
+                                              "Score": result.get(f"{dk}_score", 0),
+                                              "Finding": d.get("finding", "N/A")})
+                        st.dataframe(pd.DataFrame(findings), use_container_width=True, hide_index=True)
 
-                    # Findings
-                    findings = []
-                    for dk, label in [
-                        ("aml_screening", "AML Screening"),
-                        ("identity_verification", "Identity Verification"),
-                        ("account_activity", "Account Activity"),
-                        ("proof_of_address", "Proof of Address"),
-                        ("beneficial_ownership", "Beneficial Ownership"),
-                        ("data_quality", "Data Quality"),
-                    ]:
-                        d = result.get(f"{dk}_details", {})
-                        findings.append({"Dimension": label,
-                                          "Score": result.get(f"{dk}_score", 0),
-                                          "Finding": d.get("finding", "N/A")})
-                    st.dataframe(pd.DataFrame(findings), use_container_width=True, hide_index=True)
+                    except Exception as e:
+                        st.error(f"Evaluation error: {e}")
 
-                except Exception as e:
-                    st.error(f"Evaluation error: {e}")
-
-    # ── TAB 2: BATCH ─────────────────────────────────────────────────────────
+    # ════════════════════════════════════════════════════════
+    # TAB 2: BATCH RESULTS
+    # ════════════════════════════════════════════════════════
     with tab2:
         touch()
         if not st.session_state.engines_initialized:
-            st.warning("No data loaded. Go to Data Management.")
-            st.stop()
+            st.warning("No data loaded. Go to the Data Management tab to upload files.")
+        else:
+            st.markdown("### Batch Compliance Evaluation")
 
-        st.markdown("### Batch Compliance Evaluation")
+            if st.session_state.batch_results is not None:
+                st.success(
+                    f"Showing results from batch **{st.session_state.batch_id}** "
+                    f"run at {st.session_state.batch_run_at}. "
+                    "Click below to re-evaluate."
+                )
 
-        if st.session_state.batch_results is not None:
-            st.success(
-                f"Results from batch **{st.session_state.batch_id}** "
-                f"run at {st.session_state.batch_run_at}. "
-                "Click below to re-run."
-            )
+            if st.button("Run Full Batch Evaluation", type="primary"):
+                touch()
+                customer_ids = st.session_state.customers_df["customer_id"].tolist()
+                batch_id = str(uuid.uuid4())[:8].upper()
+                log("BATCH_RUN_START", batch_id=batch_id,
+                    details={"total": len(customer_ids), "initiated_by": user["username"]})
 
-        if st.button("Run Full Batch Evaluation", type="primary"):
-            touch()
-            customer_ids = st.session_state.customers_df["customer_id"].tolist()
-            batch_id = str(uuid.uuid4())[:8].upper()
-            log("BATCH_RUN_START", batch_id=batch_id,
-                details={"total": len(customer_ids), "initiated_by": user["username"]})
+                results, errors = [], []
+                bar = st.progress(0)
+                txt = st.empty()
 
-            results, errors = [], []
-            bar = st.progress(0)
-            txt = st.empty()
+                for i, cid in enumerate(customer_ids):
+                    try:
+                        r = st.session_state.kyc_engine.evaluate_customer(str(cid))
+                        results.append(r)
+                        log("CUSTOMER_EVALUATED", customer_id=str(cid), batch_id=batch_id,
+                            snapshot={"overall_score": r.get("overall_score"),
+                                      "overall_status": r.get("overall_status")})
+                        if r.get("overall_status") == "Non-Compliant":
+                            log("FLAG_RAISED", customer_id=str(cid), batch_id=batch_id,
+                                details={"score": r.get("overall_score"), "source": "batch"})
+                    except Exception as e:
+                        errors.append({"id": cid, "error": str(e)})
+                    if i % 10 == 0:
+                        bar.progress((i + 1) / len(customer_ids))
+                        txt.text(f"{i+1}/{len(customer_ids)}")
 
-            for i, cid in enumerate(customer_ids):
-                try:
-                    r = st.session_state.kyc_engine.evaluate_customer(str(cid))
-                    results.append(r)
-                    log("CUSTOMER_EVALUATED", customer_id=str(cid), batch_id=batch_id,
-                        snapshot={"overall_score": r.get("overall_score"),
-                                  "overall_status": r.get("overall_status")})
-                    if r.get("overall_status") == "Non-Compliant":
-                        log("FLAG_RAISED", customer_id=str(cid), batch_id=batch_id,
-                            details={"score": r.get("overall_score"), "source": "batch"})
-                except Exception as e:
-                    errors.append({"id": cid, "error": str(e)})
-                if i % 10 == 0:
-                    bar.progress((i + 1) / len(customer_ids))
-                    txt.text(f"{i+1}/{len(customer_ids)}")
+                bar.empty()
+                txt.empty()
 
-            bar.empty(); txt.empty()
+                cols = ["customer_id", "aml_screening_score", "identity_verification_score",
+                        "account_activity_score", "proof_of_address_score",
+                        "beneficial_ownership_score", "data_quality_score",
+                        "overall_score", "overall_status"]
+                rdf = pd.DataFrame(results)
+                rdf = rdf[[c for c in cols if c in rdf.columns]]
+                num_cols = [c for c in rdf.columns if c.endswith("_score")]
+                rdf[num_cols] = rdf[num_cols].fillna(0)
+                rdf["overall_status"] = rdf["overall_status"].fillna("Unknown")
+                rdf["overall_score"] = rdf["overall_score"].fillna(0)
 
-            cols = ["customer_id", "aml_screening_score", "identity_verification_score",
-                    "account_activity_score", "proof_of_address_score",
-                    "beneficial_ownership_score", "data_quality_score",
-                    "overall_score", "overall_status"]
-            rdf = pd.DataFrame(results)
-            rdf = rdf[[c for c in cols if c in rdf.columns]]
-            num_cols = [c for c in rdf.columns if c.endswith("_score")]
-            rdf[num_cols] = rdf[num_cols].fillna(0)
-            rdf["overall_status"] = rdf["overall_status"].fillna("Unknown")
-            rdf["overall_score"] = rdf["overall_score"].fillna(0)
+                order = {"Non-Compliant": 0, "Compliant with Minor Gaps": 1,
+                         "Compliant": 2, "Unknown": 3}
+                rdf["_s"] = rdf["overall_status"].map(order).fillna(3)
+                rdf = rdf.sort_values(["_s", "overall_score"]).drop(columns=["_s"])
 
-            # Sort: non-compliant first
-            order = {"Non-Compliant": 0, "Compliant with Minor Gaps": 1, "Compliant": 2, "Unknown": 3}
-            rdf["_s"] = rdf["overall_status"].map(order).fillna(3)
-            rdf = rdf.sort_values(["_s", "overall_score"]).drop(columns=["_s"])
+                st.session_state.batch_results = rdf
+                st.session_state.batch_id = batch_id
+                st.session_state.batch_run_at = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-            st.session_state.batch_results = rdf
-            st.session_state.batch_id = batch_id
-            st.session_state.batch_run_at = datetime.now().strftime("%Y-%m-%d %H:%M")
+                non_c = len(rdf[rdf["overall_status"] == "Non-Compliant"])
+                log("BATCH_RUN_COMPLETE", batch_id=batch_id,
+                    details={"evaluated": len(results), "errors": len(errors),
+                             "non_compliant": non_c,
+                             "avg_score": float(rdf["overall_score"].mean())})
+                st.rerun()
 
-            non_c = len(rdf[rdf["overall_status"] == "Non-Compliant"])
-            log("BATCH_RUN_COMPLETE", batch_id=batch_id,
-                details={"evaluated": len(results), "errors": len(errors),
-                         "non_compliant": non_c,
-                         "avg_score": float(rdf["overall_score"].mean())})
-            st.rerun()
+            rdf = st.session_state.batch_results
+            if rdf is not None:
+                total = len(rdf)
+                nc = len(rdf[rdf["overall_status"] == "Non-Compliant"])
+                mn = len(rdf[rdf["overall_status"] == "Compliant with Minor Gaps"])
+                co = len(rdf[rdf["overall_status"] == "Compliant"])
 
-        rdf = st.session_state.batch_results
-        if rdf is not None:
-            total = len(rdf)
-            nc = len(rdf[rdf["overall_status"] == "Non-Compliant"])
-            mn = len(rdf[rdf["overall_status"] == "Compliant with Minor Gaps"])
-            co = len(rdf[rdf["overall_status"] == "Compliant"])
+                m1, m2, m3, m4, m5 = st.columns(5)
+                m1.metric("Total", total)
+                m2.metric("Non-Compliant", nc, delta=f"{nc/total*100:.1f}%", delta_color="inverse")
+                m3.metric("Minor Gaps", mn)
+                m4.metric("Compliant", co)
+                m5.metric("Avg Score", f"{rdf['overall_score'].mean():.1f}")
 
-            m1, m2, m3, m4, m5 = st.columns(5)
-            m1.metric("Total", total)
-            m2.metric("Non-Compliant", nc, delta=f"{nc/total*100:.1f}%", delta_color="inverse")
-            m3.metric("Minor Gaps", mn)
-            m4.metric("Compliant", co)
-            m5.metric("Avg Score", f"{rdf['overall_score'].mean():.1f}")
+                ch1, ch2 = st.columns(2)
+                with ch1:
+                    fig = go.Figure(go.Bar(
+                        x=["Non-Compliant", "Minor Gaps", "Compliant"],
+                        y=[nc, mn, co],
+                        marker_color=[COLORS["non_compliant"], COLORS["minor"], COLORS["compliant"]],
+                        text=[nc, mn, co], textposition="outside"
+                    ))
+                    fig.update_layout(title="Compliance Distribution", height=300,
+                                      plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
+                    st.plotly_chart(fig, use_container_width=True)
 
-            ch1, ch2 = st.columns(2)
-            with ch1:
-                fig = go.Figure(go.Bar(
-                    x=["Non-Compliant", "Minor Gaps", "Compliant"],
-                    y=[nc, mn, co],
-                    marker_color=[COLORS["non_compliant"], COLORS["minor"], COLORS["compliant"]],
-                    text=[nc, mn, co], textposition="outside"
-                ))
-                fig.update_layout(title="Compliance Distribution", height=300,
-                                   plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
-                st.plotly_chart(fig, use_container_width=True)
+                with ch2:
+                    avgs = {
+                        "AML": rdf["aml_screening_score"].mean(),
+                        "Identity": rdf["identity_verification_score"].mean(),
+                        "Activity": rdf["account_activity_score"].mean(),
+                        "Address": rdf["proof_of_address_score"].mean(),
+                        "Ownership": rdf["beneficial_ownership_score"].mean(),
+                        "Quality": rdf["data_quality_score"].mean(),
+                    }
+                    fig = go.Figure(go.Bar(
+                        x=list(avgs.keys()), y=list(avgs.values()),
+                        marker_color=COLORS["blue"],
+                        text=[f"{v:.1f}" for v in avgs.values()], textposition="outside"
+                    ))
+                    fig.update_layout(title="Avg Dimension Scores", yaxis=dict(range=[0, 115]),
+                                      height=300, plot_bgcolor="rgba(0,0,0,0)",
+                                      paper_bgcolor="rgba(0,0,0,0)")
+                    st.plotly_chart(fig, use_container_width=True)
 
-            with ch2:
-                avgs = {
-                    "AML": rdf["aml_screening_score"].mean(),
-                    "Identity": rdf["identity_verification_score"].mean(),
-                    "Activity": rdf["account_activity_score"].mean(),
-                    "Address": rdf["proof_of_address_score"].mean(),
-                    "Ownership": rdf["beneficial_ownership_score"].mean(),
-                    "Quality": rdf["data_quality_score"].mean(),
-                }
-                fig = go.Figure(go.Bar(
-                    x=list(avgs.keys()), y=list(avgs.values()),
-                    marker_color=COLORS["blue"],
-                    text=[f"{v:.1f}" for v in avgs.values()], textposition="outside"
-                ))
-                fig.update_layout(title="Avg Dimension Scores", yaxis=dict(range=[0, 115]),
-                                   height=300, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
-                st.plotly_chart(fig, use_container_width=True)
+                st.markdown("#### All Results — Non-Compliant First")
+                st.dataframe(rdf, use_container_width=True, hide_index=True)
 
-            st.markdown("#### All Results — Non-Compliant First")
-            st.dataframe(rdf, use_container_width=True, hide_index=True)
+                buf = io.StringIO()
+                rdf.to_csv(buf, index=False)
+                st.download_button("Download CSV", buf.getvalue(),
+                                   file_name=f"batch_{st.session_state.batch_id}.csv",
+                                   mime="text/csv")
 
-            buf = io.StringIO()
-            rdf.to_csv(buf, index=False)
-            st.download_button("Download CSV", buf.getvalue(),
-                               file_name=f"batch_{st.session_state.batch_id}.csv",
-                               mime="text/csv")
-
-    # ── TAB 3: DATA MANAGEMENT ───────────────────────────────────────────────
+    # ════════════════════════════════════════════════════════
+    # TAB 3: DATA MANAGEMENT
+    # ════════════════════════════════════════════════════════
     with tab3:
         touch()
         st.markdown("### Data Management — Universal Ingestion")
@@ -782,7 +768,7 @@ def render_main():
         file_type_map = {}
         if batch_files:
             type_options = [AUTO_DETECT] + DATASET_OPTIONS
-            st.markdown(f"**{len(batch_files)} file(s)**")
+            st.markdown(f"**{len(batch_files)} file(s) selected.**")
             for i in range(0, len(batch_files), 2):
                 cols = st.columns(2)
                 for j, col in enumerate(cols):
@@ -827,7 +813,8 @@ def render_main():
                             cleaned[det_type] = df
                         log("DATA_CLEAN", details={"filename": fn, "method": method,
                                                     "detected_type": det_type, "rows": len(df)})
-                        st.success(f"{'OCR+AI' if method == 'ocr+llm' else 'Direct'}: {fn} → `{det_type}` — {msg}")
+                        st.success(f"{'OCR+AI' if method == 'ocr+llm' else 'Direct'}: "
+                                   f"{fn} → `{det_type}` — {msg}")
                         proc_log.append({"File": fn, "Dataset": det_type,
                                          "Method": method, "Rows": len(df), "Status": "OK"})
                     except Exception as e:
@@ -836,7 +823,8 @@ def render_main():
                                          "Method": "error", "Rows": 0, "Status": str(e)[:80]})
                     bar.progress((i + 1) / total)
 
-                bar.empty(); txt.empty()
+                bar.empty()
+                txt.empty()
 
                 if cleaned:
                     tmp_dir = save_to_temp(cleaned)
@@ -852,7 +840,8 @@ def render_main():
                         st.success(f"Engine loaded — {len(customers)} customers ready.")
                         st.balloons()
                     else:
-                        st.warning("Engine could not initialize. Ensure customers dataset has customer_id.")
+                        st.warning("Engine could not initialize. Ensure customers dataset "
+                                   "has a customer_id column.")
 
                 if proc_log:
                     st.dataframe(pd.DataFrame(proc_log), use_container_width=True, hide_index=True)
@@ -860,15 +849,22 @@ def render_main():
         st.divider()
         st.markdown("#### Download Cleaned Files")
         if st.session_state.data_dir:
-            for csv_file in Path(st.session_state.data_dir).glob("*.csv"):
-                df = pd.read_csv(csv_file)
-                buf = io.StringIO()
-                df.to_csv(buf, index=False)
-                st.download_button(csv_file.name, buf.getvalue(),
-                                   file_name=csv_file.name, mime="text/csv",
-                                   key=f"dl_{csv_file.stem}")
+            csv_files = list(Path(st.session_state.data_dir).glob("*.csv"))
+            if csv_files:
+                cols = st.columns(min(len(csv_files), 3))
+                for i, csv_file in enumerate(csv_files):
+                    df = pd.read_csv(csv_file)
+                    buf = io.StringIO()
+                    df.to_csv(buf, index=False)
+                    cols[i % 3].download_button(
+                        csv_file.name, buf.getvalue(),
+                        file_name=csv_file.name, mime="text/csv",
+                        key=f"dl_{csv_file.stem}"
+                    )
 
-    # ── TAB 4: OCR & AI ──────────────────────────────────────────────────────
+    # ════════════════════════════════════════════════════════
+    # TAB 4: DOCUMENT OCR & AI
+    # ════════════════════════════════════════════════════════
     with tab4:
         touch()
         st.markdown("### Document OCR & AI Analysis")
@@ -894,7 +890,8 @@ def render_main():
         if st.button("Run OCR + AI Analysis", type="primary") and uploaded_img:
             touch()
             log("FILE_UPLOAD", details={"filename": uploaded_img.name, "size": uploaded_img.size,
-                                         "doc_type": doc_type, "linked_customer": cid_ocr or None})
+                                         "doc_type": doc_type,
+                                         "linked_customer": cid_ocr or None})
             with st.spinner("Running OCR..."):
                 try:
                     fbytes = uploaded_img.read()
@@ -902,102 +899,108 @@ def render_main():
                         details={"filename": uploaded_img.name})
                     extracted = ocr_file(fbytes, uploaded_img.name)
                     if not extracted or len(extracted.strip()) < 10:
-                        st.error("No text extracted.")
-                        st.stop()
-                    st.success(f"OCR: {len(extracted)} characters extracted")
+                        st.error("No text extracted. Try a clearer image.")
+                    else:
+                        st.success(f"OCR: {len(extracted)} characters extracted")
+
+                        with st.spinner("Analyzing with Claude AI..."):
+                            try:
+                                import anthropic as ac
+                                cfg = get_prompt("kyc-analysis-v1.0")
+                                system = cfg.get("system", "Extract KYC fields with citations.")
+                                tmpl = cfg.get("user_template", "{ocr_text}")
+                                mcfg = cfg.get("model_settings", {})
+                                msg = tmpl.format(doc_type=doc_type,
+                                                  customer_id=cid_ocr or "Not provided",
+                                                  ocr_text=extracted[:3000])
+                                log("LLM_CALL", customer_id=cid_ocr or None,
+                                    prompt_id="kyc-analysis-v1.0",
+                                    details={"doc_type": doc_type, "filename": uploaded_img.name})
+                                client = ac.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+                                resp = client.messages.create(
+                                    model=mcfg.get("model", "claude-opus-4-20250514"),
+                                    max_tokens=mcfg.get("max_tokens", 1500),
+                                    system=system,
+                                    messages=[{"role": "user", "content": msg}]
+                                )
+                                analysis = json.loads(resp.content[0].text.strip())
+                                conf = analysis.get("overall_confidence", 0)
+
+                                am1, am2, am3 = st.columns(3)
+                                am1.metric("Document Type", analysis.get("document_type", "Unknown"))
+                                am2.metric("Confidence", f"{conf*100:.0f}%",
+                                           delta="Requires review" if conf < LOW_CONFIDENCE_THRESHOLD else None,
+                                           delta_color="inverse" if conf < LOW_CONFIDENCE_THRESHOLD else "normal")
+                                am3.metric("Flags", len(analysis.get("compliance_flags", [])))
+
+                                if conf < LOW_CONFIDENCE_THRESHOLD:
+                                    st.warning(f"Confidence {conf*100:.0f}% is below the "
+                                               f"{LOW_CONFIDENCE_THRESHOLD*100:.0f}% threshold. "
+                                               "Auto-flagged for mandatory human review.")
+                                    log("FLAG_RAISED", customer_id=cid_ocr or None,
+                                        details={"reason": "confidence_below_threshold",
+                                                 "confidence": conf,
+                                                 "filename": uploaded_img.name})
+
+                                field_pairs = [
+                                    ("customer_name", "Name", "name"),
+                                    ("document_number", "Document Number", "default"),
+                                    ("date_of_birth", "Date of Birth", "dob"),
+                                    ("issue_date", "Issue Date", "default"),
+                                    ("expiry_date", "Expiry Date", "default"),
+                                    ("address", "Address", "address"),
+                                    ("nationality", "Nationality", "default"),
+                                    ("issuing_authority", "Issuing Authority", "default"),
+                                ]
+                                rows = []
+                                for key, label, mask_type in field_pairs:
+                                    val = analysis.get(key)
+                                    rows.append({
+                                        "Field": label,
+                                        "Value": mask(val, mask_type) if val else "Not found",
+                                        "Citation": analysis.get(f"{key}_citation", ""),
+                                        "Confidence": f"{analysis.get(f'{key}_confidence', 0)*100:.0f}%",
+                                    })
+                                st.markdown("#### Extracted Fields with Citations")
+                                st.dataframe(pd.DataFrame(rows), use_container_width=True,
+                                             hide_index=True)
+
+                                for section, label, fn in [
+                                    ("compliance_flags", "Compliance Flags", st.warning),
+                                    ("risk_indicators", "Risk Indicators", st.error),
+                                    ("discrepancies", "Discrepancies", st.error),
+                                ]:
+                                    items = analysis.get(section, [])
+                                    if items:
+                                        fn(f"{label}:")
+                                        for item in items:
+                                            st.markdown(f"- {item}")
+
+                                st.info(analysis.get("extraction_summary", ""))
+
+                                analysis["meta"] = {
+                                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                                    "prompt_version": "kyc-analysis-v1.0",
+                                    "confidence_threshold": LOW_CONFIDENCE_THRESHOLD,
+                                    "auto_flagged": conf < LOW_CONFIDENCE_THRESHOLD,
+                                    "analyzed_by": user["username"],
+                                    "note": "All LLM outputs are recommendations. "
+                                            "Human decision is authoritative record."
+                                }
+                                st.download_button(
+                                    "Download Analysis JSON",
+                                    json.dumps(analysis, indent=2),
+                                    file_name=f"ocr_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
+                                    mime="application/json"
+                                )
+                            except Exception as e:
+                                st.error(f"AI analysis failed: {e}")
                 except Exception as e:
                     st.error(f"OCR failed: {e}")
-                    st.stop()
 
-            with st.spinner("Analyzing with Claude AI..."):
-                try:
-                    import anthropic as ac
-                    cfg = get_prompt("kyc-analysis-v1.0")
-                    system = cfg.get("system", "Extract KYC fields with citations.")
-                    tmpl = cfg.get("user_template", "{ocr_text}")
-                    mcfg = cfg.get("model_settings", {})
-                    msg = tmpl.format(doc_type=doc_type,
-                                      customer_id=cid_ocr or "Not provided",
-                                      ocr_text=extracted[:3000])
-                    log("LLM_CALL", customer_id=cid_ocr or None, prompt_id="kyc-analysis-v1.0",
-                        details={"doc_type": doc_type, "filename": uploaded_img.name,
-                                 "model": mcfg.get("model", "claude-opus-4-20250514")})
-                    client = ac.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-                    resp = client.messages.create(
-                        model=mcfg.get("model", "claude-opus-4-20250514"),
-                        max_tokens=mcfg.get("max_tokens", 1500),
-                        system=system,
-                        messages=[{"role": "user", "content": msg}]
-                    )
-                    analysis = json.loads(resp.content[0].text.strip())
-                    conf = analysis.get("overall_confidence", 0)
-
-                    am1, am2, am3 = st.columns(3)
-                    am1.metric("Document Type", analysis.get("document_type", "Unknown"))
-                    am2.metric("Confidence", f"{conf*100:.0f}%",
-                               delta="Requires review" if conf < LOW_CONFIDENCE_THRESHOLD else None,
-                               delta_color="inverse" if conf < LOW_CONFIDENCE_THRESHOLD else "normal")
-                    am3.metric("Flags", len(analysis.get("compliance_flags", [])))
-
-                    if conf < LOW_CONFIDENCE_THRESHOLD:
-                        st.warning(f"Confidence {conf*100:.0f}% below {LOW_CONFIDENCE_THRESHOLD*100:.0f}% threshold. "
-                                   "Auto-flagged for mandatory human review.")
-                        log("FLAG_RAISED", customer_id=cid_ocr or None,
-                            details={"reason": "confidence_below_threshold",
-                                     "confidence": conf, "threshold": LOW_CONFIDENCE_THRESHOLD,
-                                     "filename": uploaded_img.name})
-
-                    field_pairs = [
-                        ("customer_name", "Name", "name"),
-                        ("document_number", "Document Number", "default"),
-                        ("date_of_birth", "Date of Birth", "dob"),
-                        ("issue_date", "Issue Date", "default"),
-                        ("expiry_date", "Expiry Date", "default"),
-                        ("address", "Address", "address"),
-                        ("nationality", "Nationality", "default"),
-                        ("issuing_authority", "Issuing Authority", "default"),
-                    ]
-                    rows = []
-                    for key, label, mask_type in field_pairs:
-                        val = analysis.get(key)
-                        rows.append({
-                            "Field": label,
-                            "Value": mask(val, mask_type) if val else "Not found",
-                            "Citation": analysis.get(f"{key}_citation", ""),
-                            "Confidence": f"{analysis.get(f'{key}_confidence', 0)*100:.0f}%",
-                        })
-                    st.markdown("#### Extracted Fields with Citations")
-                    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-
-                    for section, label, color in [
-                        ("compliance_flags", "Compliance Flags", "warning"),
-                        ("risk_indicators", "Risk Indicators", "error"),
-                        ("discrepancies", "Discrepancies", "error"),
-                    ]:
-                        items = analysis.get(section, [])
-                        if items:
-                            getattr(st, color)(f"{label}:")
-                            for item in items:
-                                st.markdown(f"- {item}")
-
-                    st.info(analysis.get("extraction_summary", ""))
-
-                    analysis["meta"] = {
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "prompt_version": "kyc-analysis-v1.0",
-                        "confidence_threshold": LOW_CONFIDENCE_THRESHOLD,
-                        "auto_flagged": conf < LOW_CONFIDENCE_THRESHOLD,
-                        "analyzed_by": user["username"],
-                        "note": "All LLM outputs are recommendations. Human decision is authoritative record."
-                    }
-                    st.download_button("Download Analysis JSON",
-                                       json.dumps(analysis, indent=2),
-                                       file_name=f"ocr_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
-                                       mime="application/json")
-                except Exception as e:
-                    st.error(f"AI analysis failed: {e}")
-
-    # ── TAB 5: SYSTEM INFO ───────────────────────────────────────────────────
+    # ════════════════════════════════════════════════════════
+    # TAB 5: SYSTEM INFO
+    # ════════════════════════════════════════════════════════
     with tab5:
         touch()
         st.markdown("### System Information")
@@ -1007,47 +1010,60 @@ def render_main():
             if st.session_state.engines_initialized:
                 eng = st.session_state.kyc_engine
                 st.metric("Customers", len(st.session_state.customers_df))
-                st.metric("Screenings", len(eng.screenings) if eng.screenings is not None else 0)
-                st.metric("ID Verifications", len(eng.id_verifications) if eng.id_verifications is not None else 0)
-                st.metric("Transactions", len(eng.transactions) if eng.transactions is not None else 0)
+                st.metric("Screenings",
+                          len(eng.screenings) if eng.screenings is not None else 0)
+                st.metric("ID Verifications",
+                          len(eng.id_verifications) if eng.id_verifications is not None else 0)
+                st.metric("Transactions",
+                          len(eng.transactions) if eng.transactions is not None else 0)
             else:
                 st.info("No datasets loaded.")
         with c2:
             st.markdown("**Active Prompts**")
-            for pid, p in PROMPTS.items():
-                st.markdown(f"- `{pid}` v{p.get('version', '?')} ({p.get('created_at', '')[:10]})")
+            if PROMPTS:
+                for pid, p in PROMPTS.items():
+                    st.markdown(f"- `{pid}` v{p.get('version', '?')} "
+                                f"({p.get('created_at', '')[:10]})")
+            else:
+                st.warning("No prompts loaded. Commit the prompts/ folder to GitHub.")
         st.divider()
         st.markdown(f"""
         **Hosting:** Railway | **Framework:** Streamlit | **Ruleset:** `{RULESET_VERSION}`  
-        **Timeout:** {INACTIVITY_TIMEOUT_SEC // 60} min (FFIEC / PSD2 standard) | **Warning at:** {INACTIVITY_WARNING_SEC // 60} min  
-        PII clears from memory on session end. Audit trail stores metadata only, not raw PII.
+        **Timeout:** {INACTIVITY_TIMEOUT_SEC // 60} min (FFIEC / PSD2) | **Warning at:** {INACTIVITY_WARNING_SEC // 60} min  
+        PII clears from memory on session end. Audit trail stores metadata only.
         """)
 
-    # ── TAB 6: AUDIT TRAIL ───────────────────────────────────────────────────
+    # ════════════════════════════════════════════════════════
+    # TAB 6: AUDIT TRAIL
+    # ════════════════════════════════════════════════════════
     with tab6:
         touch()
         log("AUDIT_VIEWER_OPENED", details={"opened_by": user["username"]})
         st.markdown("### Audit Trail")
-        st.markdown("Every event is SHA-256 hash-chained. Chains link across sessions. "
-                    "Use Verify button to prove log integrity.")
+        st.markdown("Every event is SHA-256 hash-chained within the session and across sessions. "
+                    "Use Verify to confirm log integrity.")
 
         if logger is None or logger.event_count() == 0:
-            st.info("No audit events in this session yet.")
+            st.info("No audit events recorded yet in this session.")
         else:
             edf = logger.get_events_df()
+
             fc1, fc2, fc3 = st.columns(3)
             with fc1:
-                fa = st.selectbox("Action", ["All"] + sorted(edf["Action"].unique().tolist()))
+                fa = st.selectbox("Filter by Action",
+                                  ["All"] + sorted(edf["Action"].unique().tolist()))
             with fc2:
-                fc = st.text_input("Customer ID")
+                fc = st.text_input("Filter by Customer ID")
             with fc3:
-                fu = st.selectbox("User", ["All"] + sorted(edf["User"].unique().tolist()))
+                fu = st.selectbox("Filter by User",
+                                  ["All"] + sorted(edf["User"].unique().tolist()))
 
             filtered = edf.copy()
             if fa != "All":
                 filtered = filtered[filtered["Action"] == fa]
             if fc.strip():
-                filtered = filtered[filtered["Customer ID"].str.contains(fc.strip().upper(), na=False)]
+                filtered = filtered[
+                    filtered["Customer ID"].str.contains(fc.strip().upper(), na=False)]
             if fu != "All":
                 filtered = filtered[filtered["User"] == fu]
 
@@ -1091,7 +1107,8 @@ else:
 st.divider()
 st.markdown(
     f"<div style='text-align:center;color:gray;font-size:11px'>"
-    f"Apexon KYC Compliance Platform | {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}"
+    f"Apexon KYC Compliance Platform | "
+    f"{datetime.now().strftime('%Y-%m-%d %H:%M UTC')}"
     f"</div>",
     unsafe_allow_html=True
 )
