@@ -1,0 +1,61 @@
+{
+  "_note": "Passwords stored as plain text for demo purposes. bcrypt (pip install bcrypt) was evaluated for production use and should be implemented before any real deployment. See SECURITY.md for migration path.",
+  "_roles": {
+    "Viewer": "Read-only access. All PII masked at all times. Cannot evaluate, escalate, or clear.",
+    "Analyst": "Can run evaluations, view customers, propose clears, and escalate. PII masked by default.",
+    "Manager": "Can approve or reject proposed clears. Can unmask PII. Cannot modify audit trail.",
+    "Admin": "Full access. Can add users, view all audit trails, unmask PII, and export packages."
+  },
+  "users": [
+    {
+      "user_id": "usr_admin_001",
+      "username": "admin",
+      "password": "admin123",
+      "role": "Admin",
+      "full_name": "System Administrator",
+      "email": "admin@apexon-kyc.demo",
+      "created_at": "2026-04-01T00:00:00Z",
+      "active": true
+    },
+    {
+      "user_id": "usr_mgr_001",
+      "username": "manager",
+      "password": "mgr123",
+      "role": "Manager",
+      "full_name": "Compliance Manager",
+      "email": "manager@apexon-kyc.demo",
+      "created_at": "2026-04-01T00:00:00Z",
+      "active": true
+    },
+    {
+      "user_id": "usr_analyst_001",
+      "username": "analyst1",
+      "password": "analyst123",
+      "role": "Analyst",
+      "full_name": "KYC Analyst One",
+      "email": "analyst1@apexon-kyc.demo",
+      "created_at": "2026-04-01T00:00:00Z",
+      "active": true
+    },
+    {
+      "user_id": "usr_analyst_002",
+      "username": "analyst2",
+      "password": "analyst456",
+      "role": "Analyst",
+      "full_name": "KYC Analyst Two",
+      "email": "analyst2@apexon-kyc.demo",
+      "created_at": "2026-04-01T00:00:00Z",
+      "active": true
+    },
+    {
+      "user_id": "usr_viewer_001",
+      "username": "viewer",
+      "password": "viewer123",
+      "role": "Viewer",
+      "full_name": "Read Only Reviewer",
+      "email": "viewer@apexon-kyc.demo",
+      "created_at": "2026-04-01T00:00:00Z",
+      "active": true
+    }
+  ]
+}
