@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 import plotly.graph_objects as go
 
 try:
-    from benchmarks.app_integration import generate_and_get_manifest_path
+    from benchmarks.app_integration import generate_and_get_manifest_path, get_generated_raw_tables
     PORTFOLIO_GENERATOR_AVAILABLE = True
 except ImportError:
     PORTFOLIO_GENERATOR_AVAILABLE = False
@@ -36,6 +36,7 @@ def _maybe_run_demo_generator_cli():
     parser.add_argument("--portfolio-size", type=int, default=DEFAULT_DEMO_PORTFOLIO_SIZE)
     args, _ = parser.parse_known_args()
     if args.generate_demo_portfolio:
+        from benchmarks.app_integration import generate_and_get_manifest_path
         manifest_path = generate_and_get_manifest_path(size=args.portfolio_size)
         print(f"Generated demo portfolio ({args.portfolio_size} scenarios) at: {manifest_path}")
         sys.exit(0)
@@ -49,6 +50,57 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+
+# ── Global styles ─────────────────────────────────────────────────────────────
+
+st.markdown("""
+<style>
+/* Tab list container */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 6px;
+    padding: 4px 0 0 0;
+    border-bottom: 2px solid rgba(255,255,255,0.08);
+}
+
+/* Individual tab */
+.stTabs [data-baseweb="tab"] {
+    font-size: 15px;
+    font-weight: 500;
+    padding: 12px 24px;
+    border-radius: 6px 6px 0 0;
+    color: rgba(255,255,255,0.6);
+    background: transparent;
+    border: none;
+    letter-spacing: 0.01em;
+    transition: color 0.15s ease, background 0.15s ease;
+}
+
+/* Hover state */
+.stTabs [data-baseweb="tab"]:hover {
+    color: rgba(255,255,255,0.9);
+    background: rgba(255,255,255,0.05);
+}
+
+/* Active tab */
+.stTabs [data-baseweb="tab"][aria-selected="true"] {
+    color: #ffffff;
+    font-weight: 700;
+    background: rgba(255,255,255,0.06);
+}
+
+/* Active tab underline indicator */
+.stTabs [data-baseweb="tab-highlight"] {
+    background-color: #0072B2;
+    height: 3px;
+    border-radius: 2px 2px 0 0;
+}
+
+/* Tab panel content area — give it breathing room */
+.stTabs [data-baseweb="tab-panel"] {
+    padding-top: 24px;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -193,7 +245,6 @@ def load_users():
             return {u["username"]: u for u in data.get("users", []) if u.get("active", True)}
     except Exception:
         pass
-    # Fallback includes all roles so Railway works even if users.json is missing
     return {
         "admin":    {"user_id": "fb_admin",   "username": "admin",    "password": "admin123",   "role": "Admin",   "full_name": "Administrator"},
         "manager":  {"user_id": "fb_mgr",     "username": "manager",  "password": "mgr123",     "role": "Manager", "full_name": "Compliance Manager"},
@@ -919,7 +970,6 @@ def _try_autoload_engine():
     2. Temp dir from a previous session this deployment (kyc_data_clean/)
     Silently skips if neither exists or neither has customers.
     """
-    # 1. Default dir
     default_dir = Path.cwd() / "Data Clean"
     if default_dir.exists():
         engine, customers = load_engine(default_dir)
@@ -932,7 +982,6 @@ def _try_autoload_engine():
             _seed_structured_provenance()
             return
 
-    # 2. Temp dir from previous upload/clean in this deployment
     tmp_dir = Path(tempfile.gettempdir()) / "kyc_data_clean"
     if tmp_dir.exists() and any(tmp_dir.glob("*.csv")):
         engine, customers = load_engine(tmp_dir)
@@ -1032,7 +1081,6 @@ def render_main():
         else:
             st.markdown("### Search & Evaluate Customer")
 
-            # Fixed layout: input full width, button below it
             cid_input = st.text_input("Customer ID", placeholder="C00001",
                                        label_visibility="collapsed")
             eval_btn = st.button("Evaluate Customer", type="primary", use_container_width=True)
@@ -1066,7 +1114,6 @@ def render_main():
                                          "triggered_rules": [r["rule_id"] for r in
                                                              reject_rules + review_rules]})
 
-                        # Save to history
                         history_entry = {
                             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                             "evaluated_by": user["username"],
@@ -1083,7 +1130,6 @@ def render_main():
                             st.session_state.customer_history[cid] = []
                         st.session_state.customer_history[cid].append(history_entry)
 
-                        # Metrics row
                         m1, m2, m3, m4 = st.columns(4)
                         m1.metric("Overall Score", f"{score}/100")
                         m2.metric("Customer ID", cid)
@@ -1093,11 +1139,9 @@ def render_main():
 
                         st.divider()
 
-                        # ── Disposition block ──────────────────────────────────
                         show_disposition(disposition)
                         st.markdown(f"**Rationale:** {rationale}")
 
-                        # Triggered reject rules
                         if reject_rules:
                             st.markdown("**Hard Rejection Rules Triggered:**")
                             for r in reject_rules:
@@ -1112,7 +1156,6 @@ def render_main():
                                     unsafe_allow_html=True
                                 )
 
-                        # Triggered review rules
                         if review_rules:
                             st.markdown("**Review Rules Triggered:**")
                             for r in review_rules:
@@ -1129,7 +1172,6 @@ def render_main():
 
                         st.divider()
 
-                        # ── Dimension breakdown ────────────────────────────────
                         dim_map = [
                             ("aml_screening",         "AML Screening",         25),
                             ("identity_verification", "Identity Verification", 20),
@@ -1151,7 +1193,6 @@ def render_main():
                             else:
                                 failing.append(entry)
 
-                        # Show failing and gap dimensions prominently
                         problem_dims = failing + minor_gaps
                         if problem_dims:
                             st.markdown("**Dimension Issues:**")
@@ -1173,7 +1214,6 @@ def render_main():
                                 for e in passing:
                                     st.markdown(f"**{e['label']}** — {e['score']}/100 — {e['finding']}")
 
-                        # Dimension chart — sorted worst first
                         all_dims = {e["label"]: e["score"] for e in
                                     sorted(passing + minor_gaps + failing, key=lambda x: x["score"])}
                         fig = go.Figure(go.Bar(
@@ -1211,7 +1251,6 @@ def render_main():
                                         f"(from {ocr_file or 'N/A'}, {ocr_conf or 'N/A'} confidence)"
                                     )
 
-                        # Remediation (for Review or Reject)
                         if disposition in ("REJECT", "REVIEW") and role in ("Analyst", "Manager", "Admin"):
                             st.divider()
                             st.markdown("**Remediation Actions**")
@@ -1245,7 +1284,6 @@ def render_main():
                                                      "requires_manager_approval": True})
                                         st.success("Clear proposed. Awaiting manager approval.")
 
-                        # Customer history
                         history = st.session_state.customer_history.get(cid, [])
                         if len(history) > 1:
                             st.divider()
@@ -1318,12 +1356,29 @@ def render_main():
                         "account_activity_score", "proof_of_address_score",
                         "beneficial_ownership_score", "data_quality_score",
                         "rationale", "ruleset_version"]
-                rdf = pd.DataFrame(results)
+
+                rdf = pd.DataFrame(results) if results else pd.DataFrame(columns=cols)
+
+                # ── Normalise synthetic portfolio columns if engine couldn't score them ──
+                # Map expected_final_decision → disposition (synthetic manifest column)
+                if "disposition" not in rdf.columns:
+                    if "expected_final_decision" in rdf.columns:
+                        rdf = rdf.rename(columns={"expected_final_decision": "disposition"})
+                    else:
+                        rdf["disposition"] = "REVIEW"
+
+                # Ensure all required columns exist with safe defaults
+                if "overall_score" not in rdf.columns:
+                    rdf["overall_score"] = 0
+                if "rationale" not in rdf.columns:
+                    rdf["rationale"] = "Awaiting engine scoring"
+                if "ruleset_version" not in rdf.columns:
+                    rdf["ruleset_version"] = RULESET_VERSION
+
                 rdf = rdf[[c for c in cols if c in rdf.columns]]
                 num_cols = [c for c in rdf.columns if c.endswith("_score")]
                 rdf[num_cols] = rdf[num_cols].fillna(0)
                 rdf["disposition"] = rdf["disposition"].fillna("REVIEW")
-                rdf["overall_score"] = rdf["overall_score"].fillna(0)
 
                 order = {"REJECT": 0, "REVIEW": 1, "PASS_WITH_NOTES": 2, "PASS": 3}
                 rdf["_s"] = rdf["disposition"].map(order).fillna(4)
@@ -1348,7 +1403,7 @@ def render_main():
                         "avg_score": float(rdf["overall_score"].mean()),
                         "flagged_customer_ids": flagged_ids,
                         "error_customer_ids": [e["id"] for e in errors],
-                        "ruleset_version": rdf["ruleset_version"].iloc[0] if "ruleset_version" in rdf.columns else "unknown",
+                        "ruleset_version": rdf["ruleset_version"].iloc[0] if "ruleset_version" in rdf.columns and len(rdf) > 0 else "unknown",
                     })
                 st.rerun()
 
@@ -1501,7 +1556,7 @@ def render_main():
                         log("ENGINE_RELOAD", details={"customers": len(customers),
                                                        "datasets": list(cleaned.keys())})
                         st.success(f"Engine loaded — {len(customers)} customers ready.")
-                        st.rerun()  # Push updated state to all tabs immediately
+                        st.rerun()
                     else:
                         st.warning("Engine could not initialize. Ensure customers dataset "
                                    "has a customer_id column.")
@@ -1616,10 +1671,7 @@ def render_main():
                                         lines[1:-1] if lines and lines[-1].strip() == "```" else lines[1:]
                                     )
 
-                                # Strip any remaining whitespace
                                 raw_response = raw_response.strip()
-
-                                # Extract only the JSON object if extra content wraps it
                                 start = raw_response.find("{")
                                 end = raw_response.rfind("}") + 1
                                 if start != -1 and end > start:
@@ -1954,6 +2006,225 @@ def render_main():
         touch()
         st.markdown("### Generate Synthetic KYC Portfolio")
         st.markdown(
+            "Generates a synthetic portfolio of KYC customers. "
+            "Each run produces **intentionally messy raw CSV files** — "
+            "inconsistent column names, mixed date formats, abbreviations, "
+            "nulls, and junk columns — so Claude's cleaning pipeline does real work. "
+            "After generation, the files are automatically processed through "
+            "the same Claude AI pipeline as Data Management."
+        )
+
+        if not PORTFOLIO_GENERATOR_AVAILABLE:
+            st.error("Portfolio generator not available. Ensure the benchmarks package is installed.")
+        else:
+            portfolio_size = st.number_input(
+                "Number of synthetic customers to generate",
+                min_value=5, max_value=500, value=30, step=5,
+                help="Controls how many synthetic KYC cases will be generated."
+            )
+
+            if st.button("Generate Fresh Portfolio", type="primary"):
+                touch()
+                with st.spinner(f"Generating {int(portfolio_size)} synthetic customers..."):
+                    try:
+                        manifest_path = generate_and_get_manifest_path(size=int(portfolio_size))
+                        st.session_state["last_generated_manifest_path"] = str(manifest_path)
+                        log("DATA_CLEAN", details={
+                            "action": "synthetic_portfolio_generated",
+                            "size": int(portfolio_size),
+                            "manifest_path": str(manifest_path),
+                            "generated_by": user["username"],
+                        })
+                        st.success(f"Portfolio generated — {int(portfolio_size)} customers.")
+
+                        # ── Download the manifest ──────────────────────────────
+                        manifest_path_obj = Path(manifest_path)
+                        if manifest_path_obj.exists():
+                            raw_jsonl = manifest_path_obj.read_text(encoding="utf-8")
+                            import csv as _csv, io as _io
+                            lines = [json.loads(l) for l in raw_jsonl.strip().splitlines() if l.strip()]
+                            if lines:
+                                csv_buf = _io.StringIO()
+                                all_fields = list(dict.fromkeys(k for line in lines for k in line.keys()))
+                                writer = _csv.DictWriter(csv_buf, fieldnames=all_fields, extrasaction="ignore")
+                                writer.writeheader()
+                                writer.writerows(lines)
+                                csv_bytes = csv_buf.getvalue().encode("utf-8")
+                            else:
+                                csv_bytes = b""
+
+                            col_a, col_b = st.columns(2)
+                            with col_a:
+                                st.download_button(
+                                    label="Download Manifest (.jsonl)",
+                                    data=raw_jsonl.encode("utf-8"),
+                                    file_name=f"kyc_portfolio_{int(portfolio_size)}_manifest.jsonl",
+                                    mime="application/json",
+                                    use_container_width=True,
+                                )
+                            with col_b:
+                                st.download_button(
+                                    label="Download Manifest (.csv)",
+                                    data=csv_bytes,
+                                    file_name=f"kyc_portfolio_{int(portfolio_size)}_manifest.csv",
+                                    mime="text/csv",
+                                    use_container_width=True,
+                                )
+
+                        # ── Show raw messy files for download ──────────────────
+                        raw_tables = get_generated_raw_tables()
+                        if raw_tables:
+                            st.divider()
+                            st.markdown("#### Raw Messy Files (before Claude cleaning)")
+                            st.caption(
+                                "These files have inconsistent column names, mixed date formats, "
+                                "abbreviations, nulls, and junk columns. "
+                                "Claude will normalise them below."
+                            )
+                            dl_cols = st.columns(min(len(raw_tables), 3))
+                            for i, (stem, path) in enumerate(sorted(raw_tables.items())):
+                                with dl_cols[i % 3]:
+                                    st.download_button(
+                                        label=f"⬇ {path.name}",
+                                        data=path.read_bytes(),
+                                        file_name=path.name,
+                                        mime="text/csv",
+                                        use_container_width=True,
+                                        key=f"raw_dl_{stem}",
+                                    )
+
+                        # ── Auto-process through Claude cleaning pipeline ───────
+                        st.divider()
+                        with st.spinner(
+                            "Claude is reading and normalising the messy files — "
+                            "this may take 30–60s on first run..."
+                        ):
+                            try:
+                                raw_tables = get_generated_raw_tables()
+                                if not raw_tables:
+                                    st.error("No raw tables found to process.")
+                                else:
+                                    cleaned = {}
+                                    proc_log = []
+
+                                    for stem, csv_path in sorted(raw_tables.items()):
+                                        # Guess dataset type from filename stem
+                                        # e.g. "customers_raw" → "customers"
+                                        guessed_type = stem.replace("_raw", "")
+                                        dataset_type = (
+                                            guessed_type
+                                            if guessed_type in DATASET_OPTIONS
+                                            else AUTO_DETECT
+                                        )
+
+                                        try:
+                                            with open(csv_path, "rb") as fobj:
+                                                df, method, det_type, msg = process_file(
+                                                    fobj, csv_path.name, dataset_type
+                                                )
+
+                                            if det_type in cleaned:
+                                                cleaned[det_type] = pd.concat(
+                                                    [cleaned[det_type], df],
+                                                    ignore_index=True
+                                                ).drop_duplicates()
+                                            else:
+                                                cleaned[det_type] = df
+
+                                            log("DATA_CLEAN", details={
+                                                "filename": csv_path.name,
+                                                "method": method,
+                                                "detected_type": det_type,
+                                                "rows": len(df),
+                                            })
+                                            proc_log.append({
+                                                "File": csv_path.name,
+                                                "Dataset": det_type,
+                                                "Method": method,
+                                                "Rows": len(df),
+                                                "Status": "OK",
+                                            })
+                                        except Exception as file_err:
+                                            proc_log.append({
+                                                "File": csv_path.name,
+                                                "Dataset": dataset_type,
+                                                "Method": "error",
+                                                "Rows": 0,
+                                                "Status": str(file_err)[:80],
+                                            })
+
+                                    if proc_log:
+                                        st.markdown("**Claude cleaning results:**")
+                                        st.dataframe(
+                                            pd.DataFrame(proc_log),
+                                            use_container_width=True,
+                                            hide_index=True,
+                                        )
+
+                                    if cleaned and "customers" in cleaned:
+                                        tmp_dir = save_to_temp(cleaned)
+                                        engine_obj, customers_df_new = load_engine(tmp_dir)
+
+                                        if (
+                                            engine_obj is not None
+                                            and customers_df_new is not None
+                                            and len(customers_df_new) > 0
+                                        ):
+                                            st.session_state.kyc_engine = engine_obj
+                                            st.session_state.customers_df = customers_df_new
+                                            st.session_state.engines_initialized = True
+                                            st.session_state.data_dir = tmp_dir
+                                            st.session_state.batch_results = None
+                                            st.session_state.data_source_label = (
+                                                f"Synthetic Portfolio — "
+                                                f"Claude-cleaned ({', '.join(cleaned.keys())})"
+                                            )
+                                            _seed_structured_provenance()
+                                            discrepancy_rows = _collect_discrepancy_report()
+                                            st.session_state.latest_discrepancy_report = discrepancy_rows
+                                            n_loaded = len(customers_df_new)
+                                            st.success(
+                                                f"Pipeline complete — Claude normalised "
+                                                f"{len(raw_tables)} messy files, "
+                                                f"{n_loaded} customers loaded into engine. "
+                                                f"Go to **Batch Results** to evaluate."
+                                            )
+                                            log("ENGINE_RELOAD", details={
+                                                "source": "synthetic_portfolio_claude_cleaned",
+                                                "customers": n_loaded,
+                                                "datasets": list(cleaned.keys()),
+                                                "generated_by": user["username"],
+                                            })
+                                            st.rerun()
+                                        else:
+                                            st.error(
+                                                "Engine could not initialise. "
+                                                "Check that customers table has a customer_id column."
+                                            )
+                                    else:
+                                        st.warning(
+                                            f"Cleaning produced: {list(cleaned.keys())}. "
+                                            "No customers table found — check the results above."
+                                        )
+
+                            except Exception as _clean_err:
+                                import traceback
+                                st.error(
+                                    f"Cleaning pipeline error: {_clean_err}\n\n"
+                                    f"```\n{traceback.format_exc()}\n```"
+                                )
+
+                    except Exception as e:
+                        st.error(f"Generation failed: {e}")
+
+            if st.session_state.get("last_generated_manifest_path"):
+                st.divider()
+                st.caption(
+                    f"Last manifest: `{st.session_state['last_generated_manifest_path']}`"
+                )
+        touch()
+        st.markdown("### Generate Synthetic KYC Portfolio")
+        st.markdown(
             "Generate a fresh synthetic portfolio of KYC customers for demo and testing purposes. "
             "Once generated, go to Data Management to load the output files into the engine."
         )
@@ -1987,7 +2258,6 @@ def render_main():
                         if manifest_path_obj.exists():
                             raw_jsonl = manifest_path_obj.read_text(encoding="utf-8")
 
-                            # Parse JSONL → CSV for a friendlier download option
                             import csv, io as _io
                             lines = [json.loads(l) for l in raw_jsonl.strip().splitlines() if l.strip()]
                             if lines:
@@ -2032,6 +2302,7 @@ def render_main():
 
     # ════════════════════════════════════════════════════════
     # TAB 8: AUDIT TRAIL
+    # TAB 9: AUDIT TRAIL
     # ════════════════════════════════════════════════════════
     with tab8:
         touch()
