@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from benchmarks.generate_demo_portfolio import generate_demo_portfolio, get_raw_table_paths
+from benchmarks.generate_demo_portfolio import generate_demo_portfolio
 
 
 def generate_and_get_manifest_path(size: int) -> Path:

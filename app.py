@@ -1065,10 +1065,9 @@ def render_main():
 
     st.divider()
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab_generate, tab8 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "Individual Evaluation", "Batch Results", "Data Management",
-        "Document OCR & AI", "System Info", "Approval Queue", "Cases",
-        "Generate Data", "Audit Trail",
+        "Document OCR & AI", "System Info", "Approval Queue", "Cases", "Audit Trail",
     ])
 
     # ════════════════════════════════════════════════════════
@@ -1511,34 +1510,52 @@ def render_main():
                 bar = st.progress(0)
                 txt = st.empty()
                 total = len(batch_files)
-
-                for i, (idx, (fo, dtype)) in enumerate(file_type_map.items()):
-                    fn = fo.name
-                    txt.text(f"Processing {fn} ({i+1}/{total})")
-                    log("FILE_UPLOAD", details={"filename": fn, "size": fo.size,
-                                                "type_selected": dtype})
-                    try:
-                        df, method, det_type, msg = process_file(fo, fn, dtype)
-                        if det_type in cleaned:
-                            cleaned[det_type] = pd.concat(
-                                [cleaned[det_type], df], ignore_index=True
-                            ).drop_duplicates()
-                        else:
-                            cleaned[det_type] = df
-                        log("DATA_CLEAN", details={"filename": fn, "method": method,
-                                                    "detected_type": det_type, "rows": len(df)})
-                        st.success(f"{'OCR+AI' if method == 'ocr+llm' else 'Direct'}: "
-                                   f"{fn} → `{det_type}` — {msg}")
-                        proc_log.append({"File": fn, "Dataset": det_type,
-                                         "Method": method, "Rows": len(df), "Status": "OK"})
-                    except Exception as e:
-                        st.error(f"{fn}: {e}")
-                        proc_log.append({"File": fn, "Dataset": dtype,
-                                         "Method": "error", "Rows": 0, "Status": str(e)[:80]})
-                    bar.progress((i + 1) / total)
+                st.markdown("#### Step 1: Claude is reading and normalising your data")
+                with st.spinner("Running data cleaning pipeline..."):
+                    for i, (idx, (fo, dtype)) in enumerate(file_type_map.items()):
+                        fn = fo.name
+                        txt.text(f"Processing {fn} ({i+1}/{total})")
+                        log("FILE_UPLOAD", details={"filename": fn, "size": fo.size,
+                                                    "type_selected": dtype})
+                        try:
+                            df, method, det_type, msg = process_file(fo, fn, dtype)
+                            if det_type in cleaned:
+                                cleaned[det_type] = pd.concat(
+                                    [cleaned[det_type], df], ignore_index=True
+                                ).drop_duplicates()
+                            else:
+                                cleaned[det_type] = df
+                            log("DATA_CLEAN", details={"filename": fn, "method": method,
+                                                        "detected_type": det_type, "rows": len(df)})
+                            proc_log.append({
+                                "File": fn,
+                                "Dataset type detected": det_type,
+                                "Rows loaded": len(df),
+                                "Method": "claude_structured" if method == "ocr+llm" else "fallback_pandas",
+                                "Status": "OK",
+                            })
+                        except Exception as e:
+                            proc_log.append({
+                                "File": fn,
+                                "Dataset type detected": dtype if dtype != AUTO_DETECT else "auto_detect",
+                                "Rows loaded": 0,
+                                "Method": "error",
+                                "Status": f"FAILED: {str(e)[:120]}",
+                            })
+                        bar.progress((i + 1) / total)
 
                 bar.empty()
                 txt.empty()
+
+                if proc_log:
+                    proc_df = pd.DataFrame(proc_log)
+                    st.dataframe(proc_df, use_container_width=True, hide_index=True)
+                    failed_rows = proc_df[proc_df["Status"].str.startswith("FAILED", na=False)]
+                    if not failed_rows.empty:
+                        for _, row in failed_rows.iterrows():
+                            st.error(f"{row['File']}: {row['Status']}")
+                    else:
+                        st.success("All files were processed cleanly through the cleaning pipeline.")
 
                 if cleaned:
                     tmp_dir = save_to_temp(cleaned)
@@ -1561,8 +1578,25 @@ def render_main():
                         st.warning("Engine could not initialize. Ensure customers dataset "
                                    "has a customer_id column.")
 
-                if proc_log:
-                    st.dataframe(pd.DataFrame(proc_log), use_container_width=True, hide_index=True)
+        if st.session_state.latest_discrepancy_report is not None:
+            touch()
+            dr = st.session_state.latest_discrepancy_report
+            if dr:
+                st.divider()
+                st.markdown("#### Data Discrepancy Summary")
+                disc_df = pd.DataFrame(dr)
+                st.warning(f"{disc_df['customer_id'].nunique()} customer(s) with discrepancies detected.")
+                st.dataframe(disc_df, use_container_width=True, hide_index=True)
+                buf_disc = io.StringIO()
+                disc_df.to_csv(buf_disc, index=False)
+                st.download_button(
+                    "Download Discrepancy CSV",
+                    data=buf_disc.getvalue(),
+                    file_name=f"discrepancies_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                )
+            else:
+                st.info("No data discrepancies detected in current provenance records.")
 
         if st.session_state.latest_discrepancy_report is not None:
             touch()
@@ -1706,18 +1740,45 @@ def render_main():
                                     ("nationality", "Nationality", "default"),
                                     ("issuing_authority", "Issuing Authority", "default"),
                                 ]
-                                rows = []
+                                extracted_rows = []
                                 for key, label, mask_type in field_pairs:
+                                    conf_val = float(analysis.get(f"{key}_confidence", 0) or 0)
                                     val = analysis.get(key)
-                                    rows.append({
+                                    extracted_rows.append({
+                                        "field_key": key,
+                                        "mask_type": mask_type,
                                         "Field": label,
-                                        "Value": mask(val, mask_type) if val else "Not found",
-                                        "Citation": analysis.get(f"{key}_citation", ""),
-                                        "Confidence": f"{analysis.get(f'{key}_confidence', 0)*100:.0f}%",
+                                        "Extracted value": mask(val, mask_type) if val else "Not found",
+                                        "Confidence": conf_val,
                                     })
-                                st.markdown("#### Extracted Fields with Citations")
-                                st.dataframe(pd.DataFrame(rows), use_container_width=True,
-                                             hide_index=True)
+                                st.markdown("#### Extracted Fields")
+                                extracted_df = pd.DataFrame(extracted_rows)
+                                display_df = extracted_df[["Field", "Extracted value", "Confidence"]].copy()
+                                display_df["Confidence"] = display_df["Confidence"].map(lambda x: f"{x*100:.0f}%")
+                                low_conf_fields = [r for r in extracted_rows if r["Confidence"] < 0.75]
+
+                                def _highlight_low_confidence(row):
+                                    conf_pct = int(str(row["Confidence"]).replace("%", "") or 0)
+                                    if conf_pct < 75:
+                                        return ["background-color: #FFF3CD"] * len(row)
+                                    return [""] * len(row)
+
+                                st.dataframe(
+                                    display_df.style.apply(_highlight_low_confidence, axis=1),
+                                    use_container_width=True,
+                                    hide_index=True,
+                                )
+
+                                corrected_values = {}
+                                if low_conf_fields:
+                                    st.warning("Low-confidence fields detected (<75%). Review and correct before rescoring.")
+                                    for low in low_conf_fields:
+                                        field_key = low["field_key"]
+                                        corrected_values[field_key] = st.text_input(
+                                            f"{low['Field']} (correction)",
+                                            value=str(analysis.get(field_key) or ""),
+                                            key=f"ocr_correction_{cid_ocr}_{field_key}",
+                                        )
 
                                 for section, label, fn in [
                                     ("compliance_flags", "Compliance Flags", st.warning),
@@ -1750,25 +1811,26 @@ def render_main():
 
                                 linked_cid = (cid_ocr or "").strip().upper()
                                 if linked_cid:
-                                    written_fields = _record_ocr_analysis_provenance(
-                                        linked_cid, analysis, uploaded_img.name
-                                    )
-                                    if _customer_in_engine(linked_cid):
-                                        st.session_state.dirty_customers.add(linked_cid)
-                                    st.session_state.ocr_analysis_cache[linked_cid] = {
-                                        "analysis": analysis,
-                                        "filename": uploaded_img.name,
-                                        "doc_type": doc_type,
-                                        "written_fields": [w["field"] for w in written_fields],
-                                        "captured_at": datetime.now(timezone.utc).isoformat(),
-                                    }
-                                    st.info(
-                                        f"Provenance recorded for {linked_cid} "
-                                        f"({len(written_fields)} field(s)); customer marked dirty for optional re-score."
-                                    )
-
-                                    if st.button("Apply to Dataset & Re-score Customer", type="secondary"):
+                                    if st.button("Confirm and rescore", type="secondary"):
                                         touch()
+                                        confirmed_analysis = dict(analysis)
+                                        for field_key, edited in corrected_values.items():
+                                            confirmed_analysis[field_key] = edited
+
+                                        written_fields = _record_ocr_analysis_provenance(
+                                            linked_cid, confirmed_analysis, uploaded_img.name
+                                        )
+                                        if _customer_in_engine(linked_cid):
+                                            st.session_state.dirty_customers.add(linked_cid)
+                                        st.session_state.ocr_analysis_cache[linked_cid] = {
+                                            "analysis": confirmed_analysis,
+                                            "filename": uploaded_img.name,
+                                            "doc_type": doc_type,
+                                            "written_fields": [w["field"] for w in written_fields],
+                                            "captured_at": datetime.now(timezone.utc).isoformat(),
+                                            "confirmed_fields": corrected_values,
+                                        }
+
                                         before_score = None
                                         before_disp = None
                                         hist = st.session_state.customer_history.get(linked_cid, [])
@@ -1776,7 +1838,7 @@ def render_main():
                                             before_score = hist[-1].get("overall_score")
                                             before_disp = hist[-1].get("disposition")
 
-                                        updated_fields = _update_single_customer_records(linked_cid, doc_type, analysis)
+                                        updated_fields = _update_single_customer_records(linked_cid, doc_type, confirmed_analysis)
                                         rescored = st.session_state.kyc_engine.evaluate_customer(linked_cid)
                                         after_score = rescored.get("overall_score")
                                         after_disp = rescored.get("disposition")
@@ -1811,7 +1873,12 @@ def render_main():
                                             "after_score": after_score,
                                             "after_disposition": after_disp,
                                         })
-                                        st.success("Dataset updated and customer re-scored.")
+                                        if before_score is None:
+                                            st.success("Dataset updated and customer re-scored.")
+                                        elif after_score > before_score:
+                                            st.success("Case improved after OCR remediation and re-score.")
+                                        else:
+                                            st.warning("Case did not improve after OCR remediation; follow-up review is required.")
                             except Exception as e:
                                 st.error(f"AI analysis failed: {e}")
                 except Exception as e:
@@ -2000,309 +2067,7 @@ def render_main():
                                     st.rerun()
 
     # ════════════════════════════════════════════════════════
-    # TAB 8: GENERATE DATA
-    # ════════════════════════════════════════════════════════
-    with tab_generate:
-        touch()
-        st.markdown("### Generate Synthetic KYC Portfolio")
-        st.markdown(
-            "Generates a synthetic portfolio of KYC customers. "
-            "Each run produces **intentionally messy raw CSV files** — "
-            "inconsistent column names, mixed date formats, abbreviations, "
-            "nulls, and junk columns — so Claude's cleaning pipeline does real work. "
-            "After generation, the files are automatically processed through "
-            "the same Claude AI pipeline as Data Management."
-        )
-
-        if not PORTFOLIO_GENERATOR_AVAILABLE:
-            st.error("Portfolio generator not available. Ensure the benchmarks package is installed.")
-        else:
-            portfolio_size = st.number_input(
-                "Number of synthetic customers to generate",
-                min_value=5, max_value=500, value=30, step=5,
-                help="Controls how many synthetic KYC cases will be generated."
-            )
-
-            if st.button("Generate Fresh Portfolio", type="primary"):
-                touch()
-                with st.spinner(f"Generating {int(portfolio_size)} synthetic customers..."):
-                    try:
-                        manifest_path = generate_and_get_manifest_path(size=int(portfolio_size))
-                        st.session_state["last_generated_manifest_path"] = str(manifest_path)
-                        log("DATA_CLEAN", details={
-                            "action": "synthetic_portfolio_generated",
-                            "size": int(portfolio_size),
-                            "manifest_path": str(manifest_path),
-                            "generated_by": user["username"],
-                        })
-                        st.success(f"Portfolio generated — {int(portfolio_size)} customers.")
-
-                        # ── Download the manifest ──────────────────────────────
-                        manifest_path_obj = Path(manifest_path)
-                        if manifest_path_obj.exists():
-                            raw_jsonl = manifest_path_obj.read_text(encoding="utf-8")
-                            import csv as _csv, io as _io
-                            lines = [json.loads(l) for l in raw_jsonl.strip().splitlines() if l.strip()]
-                            if lines:
-                                csv_buf = _io.StringIO()
-                                all_fields = list(dict.fromkeys(k for line in lines for k in line.keys()))
-                                writer = _csv.DictWriter(csv_buf, fieldnames=all_fields, extrasaction="ignore")
-                                writer.writeheader()
-                                writer.writerows(lines)
-                                csv_bytes = csv_buf.getvalue().encode("utf-8")
-                            else:
-                                csv_bytes = b""
-
-                            col_a, col_b = st.columns(2)
-                            with col_a:
-                                st.download_button(
-                                    label="Download Manifest (.jsonl)",
-                                    data=raw_jsonl.encode("utf-8"),
-                                    file_name=f"kyc_portfolio_{int(portfolio_size)}_manifest.jsonl",
-                                    mime="application/json",
-                                    use_container_width=True,
-                                )
-                            with col_b:
-                                st.download_button(
-                                    label="Download Manifest (.csv)",
-                                    data=csv_bytes,
-                                    file_name=f"kyc_portfolio_{int(portfolio_size)}_manifest.csv",
-                                    mime="text/csv",
-                                    use_container_width=True,
-                                )
-
-                        # ── Show raw messy files for download ──────────────────
-                        raw_tables = get_generated_raw_tables()
-                        if raw_tables:
-                            st.divider()
-                            st.markdown("#### Raw Messy Files (before Claude cleaning)")
-                            st.caption(
-                                "These files have inconsistent column names, mixed date formats, "
-                                "abbreviations, nulls, and junk columns. "
-                                "Claude will normalise them below."
-                            )
-                            dl_cols = st.columns(min(len(raw_tables), 3))
-                            for i, (stem, path) in enumerate(sorted(raw_tables.items())):
-                                with dl_cols[i % 3]:
-                                    st.download_button(
-                                        label=f"⬇ {path.name}",
-                                        data=path.read_bytes(),
-                                        file_name=path.name,
-                                        mime="text/csv",
-                                        use_container_width=True,
-                                        key=f"raw_dl_{stem}",
-                                    )
-
-                        # ── Auto-process through Claude cleaning pipeline ───────
-                        st.divider()
-                        with st.spinner(
-                            "Claude is reading and normalising the messy files — "
-                            "this may take 30–60s on first run..."
-                        ):
-                            try:
-                                raw_tables = get_generated_raw_tables()
-                                if not raw_tables:
-                                    st.error("No raw tables found to process.")
-                                else:
-                                    cleaned = {}
-                                    proc_log = []
-
-                                    for stem, csv_path in sorted(raw_tables.items()):
-                                        # Guess dataset type from filename stem
-                                        # e.g. "customers_raw" → "customers"
-                                        guessed_type = stem.replace("_raw", "")
-                                        dataset_type = (
-                                            guessed_type
-                                            if guessed_type in DATASET_OPTIONS
-                                            else AUTO_DETECT
-                                        )
-
-                                        try:
-                                            with open(csv_path, "rb") as fobj:
-                                                df, method, det_type, msg = process_file(
-                                                    fobj, csv_path.name, dataset_type
-                                                )
-
-                                            if det_type in cleaned:
-                                                cleaned[det_type] = pd.concat(
-                                                    [cleaned[det_type], df],
-                                                    ignore_index=True
-                                                ).drop_duplicates()
-                                            else:
-                                                cleaned[det_type] = df
-
-                                            log("DATA_CLEAN", details={
-                                                "filename": csv_path.name,
-                                                "method": method,
-                                                "detected_type": det_type,
-                                                "rows": len(df),
-                                            })
-                                            proc_log.append({
-                                                "File": csv_path.name,
-                                                "Dataset": det_type,
-                                                "Method": method,
-                                                "Rows": len(df),
-                                                "Status": "OK",
-                                            })
-                                        except Exception as file_err:
-                                            proc_log.append({
-                                                "File": csv_path.name,
-                                                "Dataset": dataset_type,
-                                                "Method": "error",
-                                                "Rows": 0,
-                                                "Status": str(file_err)[:80],
-                                            })
-
-                                    if proc_log:
-                                        st.markdown("**Claude cleaning results:**")
-                                        st.dataframe(
-                                            pd.DataFrame(proc_log),
-                                            use_container_width=True,
-                                            hide_index=True,
-                                        )
-
-                                    if cleaned and "customers" in cleaned:
-                                        tmp_dir = save_to_temp(cleaned)
-                                        engine_obj, customers_df_new = load_engine(tmp_dir)
-
-                                        if (
-                                            engine_obj is not None
-                                            and customers_df_new is not None
-                                            and len(customers_df_new) > 0
-                                        ):
-                                            st.session_state.kyc_engine = engine_obj
-                                            st.session_state.customers_df = customers_df_new
-                                            st.session_state.engines_initialized = True
-                                            st.session_state.data_dir = tmp_dir
-                                            st.session_state.batch_results = None
-                                            st.session_state.data_source_label = (
-                                                f"Synthetic Portfolio — "
-                                                f"Claude-cleaned ({', '.join(cleaned.keys())})"
-                                            )
-                                            _seed_structured_provenance()
-                                            discrepancy_rows = _collect_discrepancy_report()
-                                            st.session_state.latest_discrepancy_report = discrepancy_rows
-                                            n_loaded = len(customers_df_new)
-                                            st.success(
-                                                f"Pipeline complete — Claude normalised "
-                                                f"{len(raw_tables)} messy files, "
-                                                f"{n_loaded} customers loaded into engine. "
-                                                f"Go to **Batch Results** to evaluate."
-                                            )
-                                            log("ENGINE_RELOAD", details={
-                                                "source": "synthetic_portfolio_claude_cleaned",
-                                                "customers": n_loaded,
-                                                "datasets": list(cleaned.keys()),
-                                                "generated_by": user["username"],
-                                            })
-                                            st.rerun()
-                                        else:
-                                            st.error(
-                                                "Engine could not initialise. "
-                                                "Check that customers table has a customer_id column."
-                                            )
-                                    else:
-                                        st.warning(
-                                            f"Cleaning produced: {list(cleaned.keys())}. "
-                                            "No customers table found — check the results above."
-                                        )
-
-                            except Exception as _clean_err:
-                                import traceback
-                                st.error(
-                                    f"Cleaning pipeline error: {_clean_err}\n\n"
-                                    f"```\n{traceback.format_exc()}\n```"
-                                )
-
-                    except Exception as e:
-                        st.error(f"Generation failed: {e}")
-
-            if st.session_state.get("last_generated_manifest_path"):
-                st.divider()
-                st.caption(
-                    f"Last manifest: `{st.session_state['last_generated_manifest_path']}`"
-                )
-        touch()
-        st.markdown("### Generate Synthetic KYC Portfolio")
-        st.markdown(
-            "Generate a fresh synthetic portfolio of KYC customers for demo and testing purposes. "
-            "Once generated, go to Data Management to load the output files into the engine."
-        )
-
-        if not PORTFOLIO_GENERATOR_AVAILABLE:
-            st.error("Portfolio generator not available. Ensure the benchmarks package is installed.")
-        else:
-            portfolio_size = st.number_input(
-                "Number of synthetic customers to generate",
-                min_value=5, max_value=500, value=30, step=5,
-                help="Controls how many synthetic KYC cases will be generated.",
-                key="demo_portfolio_size_input",
-            )
-
-            if st.button("Generate Fresh Portfolio", type="primary"):
-                touch()
-                with st.spinner(f"Generating {int(portfolio_size)} synthetic customers..."):
-                    try:
-                        manifest_path = generate_and_get_manifest_path(size=int(portfolio_size))
-                        st.session_state["last_generated_manifest_path"] = str(manifest_path)
-                        log("DATA_CLEAN", details={
-                            "action": "synthetic_portfolio_generated",
-                            "size": int(portfolio_size),
-                            "manifest_path": str(manifest_path),
-                            "generated_by": user["username"],
-                        })
-                        st.success(f"Portfolio generated — {int(portfolio_size)} customers.")
-
-                        # Read the generated file for download
-                        manifest_path_obj = Path(manifest_path)
-                        if manifest_path_obj.exists():
-                            raw_jsonl = manifest_path_obj.read_text(encoding="utf-8")
-
-                            import csv, io as _io
-                            lines = [json.loads(l) for l in raw_jsonl.strip().splitlines() if l.strip()]
-                            if lines:
-                                csv_buf = _io.StringIO()
-                                all_fields = list(dict.fromkeys(k for line in lines for k in line.keys()))
-                                writer = csv.DictWriter(csv_buf, fieldnames=all_fields, extrasaction="ignore")
-                                writer.writeheader()
-                                writer.writerows(lines)
-                                csv_bytes = csv_buf.getvalue().encode("utf-8")
-                            else:
-                                csv_bytes = b""
-
-                            col_a, col_b = st.columns(2)
-                            with col_a:
-                                st.download_button(
-                                    label="Download Manifest (.jsonl)",
-                                    data=raw_jsonl.encode("utf-8"),
-                                    file_name=f"kyc_portfolio_{int(portfolio_size)}_customers.jsonl",
-                                    mime="application/json",
-                                    use_container_width=True,
-                                )
-                            with col_b:
-                                st.download_button(
-                                    label="Download as CSV",
-                                    data=csv_bytes,
-                                    file_name=f"kyc_portfolio_{int(portfolio_size)}_customers.csv",
-                                    mime="text/csv",
-                                    use_container_width=True,
-                                )
-
-                            st.caption(f"File also saved locally to: `{manifest_path_obj}`")
-                        else:
-                            st.warning("File generated but could not be read for download.")
-
-                        st.markdown("Go to the **Data Management** tab to upload and load these files into the engine.")
-                    except Exception as e:
-                        st.error(f"Generation failed: {e}")
-
-            if "last_generated_manifest_path" in st.session_state and st.session_state["last_generated_manifest_path"]:
-                st.divider()
-                st.caption(f"Last generated manifest: `{st.session_state['last_generated_manifest_path']}`")
-
-    # ════════════════════════════════════════════════════════
     # TAB 8: AUDIT TRAIL
-    # TAB 9: AUDIT TRAIL
     # ════════════════════════════════════════════════════════
     with tab8:
         touch()
