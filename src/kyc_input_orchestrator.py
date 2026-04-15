@@ -11,6 +11,7 @@ Uses:
 
 from pathlib import Path
 from typing import Dict, List, Any, Union
+import sys
 import pandas as pd
 import json
 import logging
@@ -49,8 +50,6 @@ class KYCInputOrchestrator:
         self.merged_data = {}
         
         try:
-            import sys
-            
             src_path = str(self.project_root / 'src')
             if src_path not in sys.path:
                 sys.path.insert(0, src_path)

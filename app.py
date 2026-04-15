@@ -11,6 +11,8 @@ import os
 import sys
 import tempfile
 import uuid
+import zipfile
+import hashlib
 import base64
 from pathlib import Path
 from datetime import datetime, timezone
@@ -35,6 +37,8 @@ ACCEPTED_TYPES = ["csv", "xlsx", "xls", "json", "png", "jpg", "jpeg", "tiff", "b
 DATASET_OPTIONS = ["customers", "screenings", "id_verifications", "transactions", "documents", "beneficial_ownership"]
 AUTO_DETECT = "Auto-detect (AI classifies)"
 LOW_CONFIDENCE_THRESHOLD = 0.6
+DEFAULT_SLA_AMBER_DAYS = 3
+DEFAULT_SLA_RED_DAYS = 7
 
 KYC_SCHEMAS_HINT = {
     "customers": "customer_id, entity_type, jurisdiction, risk_rating, account_open_date, last_kyc_review_date, country_of_origin",
@@ -192,6 +196,13 @@ _DEFAULTS = {
     "data_dir": None, "batch_results": None, "batch_id": None, "batch_run_at": None,
     "customer_history": {},
     "data_source_label": None,
+    "case_sla_amber_days": DEFAULT_SLA_AMBER_DAYS,
+    "case_sla_red_days": DEFAULT_SLA_RED_DAYS,
+    "latest_export_package": None,
+    "provenance_store": None,
+    "dirty_customers": set(),
+    "ocr_analysis_cache": {},
+    "latest_discrepancy_report": None,
 }
 for k, v in _DEFAULTS.items():
     if k not in st.session_state:
@@ -210,6 +221,426 @@ def log(action_type, details=None, customer_id=None, batch_id=None, snapshot=Non
 
 def touch():
     st.session_state.last_activity = datetime.now(timezone.utc)
+
+
+def _ensure_runtime_action_types():
+    """Allow app-level workflow actions without editing audit_logger.py."""
+    try:
+        sys.path.insert(0, str(Path.cwd() / "src"))
+        from audit_logger import ACTION_TYPES
+        ACTION_TYPES.setdefault("CASE_CLOSED", "Manager/Admin closed a customer case")
+    except Exception:
+        pass
+
+
+def _get_provenance_store():
+    if st.session_state.provenance_store is None:
+        sys.path.insert(0, str(Path.cwd() / "src"))
+        from data_provenance import CustomerProvenance
+        st.session_state.provenance_store = CustomerProvenance()
+    return st.session_state.provenance_store
+
+
+def _format_conf_pct(conf):
+    if conf is None or pd.isna(conf):
+        return ""
+    return f"{int(round(float(conf) * 100))}%"
+
+
+def _seed_structured_provenance():
+    """Seed user-provided structured fields into provenance once."""
+    if not st.session_state.engines_initialized:
+        return
+    prov = _get_provenance_store()
+    engine = st.session_state.kyc_engine
+    if engine is None or engine.customers is None or len(engine.customers) == 0:
+        return
+
+    datasets = [engine.customers, engine.id_verifications, engine.screenings, engine.transactions, engine.beneficial_owners]
+    for df in datasets:
+        if df is None or len(df) == 0 or "customer_id" not in df.columns:
+            continue
+        for _, row in df.iterrows():
+            cid = str(row.get("customer_id", "")).strip()
+            if not cid:
+                continue
+            for field in df.columns:
+                if field == "customer_id":
+                    continue
+                val = row.get(field)
+                if pd.isna(val) or str(val).strip() == "":
+                    continue
+                if not prov.get_field_history(cid, field):
+                    prov.set_field(cid, field, val, source="User-Provided")
+
+
+def _collect_discrepancy_report():
+    prov = _get_provenance_store()
+    rows = []
+    customer_ids = prov.get_customer_ids()
+    for cid in customer_ids:
+        disc = prov.detect_discrepancies(cid)
+        if not disc:
+            continue
+        fields = []
+        for d in disc:
+            field = d["field_name"]
+            fields.append(field)
+            rows.append({
+                "customer_id": cid,
+                "field": field,
+                "values_by_source": json.dumps(d["values_by_source"], default=str),
+            })
+        log("FLAG_RAISED", customer_id=cid, details={"reason": "data_discrepancy", "fields": sorted(set(fields))})
+    return rows
+
+
+def _customer_in_engine(customer_id: str) -> bool:
+    if not st.session_state.engines_initialized or st.session_state.customers_df is None:
+        return False
+    cdf = st.session_state.customers_df
+    if "customer_id" not in cdf.columns:
+        return False
+    return str(customer_id) in set(cdf["customer_id"].astype(str).tolist())
+
+
+def _record_ocr_analysis_provenance(customer_id: str, analysis: dict, filename: str):
+    if not customer_id:
+        return []
+    prov = _get_provenance_store()
+    written = []
+    for k, v in analysis.items():
+        if k.endswith("_citation") or k.endswith("_confidence") or k in ("meta", "compliance_flags", "risk_indicators", "discrepancies", "extraction_summary"):
+            continue
+        if v is None or (isinstance(v, str) and not v.strip()):
+            continue
+        conf = analysis.get(f"{k}_confidence")
+        prov.set_field(customer_id, k, v, source="OCR-Extracted", source_file=filename, confidence=conf)
+        written.append({"field": k, "value": v, "confidence": conf})
+    return written
+
+
+def _update_single_customer_records(customer_id: str, doc_type: str, analysis: dict):
+    engine = st.session_state.kyc_engine
+    updated_fields = []
+    cid = str(customer_id)
+    now_date = datetime.now(timezone.utc).date().isoformat()
+
+    def _upsert(df, values: dict):
+        nonlocal updated_fields
+        if df is None:
+            return
+        for col in values.keys():
+            if col not in df.columns:
+                df[col] = None
+        match_idx = df.index[df["customer_id"].astype(str) == cid].tolist() if "customer_id" in df.columns else []
+        if match_idx:
+            idx = match_idx[0]
+            for col, val in values.items():
+                if val is not None and str(val).strip() != "":
+                    df.at[idx, col] = val
+                    updated_fields.append(col)
+        else:
+            row = {"customer_id": cid}
+            row.update({k: v for k, v in values.items() if v is not None and str(v).strip() != ""})
+            df.loc[len(df)] = row
+            updated_fields.extend(list(row.keys()))
+
+    identity_values = {
+        "document_type": "IDENTITY_DOCUMENT",
+        "document_number": analysis.get("document_number"),
+        "issue_date": analysis.get("issue_date"),
+        "expiry_date": analysis.get("expiry_date"),
+        "verification_date": now_date,
+        "document_status": "VERIFIED",
+    }
+    address_values = {
+        "jurisdiction": analysis.get("address"),
+        "country_of_origin": analysis.get("nationality"),
+    }
+
+    if "identity" in doc_type.lower() or "passport" in doc_type.lower():
+        _upsert(engine.id_verifications, identity_values)
+    elif "proof of address" in doc_type.lower():
+        _upsert(engine.customers, address_values)
+    else:
+        _upsert(engine.id_verifications, identity_values)
+        _upsert(engine.customers, address_values)
+
+    if engine.customers is not None and "customer_id" in engine.customers.columns:
+        st.session_state.customers_df = engine.customers.copy()
+    return sorted(set(updated_fields))
+
+
+def _get_provenance_table(customer_id: str):
+    prov = _get_provenance_store()
+    rows = []
+    engine = st.session_state.kyc_engine
+    base_fields = {}
+    if engine and engine.customers is not None and "customer_id" in engine.customers.columns:
+        match = engine.customers[engine.customers["customer_id"].astype(str) == str(customer_id)]
+        if not match.empty:
+            base_fields = match.iloc[0].to_dict()
+    latest = prov.get_all_fields(customer_id)
+    all_fields = sorted(set(base_fields.keys()) | set(latest.keys()))
+    for field in all_fields:
+        tag = latest.get(field)
+        if tag:
+            rows.append({
+                "Field": field,
+                "Current Value": tag.value,
+                "Source": tag.source or "User-Provided",
+                "Source File": tag.source_file or "",
+                "Confidence": _format_conf_pct(tag.confidence),
+                "Last Updated": tag.timestamp,
+            })
+        else:
+            val = base_fields.get(field, "")
+            if pd.isna(val):
+                val = ""
+            rows.append({
+                "Field": field,
+                "Current Value": val,
+                "Source": "User-Provided",
+                "Source File": "",
+                "Confidence": "",
+                "Last Updated": "",
+            })
+    return rows
+
+
+def _parse_iso(ts: str):
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _format_ago(ts: str) -> str:
+    dt = _parse_iso(ts)
+    if not dt:
+        return "unknown"
+    delta = datetime.now(timezone.utc) - dt
+    mins = int(delta.total_seconds() // 60)
+    if mins < 1:
+        return "just now"
+    if mins < 60:
+        return f"{mins}m ago"
+    hrs = mins // 60
+    if hrs < 24:
+        return f"{hrs}h ago"
+    return f"{hrs // 24}d ago"
+
+
+def _get_current_customer_state(customer_id: str):
+    disposition, score = "N/A", "N/A"
+    history = st.session_state.customer_history.get(customer_id, [])
+    if history:
+        disposition = history[-1].get("disposition", disposition)
+        score = history[-1].get("overall_score", score)
+    elif st.session_state.batch_results is not None:
+        rdf = st.session_state.batch_results
+        row = rdf[rdf["customer_id"].astype(str) == str(customer_id)]
+        if not row.empty:
+            disposition = row.iloc[0].get("disposition", disposition)
+            score = row.iloc[0].get("overall_score", score)
+    return disposition, score
+
+
+def _get_pending_clear_approvals(logger):
+    if not logger:
+        return []
+    pending = {}
+    for e in logger.events:
+        cid = e.get("customer_id")
+        action = e.get("action_type")
+        if not cid:
+            continue
+        if action == "CLEAR_PROPOSED":
+            pending[cid] = e
+        elif action in ("CLEAR_APPROVED", "CLEAR_REJECTED"):
+            pending.pop(cid, None)
+    rows = []
+    for cid, e in pending.items():
+        details = e.get("details", {})
+        disposition, score = _get_current_customer_state(cid)
+        rows.append({
+            "customer_id": cid,
+            "proposed_by": e.get("username", ""),
+            "reason_code": details.get("reason_code", ""),
+            "note": details.get("note", ""),
+            "proposed_at": e.get("timestamp"),
+            "proposed_at_ago": _format_ago(e.get("timestamp")),
+            "disposition": disposition,
+            "score": score,
+            "event_id": e.get("event_id"),
+        })
+    return sorted(rows, key=lambda x: x.get("proposed_at", ""))
+
+
+def _sla_badge(case_opened_at: str, case_status: str) -> str:
+    if case_status == "Closed":
+        return "🟢 On time"
+    opened = _parse_iso(case_opened_at)
+    if not opened:
+        return "⚪ Unknown"
+    age_days = (datetime.now(timezone.utc) - opened).total_seconds() / 86400
+    amber = st.session_state.case_sla_amber_days
+    red = st.session_state.case_sla_red_days
+    if age_days >= red:
+        return f"🔴 {int(age_days)}d open"
+    if age_days >= amber:
+        return f"🟠 {int(age_days)}d open"
+    return f"🟢 {int(age_days)}d open"
+
+
+def _build_cases(logger):
+    if not logger:
+        return []
+    events = logger.events
+    trigger_actions = {"FLAG_RAISED", "CLEAR_PROPOSED", "CUSTOMER_ESCALATED", "CLEAR_APPROVED", "CLEAR_REJECTED"}
+    close_actions = {"CASE_CLOSED"}
+    by_customer = {}
+    for e in events:
+        cid = e.get("customer_id")
+        if not cid:
+            continue
+        by_customer.setdefault(cid, []).append(e)
+
+    cases = []
+    for cid, history in by_customer.items():
+        history = sorted(history, key=lambda x: x.get("timestamp", ""))
+        has_trigger = False
+        opened_event = None
+        for e in history:
+            action = e.get("action_type")
+            if action in trigger_actions:
+                has_trigger = True
+                opened_event = opened_event or e
+            if action == "CUSTOMER_VIEW":
+                disp = (e.get("snapshot") or {}).get("disposition")
+                if disp in ("REJECT", "REVIEW"):
+                    has_trigger = True
+                    opened_event = opened_event or e
+        if not has_trigger:
+            continue
+
+        latest = history[-1]
+        disposition, score = _get_current_customer_state(cid)
+        if disposition == "N/A":
+            for e in reversed(history):
+                disp = (e.get("snapshot") or {}).get("disposition")
+                if disp:
+                    disposition = disp
+                    score = (e.get("snapshot") or {}).get("overall_score", score)
+                    break
+        has_closed = any(e.get("action_type") in close_actions for e in history)
+        has_pending = any(e.get("action_type") == "CLEAR_PROPOSED" for e in history) and not any(
+            e.get("action_type") in ("CLEAR_APPROVED", "CLEAR_REJECTED") for e in history
+        )
+        case_status = "Closed" if has_closed else ("Pending Approval" if has_pending else "Open")
+        opened_at = opened_event.get("timestamp") if opened_event else latest.get("timestamp")
+        case_id = f"CASE-{cid}-{(_parse_iso(opened_at) or datetime.now(timezone.utc)).strftime('%Y%m%d')}"
+
+        case_rows = []
+        for e in history:
+            case_rows.append({
+                "timestamp": e.get("timestamp"),
+                "action": e.get("action_type"),
+                "user": e.get("username"),
+                "role": e.get("role"),
+                "details": json.dumps(e.get("details", {}), default=str),
+            })
+
+        cases.append({
+            "case_id": case_id,
+            "customer_id": cid,
+            "current_disposition": disposition,
+            "current_score": score,
+            "case_status": case_status,
+            "opened_by": opened_event.get("username") if opened_event else latest.get("username"),
+            "opened_at": opened_at,
+            "case_history": case_rows,
+            "sla_badge": _sla_badge(opened_at, case_status),
+        })
+    return sorted(cases, key=lambda x: x["opened_at"], reverse=True)
+
+
+def _build_export_package(logger, user):
+    session_id = logger.session_id
+    batch_id = st.session_state.batch_id or "no_batch"
+    export_ts = datetime.now(timezone.utc)
+    export_ts_str = export_ts.strftime("%Y%m%d_%H%M%S")
+
+    files = {}
+    audit_payload = logger.finalize()
+    audit_name = f"audit_log_{session_id}.json"
+    files[audit_name] = json.dumps(audit_payload, indent=2, default=str)
+
+    batch_name = f"batch_results_{batch_id}.csv"
+    flagged_name = f"flagged_customers_{batch_id}.csv"
+    if st.session_state.batch_results is not None:
+        rdf = st.session_state.batch_results.copy()
+        batch_buf = io.StringIO()
+        rdf.to_csv(batch_buf, index=False)
+        files[batch_name] = batch_buf.getvalue()
+        flagged = rdf[rdf["disposition"].isin(["REJECT", "REVIEW"])].copy()
+        flag_buf = io.StringIO()
+        if flagged.empty:
+            flag_buf.write("note\nNo REJECT or REVIEW customers in latest batch.\n")
+        else:
+            include_cols = [c for c in ["customer_id", "disposition", "overall_score", "rationale"] if c in flagged.columns]
+            flagged[include_cols].to_csv(flag_buf, index=False)
+        files[flagged_name] = flag_buf.getvalue()
+        total_customers = len(rdf)
+    else:
+        files[batch_name] = "note\nNo batch evaluation was run in this session.\n"
+        files[flagged_name] = "note\nNo batch evaluation was run in this session.\n"
+        total_customers = 0
+
+    metadata = {
+        "session_id": session_id,
+        "user_id": user["user_id"],
+        "username": user["username"],
+        "role": user["role"],
+        "session_start_time": logger.session_start,
+        "export_timestamp": export_ts.isoformat(),
+        "ruleset_version_active": RULESET_VERSION,
+        "prompt_versions_active": {pid: p.get("version", "unknown") for pid, p in PROMPTS.items()},
+        "total_audit_events": logger.event_count(),
+        "total_customers_evaluated_in_batch": total_customers,
+    }
+    files["session_metadata.json"] = json.dumps(metadata, indent=2, default=str)
+
+    verification_hash = hashlib.sha256(
+        (
+            str(audit_payload.get("previous_session_hash", ""))
+            + json.dumps(audit_payload.get("events", []), sort_keys=True, default=str)
+        ).encode("utf-8")
+    ).hexdigest()
+    files["README.txt"] = (
+        "KYC Compliance Export Package\n\n"
+        f"- {audit_name}: Finalized session audit log with appended session_hash.\n"
+        f"- {batch_name}: Latest batch results (or note when no batch exists).\n"
+        f"- {flagged_name}: Batch subset where disposition is REJECT or REVIEW.\n"
+        "- session_metadata.json: Session and export metadata.\n"
+        "- README.txt: Package guidance.\n\n"
+        "Audit verification:\n"
+        "Recompute SHA-256 of (previous_session_hash + sorted JSON events) and compare to session_hash.\n"
+        f"Computed hash for this export: {verification_hash}\n"
+    )
+
+    zbuf = io.BytesIO()
+    with zipfile.ZipFile(zbuf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for name, content in files.items():
+            zf.writestr(name, content if isinstance(content, str) else str(content))
+    zbuf.seek(0)
+
+    manifest = [{"file": name, "size_bytes": len(content.encode("utf-8"))} for name, content in files.items()]
+    zip_name = f"kyc_export_{user['username']}_{export_ts_str}.zip"
+    return zbuf.getvalue(), zip_name, manifest
 
 # ── Timeout ───────────────────────────────────────────────────────────────────
 
@@ -332,7 +763,7 @@ def read_structured(file_obj, filename):
         return pd.DataFrame([content])
     raise ValueError(f"Unsupported: {ext}")
 
-def ocr_file(file_bytes, filename):
+def run_ocr(file_bytes, filename):
     from google.cloud import vision as gv
     client = gv.ImageAnnotatorClient()
     if Path(filename).suffix.lower() == ".pdf":
@@ -404,7 +835,7 @@ def process_file(file_obj, filename, dataset_type):
         file_bytes = file_obj.read()
         log("OCR_RUN", prompt_id="kyc-analysis-v1.0",
             details={"filename": filename, "bytes": len(file_bytes)})
-        raw_text = ocr_file(file_bytes, filename)
+        raw_text = run_ocr(file_bytes, filename)
         if not raw_text or len(raw_text.strip()) < 20:
             raise ValueError("No usable text from OCR.")
         if dataset_type == AUTO_DETECT:
@@ -475,6 +906,7 @@ def _try_autoload_engine():
             st.session_state.engines_initialized = True
             st.session_state.data_dir = default_dir
             st.session_state.data_source_label = "Data Clean/ (default)"
+            _seed_structured_provenance()
             return
 
     # 2. Temp dir from previous upload/clean in this deployment
@@ -487,6 +919,7 @@ def _try_autoload_engine():
             st.session_state.engines_initialized = True
             st.session_state.data_dir = tmp_dir
             st.session_state.data_source_label = "Previously cleaned data (auto-loaded)"
+            _seed_structured_provenance()
 
 
 # ╔══════════════════════════════════════════════════════════════════════════════
@@ -497,6 +930,9 @@ def render_main():
     user = st.session_state.current_user
     role = user["role"]
     logger = get_logger()
+    _ensure_runtime_action_types()
+    _get_provenance_store()
+    _seed_structured_provenance()
 
     # Inactivity warning banner (shown on next interaction after 13 min)
     if st.session_state.timeout_warning_logged:
@@ -557,9 +993,9 @@ def render_main():
 
     st.divider()
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "Individual Evaluation", "Batch Results", "Data Management",
-        "Document OCR & AI", "System Info", "Audit Trail",
+        "Document OCR & AI", "System Info", "Approval Queue", "Cases", "Audit Trail",
     ])
 
     # ════════════════════════════════════════════════════════
@@ -727,6 +1163,29 @@ def render_main():
                                           height=300, margin=dict(l=10, r=10, t=20, b=10),
                                           plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
                         st.plotly_chart(fig, use_container_width=True)
+
+                        with st.expander("Field Provenance & Change History", expanded=False):
+                            touch()
+                            prov_rows = _get_provenance_table(cid)
+                            if prov_rows:
+                                st.dataframe(pd.DataFrame(prov_rows), use_container_width=True, hide_index=True)
+                            else:
+                                st.info("No provenance data for this customer yet.")
+
+                            discrepancies = _get_provenance_store().detect_discrepancies(cid)
+                            if discrepancies:
+                                st.warning("Discrepancies detected across data sources:")
+                                for d in discrepancies:
+                                    field = d.get("field_name", "")
+                                    vals = d.get("values_by_source", {})
+                                    user_val = vals.get("User-Provided", {}).get("value")
+                                    ocr_val = vals.get("OCR-Extracted", {}).get("value")
+                                    ocr_file = vals.get("OCR-Extracted", {}).get("source_file", "")
+                                    ocr_conf = _format_conf_pct(vals.get("OCR-Extracted", {}).get("confidence"))
+                                    st.markdown(
+                                        f"- **{field}**: User-Provided='{user_val}' vs OCR-Extracted='{ocr_val}' "
+                                        f"(from {ocr_file or 'N/A'}, {ocr_conf or 'N/A'} confidence)"
+                                    )
 
                         # Remediation (for Review or Reject)
                         if disposition in ("REJECT", "REVIEW") and role in ("Analyst", "Manager", "Admin"):
@@ -973,34 +1432,52 @@ def render_main():
                 bar = st.progress(0)
                 txt = st.empty()
                 total = len(batch_files)
-
-                for i, (idx, (fo, dtype)) in enumerate(file_type_map.items()):
-                    fn = fo.name
-                    txt.text(f"Processing {fn} ({i+1}/{total})")
-                    log("FILE_UPLOAD", details={"filename": fn, "size": fo.size,
-                                                "type_selected": dtype})
-                    try:
-                        df, method, det_type, msg = process_file(fo, fn, dtype)
-                        if det_type in cleaned:
-                            cleaned[det_type] = pd.concat(
-                                [cleaned[det_type], df], ignore_index=True
-                            ).drop_duplicates()
-                        else:
-                            cleaned[det_type] = df
-                        log("DATA_CLEAN", details={"filename": fn, "method": method,
-                                                    "detected_type": det_type, "rows": len(df)})
-                        st.success(f"{'OCR+AI' if method == 'ocr+llm' else 'Direct'}: "
-                                   f"{fn} → `{det_type}` — {msg}")
-                        proc_log.append({"File": fn, "Dataset": det_type,
-                                         "Method": method, "Rows": len(df), "Status": "OK"})
-                    except Exception as e:
-                        st.error(f"{fn}: {e}")
-                        proc_log.append({"File": fn, "Dataset": dtype,
-                                         "Method": "error", "Rows": 0, "Status": str(e)[:80]})
-                    bar.progress((i + 1) / total)
+                st.markdown("#### Step 1: Claude is reading and normalising your data")
+                with st.spinner("Running data cleaning pipeline..."):
+                    for i, (idx, (fo, dtype)) in enumerate(file_type_map.items()):
+                        fn = fo.name
+                        txt.text(f"Processing {fn} ({i+1}/{total})")
+                        log("FILE_UPLOAD", details={"filename": fn, "size": fo.size,
+                                                    "type_selected": dtype})
+                        try:
+                            df, method, det_type, msg = process_file(fo, fn, dtype)
+                            if det_type in cleaned:
+                                cleaned[det_type] = pd.concat(
+                                    [cleaned[det_type], df], ignore_index=True
+                                ).drop_duplicates()
+                            else:
+                                cleaned[det_type] = df
+                            log("DATA_CLEAN", details={"filename": fn, "method": method,
+                                                        "detected_type": det_type, "rows": len(df)})
+                            proc_log.append({
+                                "File": fn,
+                                "Dataset type detected": det_type,
+                                "Rows loaded": len(df),
+                                "Method": "claude_structured" if method == "ocr+llm" else "fallback_pandas",
+                                "Status": "OK",
+                            })
+                        except Exception as e:
+                            proc_log.append({
+                                "File": fn,
+                                "Dataset type detected": dtype if dtype != AUTO_DETECT else "auto_detect",
+                                "Rows loaded": 0,
+                                "Method": "error",
+                                "Status": f"FAILED: {str(e)[:120]}",
+                            })
+                        bar.progress((i + 1) / total)
 
                 bar.empty()
                 txt.empty()
+
+                if proc_log:
+                    proc_df = pd.DataFrame(proc_log)
+                    st.dataframe(proc_df, use_container_width=True, hide_index=True)
+                    failed_rows = proc_df[proc_df["Status"].str.startswith("FAILED", na=False)]
+                    if not failed_rows.empty:
+                        for _, row in failed_rows.iterrows():
+                            st.error(f"{row['File']}: {row['Status']}")
+                    else:
+                        st.success("All files were processed cleanly through the cleaning pipeline.")
 
                 if cleaned:
                     tmp_dir = save_to_temp(cleaned)
@@ -1012,6 +1489,9 @@ def render_main():
                         st.session_state.data_dir = tmp_dir
                         st.session_state.batch_results = None
                         st.session_state.data_source_label = f"Uploaded & cleaned ({', '.join(cleaned.keys())})"
+                        _seed_structured_provenance()
+                        discrepancy_rows = _collect_discrepancy_report()
+                        st.session_state.latest_discrepancy_report = discrepancy_rows
                         log("ENGINE_RELOAD", details={"customers": len(customers),
                                                        "datasets": list(cleaned.keys())})
                         st.success(f"Engine loaded — {len(customers)} customers ready.")
@@ -1020,8 +1500,25 @@ def render_main():
                         st.warning("Engine could not initialize. Ensure customers dataset "
                                    "has a customer_id column.")
 
-                if proc_log:
-                    st.dataframe(pd.DataFrame(proc_log), use_container_width=True, hide_index=True)
+        if st.session_state.latest_discrepancy_report is not None:
+            touch()
+            dr = st.session_state.latest_discrepancy_report
+            if dr:
+                st.divider()
+                st.markdown("#### Data Discrepancy Summary")
+                disc_df = pd.DataFrame(dr)
+                st.warning(f"{disc_df['customer_id'].nunique()} customer(s) with discrepancies detected.")
+                st.dataframe(disc_df, use_container_width=True, hide_index=True)
+                buf_disc = io.StringIO()
+                disc_df.to_csv(buf_disc, index=False)
+                st.download_button(
+                    "Download Discrepancy CSV",
+                    data=buf_disc.getvalue(),
+                    file_name=f"discrepancies_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                )
+            else:
+                st.info("No data discrepancies detected in current provenance records.")
 
         st.divider()
         st.markdown("#### Download Cleaned Files")
@@ -1062,7 +1559,7 @@ def render_main():
             cid_ocr = st.text_input("Customer ID (for linking)", placeholder="C00001")
         with oc2:
             if uploaded_img:
-                st.image(uploaded_img, use_column_width=True)
+                st.image(uploaded_img, use_container_width=True)
 
         if st.button("Run OCR + AI Analysis", type="primary") and uploaded_img:
             touch()
@@ -1074,7 +1571,7 @@ def render_main():
                     fbytes = uploaded_img.read()
                     log("OCR_RUN", customer_id=cid_ocr or None, prompt_id="kyc-analysis-v1.0",
                         details={"filename": uploaded_img.name})
-                    extracted = ocr_file(fbytes, uploaded_img.name)
+                    extracted = run_ocr(fbytes, uploaded_img.name)
                     if not extracted or len(extracted.strip()) < 10:
                         st.error("No text extracted. Try a clearer image.")
                     else:
@@ -1100,7 +1597,26 @@ def render_main():
                                     system=system,
                                     messages=[{"role": "user", "content": msg}]
                                 )
-                                analysis = json.loads(resp.content[0].text.strip())
+                                raw_response = resp.content[0].text.strip()
+
+                                # Strip markdown code fences if present
+                                if raw_response.startswith("```"):
+                                    lines = raw_response.split("\n")
+                                    # Remove first line (```json or ```) and last line (```) if present
+                                    raw_response = "\n".join(
+                                        lines[1:-1] if lines and lines[-1].strip() == "```" else lines[1:]
+                                    )
+
+                                # Strip any remaining whitespace
+                                raw_response = raw_response.strip()
+
+                                # Extract only the JSON object if extra content wraps it
+                                start = raw_response.find("{")
+                                end = raw_response.rfind("}") + 1
+                                if start != -1 and end > start:
+                                    raw_response = raw_response[start:end]
+
+                                analysis = json.loads(raw_response)
                                 conf = analysis.get("overall_confidence", 0)
 
                                 am1, am2, am3 = st.columns(3)
@@ -1129,18 +1645,45 @@ def render_main():
                                     ("nationality", "Nationality", "default"),
                                     ("issuing_authority", "Issuing Authority", "default"),
                                 ]
-                                rows = []
+                                extracted_rows = []
                                 for key, label, mask_type in field_pairs:
+                                    conf_val = float(analysis.get(f"{key}_confidence", 0) or 0)
                                     val = analysis.get(key)
-                                    rows.append({
+                                    extracted_rows.append({
+                                        "field_key": key,
+                                        "mask_type": mask_type,
                                         "Field": label,
-                                        "Value": mask(val, mask_type) if val else "Not found",
-                                        "Citation": analysis.get(f"{key}_citation", ""),
-                                        "Confidence": f"{analysis.get(f'{key}_confidence', 0)*100:.0f}%",
+                                        "Extracted value": mask(val, mask_type) if val else "Not found",
+                                        "Confidence": conf_val,
                                     })
-                                st.markdown("#### Extracted Fields with Citations")
-                                st.dataframe(pd.DataFrame(rows), use_container_width=True,
-                                             hide_index=True)
+                                st.markdown("#### Extracted Fields")
+                                extracted_df = pd.DataFrame(extracted_rows)
+                                display_df = extracted_df[["Field", "Extracted value", "Confidence"]].copy()
+                                display_df["Confidence"] = display_df["Confidence"].map(lambda x: f"{x*100:.0f}%")
+                                low_conf_fields = [r for r in extracted_rows if r["Confidence"] < 0.75]
+
+                                def _highlight_low_confidence(row):
+                                    conf_pct = int(str(row["Confidence"]).replace("%", "") or 0)
+                                    if conf_pct < 75:
+                                        return ["background-color: #FFF3CD"] * len(row)
+                                    return [""] * len(row)
+
+                                st.dataframe(
+                                    display_df.style.apply(_highlight_low_confidence, axis=1),
+                                    use_container_width=True,
+                                    hide_index=True,
+                                )
+
+                                corrected_values = {}
+                                if low_conf_fields:
+                                    st.warning("Low-confidence fields detected (<75%). Review and correct before rescoring.")
+                                    for low in low_conf_fields:
+                                        field_key = low["field_key"]
+                                        corrected_values[field_key] = st.text_input(
+                                            f"{low['Field']} (correction)",
+                                            value=str(analysis.get(field_key) or ""),
+                                            key=f"ocr_correction_{cid_ocr}_{field_key}",
+                                        )
 
                                 for section, label, fn in [
                                     ("compliance_flags", "Compliance Flags", st.warning),
@@ -1170,6 +1713,77 @@ def render_main():
                                     file_name=f"ocr_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
                                     mime="application/json"
                                 )
+
+                                linked_cid = (cid_ocr or "").strip().upper()
+                                if linked_cid:
+                                    if st.button("Confirm and rescore", type="secondary"):
+                                        touch()
+                                        confirmed_analysis = dict(analysis)
+                                        for field_key, edited in corrected_values.items():
+                                            confirmed_analysis[field_key] = edited
+
+                                        written_fields = _record_ocr_analysis_provenance(
+                                            linked_cid, confirmed_analysis, uploaded_img.name
+                                        )
+                                        if _customer_in_engine(linked_cid):
+                                            st.session_state.dirty_customers.add(linked_cid)
+                                        st.session_state.ocr_analysis_cache[linked_cid] = {
+                                            "analysis": confirmed_analysis,
+                                            "filename": uploaded_img.name,
+                                            "doc_type": doc_type,
+                                            "written_fields": [w["field"] for w in written_fields],
+                                            "captured_at": datetime.now(timezone.utc).isoformat(),
+                                            "confirmed_fields": corrected_values,
+                                        }
+
+                                        before_score = None
+                                        before_disp = None
+                                        hist = st.session_state.customer_history.get(linked_cid, [])
+                                        if hist:
+                                            before_score = hist[-1].get("overall_score")
+                                            before_disp = hist[-1].get("disposition")
+
+                                        updated_fields = _update_single_customer_records(linked_cid, doc_type, confirmed_analysis)
+                                        rescored = st.session_state.kyc_engine.evaluate_customer(linked_cid)
+                                        after_score = rescored.get("overall_score")
+                                        after_disp = rescored.get("disposition")
+                                        st.session_state.dirty_customers.discard(linked_cid)
+
+                                        h_entry = {
+                                            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                            "evaluated_by": user["username"],
+                                            "overall_score": after_score,
+                                            "disposition": after_disp,
+                                            "aml_screening_score": rescored.get("aml_screening_score", 0),
+                                            "identity_verification_score": rescored.get("identity_verification_score", 0),
+                                            "account_activity_score": rescored.get("account_activity_score", 0),
+                                            "proof_of_address_score": rescored.get("proof_of_address_score", 0),
+                                            "beneficial_ownership_score": rescored.get("beneficial_ownership_score", 0),
+                                            "data_quality_score": rescored.get("data_quality_score", 0),
+                                        }
+                                        st.session_state.customer_history.setdefault(linked_cid, []).append(h_entry)
+
+                                        b1, b2 = st.columns(2)
+                                        b1.metric("Before Score / Disposition",
+                                                  f"{before_score if before_score is not None else 'N/A'} / {before_disp or 'N/A'}")
+                                        b2.metric("After Score / Disposition", f"{after_score} / {after_disp}")
+
+                                        log("ENGINE_RELOAD", customer_id=linked_cid, details={
+                                            "scope": "single_customer_rescore",
+                                            "doc_type": doc_type,
+                                            "source_file": uploaded_img.name,
+                                            "updated_fields": updated_fields,
+                                            "before_score": before_score,
+                                            "before_disposition": before_disp,
+                                            "after_score": after_score,
+                                            "after_disposition": after_disp,
+                                        })
+                                        if before_score is None:
+                                            st.success("Dataset updated and customer re-scored.")
+                                        elif after_score > before_score:
+                                            st.success("Case improved after OCR remediation and re-score.")
+                                        else:
+                                            st.warning("Case did not improve after OCR remediation; follow-up review is required.")
                             except Exception as e:
                                 st.error(f"AI analysis failed: {e}")
                 except Exception as e:
@@ -1211,9 +1825,156 @@ def render_main():
         """)
 
     # ════════════════════════════════════════════════════════
-    # TAB 6: AUDIT TRAIL
+    # TAB 6: APPROVAL QUEUE
     # ════════════════════════════════════════════════════════
     with tab6:
+        touch()
+        st.markdown("### Approval Queue")
+        if role not in ("Manager", "Admin"):
+            st.info("Approvals are handled by a Manager or Admin.")
+        else:
+            pending = _get_pending_clear_approvals(logger)
+            if not pending:
+                st.success("No pending clear approvals.")
+            else:
+                st.caption(f"{len(pending)} pending item(s) awaiting maker-checker approval.")
+                for idx, item in enumerate(pending):
+                    with st.container(border=True):
+                        st.markdown(
+                            f"**Customer:** `{item['customer_id']}`  \n"
+                            f"**Proposed by:** `{item['proposed_by']}`  \n"
+                            f"**Reason code:** {item['reason_code']}  \n"
+                            f"**Analyst note:** {item['note']}  \n"
+                            f"**Current disposition/score:** {item['disposition']} / {item['score']}  \n"
+                            f"**Proposed:** {item['proposed_at_ago']}"
+                        )
+                        manager_note = st.text_input(
+                            "Manager note (required)",
+                            key=f"approval_note_{idx}_{item['event_id']}",
+                        )
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            approve_disabled = user["username"] == item["proposed_by"]
+                            if st.button("Approve Clear", key=f"approve_{idx}_{item['event_id']}", disabled=approve_disabled):
+                                if approve_disabled:
+                                    st.error("Maker-checker: proposer cannot approve their own clear.")
+                                elif not manager_note.strip():
+                                    st.error("Manager note is required.")
+                                else:
+                                    touch()
+                                    log(
+                                        "CLEAR_APPROVED",
+                                        customer_id=item["customer_id"],
+                                        details={
+                                            "proposed_by": item["proposed_by"],
+                                            "reason_code": item["reason_code"],
+                                            "manager_note": manager_note,
+                                            "approved_by": user["username"],
+                                            "approved_at": datetime.now(timezone.utc).isoformat(),
+                                        },
+                                    )
+                                    st.success("Clear approved.")
+                                    st.rerun()
+                        with c2:
+                            if st.button("Reject Clear", key=f"reject_{idx}_{item['event_id']}"):
+                                if not manager_note.strip():
+                                    st.error("Manager note is required.")
+                                else:
+                                    touch()
+                                    log(
+                                        "CLEAR_REJECTED",
+                                        customer_id=item["customer_id"],
+                                        details={
+                                            "proposed_by": item["proposed_by"],
+                                            "reason_code": item["reason_code"],
+                                            "manager_note": manager_note,
+                                            "rejected_by": user["username"],
+                                            "rejected_at": datetime.now(timezone.utc).isoformat(),
+                                        },
+                                    )
+                                    st.success("Clear rejected.")
+                                    st.rerun()
+
+    # ════════════════════════════════════════════════════════
+    # TAB 7: CASES
+    # ════════════════════════════════════════════════════════
+    with tab7:
+        touch()
+        st.markdown("### Cases")
+        cfg1, cfg2 = st.columns(2)
+        with cfg1:
+            st.session_state.case_sla_amber_days = st.number_input(
+                "SLA amber threshold (days)",
+                min_value=1,
+                max_value=30,
+                value=int(st.session_state.case_sla_amber_days),
+                step=1,
+                key="sla_amber_input",
+            )
+        with cfg2:
+            st.session_state.case_sla_red_days = st.number_input(
+                "SLA red threshold (days)",
+                min_value=1,
+                max_value=60,
+                value=int(st.session_state.case_sla_red_days),
+                step=1,
+                key="sla_red_input",
+            )
+        cases = _build_cases(logger)
+        if not cases:
+            st.info("No cases generated yet in this session.")
+        else:
+            st.caption(f"{len(cases)} case(s) derived from session audit events.")
+            for c in cases:
+                with st.expander(f"{c['case_id']} · {c['customer_id']} · {c['case_status']} · {c['sla_badge']}", expanded=False):
+                    st.markdown(
+                        f"**Case ID:** `{c['case_id']}`  \n"
+                        f"**Customer ID:** `{c['customer_id']}`  \n"
+                        f"**Current disposition:** {c['current_disposition']}  \n"
+                        f"**Current score:** {c['current_score']}  \n"
+                        f"**Status:** {c['case_status']}  \n"
+                        f"**Opened by:** {c['opened_by']}  \n"
+                        f"**Opened at:** {c['opened_at']}  \n"
+                        f"**SLA aging:** {c['sla_badge']}"
+                    )
+                    st.markdown("**Case history (chronological):**")
+                    st.dataframe(pd.DataFrame(c["case_history"]), use_container_width=True, hide_index=True)
+
+                    note_key = f"case_note_{c['case_id']}"
+                    note_text = st.text_area("Add case note", key=note_key, placeholder="Write note and click Add Note.")
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        if role in ("Analyst", "Manager", "Admin"):
+                            if st.button("Add Note", key=f"add_note_{c['case_id']}"):
+                                if not note_text.strip():
+                                    st.error("Note is required.")
+                                else:
+                                    touch()
+                                    log("NOTE_ADDED", customer_id=c["customer_id"],
+                                        details={"case_id": c["case_id"], "note": note_text.strip()})
+                                    st.success("Case note added.")
+                                    st.rerun()
+                    with col_b:
+                        if role in ("Manager", "Admin") and c["case_status"] != "Closed":
+                            close_note = st.text_input(
+                                "Closure note (required)",
+                                key=f"close_note_{c['case_id']}",
+                                placeholder="Reason for closure",
+                            )
+                            if st.button("Close Case", key=f"close_case_{c['case_id']}"):
+                                if not close_note.strip():
+                                    st.error("Closure note is required.")
+                                else:
+                                    touch()
+                                    log("CASE_CLOSED", customer_id=c["customer_id"],
+                                        details={"case_id": c["case_id"], "note": close_note.strip()})
+                                    st.success("Case closed.")
+                                    st.rerun()
+
+    # ════════════════════════════════════════════════════════
+    # TAB 8: AUDIT TRAIL
+    # ════════════════════════════════════════════════════════
+    with tab8:
         touch()
         log("AUDIT_VIEWER_OPENED", details={"opened_by": user["username"]})
         st.markdown("### Audit Trail")
@@ -1247,6 +2008,33 @@ def render_main():
             st.markdown(f"**{len(filtered)} of {logger.event_count()} events**")
             st.dataframe(filtered, use_container_width=True, hide_index=True)
 
+            touch()
+            st.divider()
+            st.markdown("#### Data Provenance Summary")
+            prov = _get_provenance_store()
+            p_customers = prov.get_customer_ids()
+            if not p_customers:
+                st.info("No provenance data captured yet.")
+            else:
+                total_fields = 0
+                total_discrepancies = 0
+                for pcid in p_customers:
+                    total_fields += len(prov.get_all_fields(pcid))
+                    total_discrepancies += len(prov.detect_discrepancies(pcid))
+                ps1, ps2, ps3 = st.columns(3)
+                ps1.metric("Total Fields Tracked", total_fields)
+                ps2.metric("Customers with Provenance", len(p_customers))
+                ps3.metric("Total Discrepancies", total_discrepancies)
+
+                chosen = st.selectbox("View customer provenance history", p_customers, key="prov_customer_pick")
+                hist_rows = prov.get_customer_history_rows(chosen)
+                if hist_rows:
+                    show_df = pd.DataFrame(hist_rows)
+                    show_df["Confidence"] = show_df["Confidence"].apply(_format_conf_pct)
+                    st.dataframe(show_df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No provenance history rows for selected customer.")
+
             st.divider()
             v1, v2 = st.columns(2)
             with v1:
@@ -1269,6 +2057,36 @@ def render_main():
                     file_name=f"audit_{user['user_id']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
                     mime="application/json"
                 )
+
+            if role in ("Manager", "Admin"):
+                st.divider()
+                st.markdown("#### Export Package")
+                if st.button("Generate Export Package", type="primary"):
+                    touch()
+                    _, _, manifest = _build_export_package(logger, user)
+                    log("EXPORT_PACKAGE_CREATED", details={
+                        "created_by": user["username"],
+                        "files_included": manifest,
+                        "generated_at": datetime.now(timezone.utc).isoformat(),
+                    })
+                    export_bytes, export_name, manifest = _build_export_package(logger, user)
+                    st.session_state.latest_export_package = {
+                        "bytes": export_bytes,
+                        "name": export_name,
+                        "manifest": manifest,
+                    }
+                    st.success("Export package generated.")
+
+                pkg = st.session_state.latest_export_package
+                if pkg:
+                    st.caption("Included files:")
+                    st.dataframe(pd.DataFrame(pkg["manifest"]), use_container_width=True, hide_index=True)
+                    st.download_button(
+                        "Download Export Package (.zip)",
+                        data=pkg["bytes"],
+                        file_name=pkg["name"],
+                        mime="application/zip",
+                    )
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
