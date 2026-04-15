@@ -118,6 +118,13 @@ def generate_demo_portfolio(size: int, run_id: str | None = None) -> str:
 
     print(f"Wrote {len(scenarios)} scenarios to {out_file}")
     return str(out_file.resolve())
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    with OUTPUT_FILE.open("w", encoding="utf-8") as f:
+        for scenario in scenarios:
+            f.write(json.dumps(scenario) + "\n")
+
+    print(f"Wrote {len(scenarios)} scenarios to {OUTPUT_FILE}")
+    return OUTPUT_FILE
 
 
 def main() -> None:
