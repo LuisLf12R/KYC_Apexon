@@ -61,53 +61,6 @@ st.markdown("""
     padding: 4px 0 0 0;
     border-bottom: 2px solid rgba(255,255,255,0.08);
 }
-/* Individual tab */
-.stTabs [data-baseweb="tab"] {
-    font-size: 15px;
-    font-weight: 500;
-    padding: 12px 24px;
-    border-radius: 6px 6px 0 0;
-    color: rgba(255,255,255,0.6);
-    background: transparent;
-    border: none;
-    letter-spacing: 0.01em;
-    transition: color 0.15s ease, background 0.15s ease;
-}
-/* Hover state */
-.stTabs [data-baseweb="tab"]:hover {
-    color: rgba(255,255,255,0.9);
-    background: rgba(255,255,255,0.05);
-}
-/* Active tab */
-.stTabs [data-baseweb="tab"][aria-selected="true"] {
-    color: #ffffff;
-    font-weight: 700;
-    background: rgba(255,255,255,0.06);
-}
-/* Active tab underline indicator */
-.stTabs [data-baseweb="tab-highlight"] {
-    background-color: #0072B2;
-    height: 3px;
-    border-radius: 2px 2px 0 0;
-}
-/* Tab panel content area */
-.stTabs [data-baseweb="tab-panel"] {
-    padding-top: 24px;
-}
-</style>
-""", unsafe_allow_html=True)
-
-
-# ── Global styles ─────────────────────────────────────────────────────────────
-
-st.markdown("""
-<style>
-/* Tab list container */
-.stTabs [data-baseweb="tab-list"] {
-    gap: 6px;
-    padding: 4px 0 0 0;
-    border-bottom: 2px solid rgba(255,255,255,0.08);
-}
 
 /* Individual tab */
 .stTabs [data-baseweb="tab"] {
@@ -292,7 +245,6 @@ def load_users():
             return {u["username"]: u for u in data.get("users", []) if u.get("active", True)}
     except Exception:
         pass
-    # Fallback includes all roles so Railway works even if users.json is missing
     return {
         "admin":    {"user_id": "fb_admin",   "username": "admin",    "password": "admin123",   "role": "Admin",   "full_name": "Administrator"},
         "manager":  {"user_id": "fb_mgr",     "username": "manager",  "password": "mgr123",     "role": "Manager", "full_name": "Compliance Manager"},
@@ -343,16 +295,6 @@ def log(action_type, details=None, customer_id=None, batch_id=None, snapshot=Non
 
 def touch():
     st.session_state.last_activity = datetime.now(timezone.utc)
-
-
-def generate_live_demo_portfolio(size: int = DEFAULT_DEMO_PORTFOLIO_SIZE) -> str:
-    """
-    Generate a fresh synthetic KYC portfolio for the live demo with the specified size.
-    Returns the path to the generated scenario_manifest.jsonl.
-    """
-    from benchmarks.app_integration import generate_and_get_manifest_path
-    manifest_path = generate_and_get_manifest_path(size=size)
-    return str(manifest_path)
 
 
 def _ensure_runtime_action_types():
@@ -1028,7 +970,6 @@ def _try_autoload_engine():
     2. Temp dir from a previous session this deployment (kyc_data_clean/)
     Silently skips if neither exists or neither has customers.
     """
-    # 1. Default dir
     default_dir = Path.cwd() / "Data Clean"
     if default_dir.exists():
         engine, customers = load_engine(default_dir)
@@ -1041,7 +982,6 @@ def _try_autoload_engine():
             _seed_structured_provenance()
             return
 
-    # 2. Temp dir from previous upload/clean in this deployment
     tmp_dir = Path(tempfile.gettempdir()) / "kyc_data_clean"
     if tmp_dir.exists() and any(tmp_dir.glob("*.csv")):
         engine, customers = load_engine(tmp_dir)
@@ -1141,7 +1081,6 @@ def render_main():
         else:
             st.markdown("### Search & Evaluate Customer")
 
-            # Fixed layout: input full width, button below it
             cid_input = st.text_input("Customer ID", placeholder="C00001",
                                        label_visibility="collapsed")
             eval_btn = st.button("Evaluate Customer", type="primary", use_container_width=True)
@@ -1175,7 +1114,6 @@ def render_main():
                                          "triggered_rules": [r["rule_id"] for r in
                                                              reject_rules + review_rules]})
 
-                        # Save to history
                         history_entry = {
                             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                             "evaluated_by": user["username"],
@@ -1192,7 +1130,6 @@ def render_main():
                             st.session_state.customer_history[cid] = []
                         st.session_state.customer_history[cid].append(history_entry)
 
-                        # Metrics row
                         m1, m2, m3, m4 = st.columns(4)
                         m1.metric("Overall Score", f"{score}/100")
                         m2.metric("Customer ID", cid)
@@ -1202,11 +1139,9 @@ def render_main():
 
                         st.divider()
 
-                        # ── Disposition block ──────────────────────────────────
                         show_disposition(disposition)
                         st.markdown(f"**Rationale:** {rationale}")
 
-                        # Triggered reject rules
                         if reject_rules:
                             st.markdown("**Hard Rejection Rules Triggered:**")
                             for r in reject_rules:
@@ -1221,7 +1156,6 @@ def render_main():
                                     unsafe_allow_html=True
                                 )
 
-                        # Triggered review rules
                         if review_rules:
                             st.markdown("**Review Rules Triggered:**")
                             for r in review_rules:
@@ -1238,7 +1172,6 @@ def render_main():
 
                         st.divider()
 
-                        # ── Dimension breakdown ────────────────────────────────
                         dim_map = [
                             ("aml_screening",         "AML Screening",         25),
                             ("identity_verification", "Identity Verification", 20),
@@ -1260,7 +1193,6 @@ def render_main():
                             else:
                                 failing.append(entry)
 
-                        # Show failing and gap dimensions prominently
                         problem_dims = failing + minor_gaps
                         if problem_dims:
                             st.markdown("**Dimension Issues:**")
@@ -1282,7 +1214,6 @@ def render_main():
                                 for e in passing:
                                     st.markdown(f"**{e['label']}** — {e['score']}/100 — {e['finding']}")
 
-                        # Dimension chart — sorted worst first
                         all_dims = {e["label"]: e["score"] for e in
                                     sorted(passing + minor_gaps + failing, key=lambda x: x["score"])}
                         fig = go.Figure(go.Bar(
@@ -1320,7 +1251,6 @@ def render_main():
                                         f"(from {ocr_file or 'N/A'}, {ocr_conf or 'N/A'} confidence)"
                                     )
 
-                        # Remediation (for Review or Reject)
                         if disposition in ("REJECT", "REVIEW") and role in ("Analyst", "Manager", "Admin"):
                             st.divider()
                             st.markdown("**Remediation Actions**")
@@ -1354,7 +1284,6 @@ def render_main():
                                                      "requires_manager_approval": True})
                                         st.success("Clear proposed. Awaiting manager approval.")
 
-                        # Customer history
                         history = st.session_state.customer_history.get(cid, [])
                         if len(history) > 1:
                             st.divider()
@@ -1427,11 +1356,18 @@ def render_main():
                         "account_activity_score", "proof_of_address_score",
                         "beneficial_ownership_score", "data_quality_score",
                         "rationale", "ruleset_version"]
-                rdf = pd.DataFrame(results)
 
-                # Remap synthetic portfolio columns to engine schema if needed
-                if "disposition" not in rdf.columns and "expected_final_decision" in rdf.columns:
-                    rdf = rdf.rename(columns={"expected_final_decision": "disposition"})
+                rdf = pd.DataFrame(results) if results else pd.DataFrame(columns=cols)
+
+                # ── Normalise synthetic portfolio columns if engine couldn't score them ──
+                # Map expected_final_decision → disposition (synthetic manifest column)
+                if "disposition" not in rdf.columns:
+                    if "expected_final_decision" in rdf.columns:
+                        rdf = rdf.rename(columns={"expected_final_decision": "disposition"})
+                    else:
+                        rdf["disposition"] = "REVIEW"
+
+                # Ensure all required columns exist with safe defaults
                 if "overall_score" not in rdf.columns:
                     rdf["overall_score"] = 0
                 if "rationale" not in rdf.columns:
@@ -1443,7 +1379,7 @@ def render_main():
                 num_cols = [c for c in rdf.columns if c.endswith("_score")]
                 rdf[num_cols] = rdf[num_cols].fillna(0)
                 rdf["disposition"] = rdf["disposition"].fillna("REVIEW")
-               
+
                 order = {"REJECT": 0, "REVIEW": 1, "PASS_WITH_NOTES": 2, "PASS": 3}
                 rdf["_s"] = rdf["disposition"].map(order).fillna(4)
                 rdf = rdf.sort_values(["_s", "overall_score"]).drop(columns=["_s"])
@@ -1620,7 +1556,7 @@ def render_main():
                         log("ENGINE_RELOAD", details={"customers": len(customers),
                                                        "datasets": list(cleaned.keys())})
                         st.success(f"Engine loaded — {len(customers)} customers ready.")
-                        st.rerun()  # Push updated state to all tabs immediately
+                        st.rerun()
                     else:
                         st.warning("Engine could not initialize. Ensure customers dataset "
                                    "has a customer_id column.")
@@ -1727,18 +1663,13 @@ def render_main():
                                 )
                                 raw_response = resp.content[0].text.strip()
 
-                                # Strip markdown code fences if present
                                 if raw_response.startswith("```"):
                                     lines = raw_response.split("\n")
-                                    # Remove first line (```json or ```) and last line (```) if present
                                     raw_response = "\n".join(
                                         lines[1:-1] if lines and lines[-1].strip() == "```" else lines[1:]
                                     )
 
-                                # Strip any remaining whitespace
                                 raw_response = raw_response.strip()
-
-                                # Extract only the JSON object if extra content wraps it
                                 start = raw_response.find("{")
                                 end = raw_response.rfind("}") + 1
                                 if start != -1 and end > start:
@@ -2000,20 +1931,16 @@ def render_main():
         with cfg1:
             st.session_state.case_sla_amber_days = st.number_input(
                 "SLA amber threshold (days)",
-                min_value=1,
-                max_value=30,
+                min_value=1, max_value=30,
                 value=int(st.session_state.case_sla_amber_days),
-                step=1,
-                key="sla_amber_input",
+                step=1, key="sla_amber_input",
             )
         with cfg2:
             st.session_state.case_sla_red_days = st.number_input(
                 "SLA red threshold (days)",
-                min_value=1,
-                max_value=60,
+                min_value=1, max_value=60,
                 value=int(st.session_state.case_sla_red_days),
-                step=1,
-                key="sla_red_input",
+                step=1, key="sla_red_input",
             )
         cases = _build_cases(logger)
         if not cases:
@@ -2100,12 +2027,10 @@ def render_main():
                         })
                         st.success(f"Portfolio generated — {int(portfolio_size)} customers.")
 
-                        # Read the generated file for download
                         manifest_path_obj = Path(manifest_path)
                         if manifest_path_obj.exists():
                             raw_jsonl = manifest_path_obj.read_text(encoding="utf-8")
 
-                            # Parse JSONL → CSV for a friendlier download option
                             import csv, io as _io
                             lines = [json.loads(l) for l in raw_jsonl.strip().splitlines() if l.strip()]
                             if lines:
@@ -2150,7 +2075,6 @@ def render_main():
 
     # ════════════════════════════════════════════════════════
     # TAB 9: AUDIT TRAIL
-    # TAB 8: AUDIT TRAIL
     # ════════════════════════════════════════════════════════
     with tab8:
         touch()
