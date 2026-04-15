@@ -135,8 +135,6 @@ def main() -> None:
     args = parser.parse_args()
 
     generate_demo_portfolio(size=args.size, run_id=args.run_id, output_path=None)
-    run_id = args.run_id or _default_run_id()
-    generate_demo_portfolio(size=args.size, run_id=run_id)
 
 
 if __name__ == "__main__":

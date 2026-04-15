@@ -1080,10 +1080,8 @@ def render_main():
 
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab_generate, tab8 = st.tabs([
         "Individual Evaluation", "Batch Results", "Data Management",
-        "Document OCR & AI", "System Info", "Approval Queue", "Cases", "Generate Data", "Audit Trail",
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
-        "Individual Evaluation", "Batch Results", "Data Management",
-        "Document OCR & AI", "System Info", "Approval Queue", "Cases", "Audit Trail",
+        "Document OCR & AI", "System Info", "Approval Queue", "Cases",
+        "Generate Data", "Audit Trail",
     ])
 
     # ════════════════════════════════════════════════════════
@@ -2056,7 +2054,6 @@ def render_main():
                 st.caption(f"Last generated manifest: `{st.session_state['last_generated_manifest_path']}`")
 
     # ════════════════════════════════════════════════════════
-    # TAB 9: AUDIT TRAIL
     # TAB 8: AUDIT TRAIL
     # ════════════════════════════════════════════════════════
     with tab8:
