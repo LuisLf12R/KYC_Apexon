@@ -45,6 +45,57 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# ── Global styles ─────────────────────────────────────────────────────────────
+
+st.markdown("""
+<style>
+/* Tab list container */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 6px;
+    padding: 4px 0 0 0;
+    border-bottom: 2px solid rgba(255,255,255,0.08);
+}
+
+/* Individual tab */
+.stTabs [data-baseweb="tab"] {
+    font-size: 15px;
+    font-weight: 500;
+    padding: 12px 24px;
+    border-radius: 6px 6px 0 0;
+    color: rgba(255,255,255,0.6);
+    background: transparent;
+    border: none;
+    letter-spacing: 0.01em;
+    transition: color 0.15s ease, background 0.15s ease;
+}
+
+/* Hover state */
+.stTabs [data-baseweb="tab"]:hover {
+    color: rgba(255,255,255,0.9);
+    background: rgba(255,255,255,0.05);
+}
+
+/* Active tab */
+.stTabs [data-baseweb="tab"][aria-selected="true"] {
+    color: #ffffff;
+    font-weight: 700;
+    background: rgba(255,255,255,0.06);
+}
+
+/* Active tab underline indicator */
+.stTabs [data-baseweb="tab-highlight"] {
+    background-color: #0072B2;
+    height: 3px;
+    border-radius: 2px 2px 0 0;
+}
+
+/* Tab panel content area — give it breathing room */
+.stTabs [data-baseweb="tab-panel"] {
+    padding-top: 24px;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 INACTIVITY_WARNING_SEC = 13 * 60
@@ -238,16 +289,6 @@ def log(action_type, details=None, customer_id=None, batch_id=None, snapshot=Non
 
 def touch():
     st.session_state.last_activity = datetime.now(timezone.utc)
-
-
-def generate_live_demo_portfolio(size: int = DEFAULT_DEMO_PORTFOLIO_SIZE) -> str:
-    """
-    Generate a fresh synthetic KYC portfolio for the live demo with the specified size.
-    Returns the path to the generated scenario_manifest.jsonl.
-    """
-    from benchmarks.app_integration import generate_and_get_manifest_path
-    manifest_path = generate_and_get_manifest_path(size=size)
-    return str(manifest_path)
 
 
 def _ensure_runtime_action_types():
