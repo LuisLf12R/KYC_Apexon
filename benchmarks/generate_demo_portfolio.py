@@ -80,13 +80,12 @@ def _apply_constraints(scenario: Dict[str, Any], constraints: List[Dict[str, Any
     return updated
 
 
-def generate_demo_portfolio(size: int, run_id: str | None = None, output_path: str | None = None) -> str:
+def generate_demo_portfolio(size: int, run_id: str | None = None) -> str:
     """
     Generate a demo portfolio and return absolute path to scenario_manifest.jsonl.
     """
     run_id = run_id or _default_run_id()
-    out_file = Path(output_path) if output_path else OUTPUT_FILE
-def generate_demo_portfolio(size: int, run_id: str) -> Path:
+    out_file = OUTPUT_FILE
     _ = load_generator_matrix()  # loaded for config consistency in v1
     constraints_cfg = load_constraint_catalog()
     archetypes_cfg = load_scenario_archetypes()
@@ -134,7 +133,7 @@ def main() -> None:
     parser.add_argument("--run-id", type=str, default=None, help="Optional run identifier.")
     args = parser.parse_args()
 
-    generate_demo_portfolio(size=args.size, run_id=args.run_id, output_path=None)
+    generate_demo_portfolio(size=args.size, run_id=args.run_id)
 
 
 if __name__ == "__main__":

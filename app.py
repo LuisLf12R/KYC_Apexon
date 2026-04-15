@@ -2101,6 +2101,7 @@ def render_main():
                 st.caption(f"Last generated manifest: `{st.session_state['last_generated_manifest_path']}`")
 
     # ════════════════════════════════════════════════════════
+    # TAB 9: AUDIT TRAIL
     # TAB 8: AUDIT TRAIL
     # ════════════════════════════════════════════════════════
     with tab8:
