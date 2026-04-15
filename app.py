@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 import plotly.graph_objects as go
 
 try:
-    from benchmarks.app_integration import generate_and_get_manifest_path
+    from benchmarks.app_integration import generate_and_get_manifest_path, get_generated_raw_tables
     PORTFOLIO_GENERATOR_AVAILABLE = True
 except ImportError:
     PORTFOLIO_GENERATOR_AVAILABLE = False
@@ -2000,6 +2000,225 @@ def render_main():
         touch()
         st.markdown("### Generate Synthetic KYC Portfolio")
         st.markdown(
+            "Generates a synthetic portfolio of KYC customers. "
+            "Each run produces **intentionally messy raw CSV files** — "
+            "inconsistent column names, mixed date formats, abbreviations, "
+            "nulls, and junk columns — so Claude's cleaning pipeline does real work. "
+            "After generation, the files are automatically processed through "
+            "the same Claude AI pipeline as Data Management."
+        )
+
+        if not PORTFOLIO_GENERATOR_AVAILABLE:
+            st.error("Portfolio generator not available. Ensure the benchmarks package is installed.")
+        else:
+            portfolio_size = st.number_input(
+                "Number of synthetic customers to generate",
+                min_value=5, max_value=500, value=30, step=5,
+                help="Controls how many synthetic KYC cases will be generated."
+            )
+
+            if st.button("Generate Fresh Portfolio", type="primary"):
+                touch()
+                with st.spinner(f"Generating {int(portfolio_size)} synthetic customers..."):
+                    try:
+                        manifest_path = generate_and_get_manifest_path(size=int(portfolio_size))
+                        st.session_state["last_generated_manifest_path"] = str(manifest_path)
+                        log("DATA_CLEAN", details={
+                            "action": "synthetic_portfolio_generated",
+                            "size": int(portfolio_size),
+                            "manifest_path": str(manifest_path),
+                            "generated_by": user["username"],
+                        })
+                        st.success(f"Portfolio generated — {int(portfolio_size)} customers.")
+
+                        # ── Download the manifest ──────────────────────────────
+                        manifest_path_obj = Path(manifest_path)
+                        if manifest_path_obj.exists():
+                            raw_jsonl = manifest_path_obj.read_text(encoding="utf-8")
+                            import csv as _csv, io as _io
+                            lines = [json.loads(l) for l in raw_jsonl.strip().splitlines() if l.strip()]
+                            if lines:
+                                csv_buf = _io.StringIO()
+                                all_fields = list(dict.fromkeys(k for line in lines for k in line.keys()))
+                                writer = _csv.DictWriter(csv_buf, fieldnames=all_fields, extrasaction="ignore")
+                                writer.writeheader()
+                                writer.writerows(lines)
+                                csv_bytes = csv_buf.getvalue().encode("utf-8")
+                            else:
+                                csv_bytes = b""
+
+                            col_a, col_b = st.columns(2)
+                            with col_a:
+                                st.download_button(
+                                    label="Download Manifest (.jsonl)",
+                                    data=raw_jsonl.encode("utf-8"),
+                                    file_name=f"kyc_portfolio_{int(portfolio_size)}_manifest.jsonl",
+                                    mime="application/json",
+                                    use_container_width=True,
+                                )
+                            with col_b:
+                                st.download_button(
+                                    label="Download Manifest (.csv)",
+                                    data=csv_bytes,
+                                    file_name=f"kyc_portfolio_{int(portfolio_size)}_manifest.csv",
+                                    mime="text/csv",
+                                    use_container_width=True,
+                                )
+
+                        # ── Show raw messy files for download ──────────────────
+                        raw_tables = get_generated_raw_tables()
+                        if raw_tables:
+                            st.divider()
+                            st.markdown("#### Raw Messy Files (before Claude cleaning)")
+                            st.caption(
+                                "These files have inconsistent column names, mixed date formats, "
+                                "abbreviations, nulls, and junk columns. "
+                                "Claude will normalise them below."
+                            )
+                            dl_cols = st.columns(min(len(raw_tables), 3))
+                            for i, (stem, path) in enumerate(sorted(raw_tables.items())):
+                                with dl_cols[i % 3]:
+                                    st.download_button(
+                                        label=f"⬇ {path.name}",
+                                        data=path.read_bytes(),
+                                        file_name=path.name,
+                                        mime="text/csv",
+                                        use_container_width=True,
+                                        key=f"raw_dl_{stem}",
+                                    )
+
+                        # ── Auto-process through Claude cleaning pipeline ───────
+                        st.divider()
+                        with st.spinner(
+                            "Claude is reading and normalising the messy files — "
+                            "this may take 30–60s on first run..."
+                        ):
+                            try:
+                                raw_tables = get_generated_raw_tables()
+                                if not raw_tables:
+                                    st.error("No raw tables found to process.")
+                                else:
+                                    cleaned = {}
+                                    proc_log = []
+
+                                    for stem, csv_path in sorted(raw_tables.items()):
+                                        # Guess dataset type from filename stem
+                                        # e.g. "customers_raw" → "customers"
+                                        guessed_type = stem.replace("_raw", "")
+                                        dataset_type = (
+                                            guessed_type
+                                            if guessed_type in DATASET_OPTIONS
+                                            else AUTO_DETECT
+                                        )
+
+                                        try:
+                                            with open(csv_path, "rb") as fobj:
+                                                df, method, det_type, msg = process_file(
+                                                    fobj, csv_path.name, dataset_type
+                                                )
+
+                                            if det_type in cleaned:
+                                                cleaned[det_type] = pd.concat(
+                                                    [cleaned[det_type], df],
+                                                    ignore_index=True
+                                                ).drop_duplicates()
+                                            else:
+                                                cleaned[det_type] = df
+
+                                            log("DATA_CLEAN", details={
+                                                "filename": csv_path.name,
+                                                "method": method,
+                                                "detected_type": det_type,
+                                                "rows": len(df),
+                                            })
+                                            proc_log.append({
+                                                "File": csv_path.name,
+                                                "Dataset": det_type,
+                                                "Method": method,
+                                                "Rows": len(df),
+                                                "Status": "OK",
+                                            })
+                                        except Exception as file_err:
+                                            proc_log.append({
+                                                "File": csv_path.name,
+                                                "Dataset": dataset_type,
+                                                "Method": "error",
+                                                "Rows": 0,
+                                                "Status": str(file_err)[:80],
+                                            })
+
+                                    if proc_log:
+                                        st.markdown("**Claude cleaning results:**")
+                                        st.dataframe(
+                                            pd.DataFrame(proc_log),
+                                            use_container_width=True,
+                                            hide_index=True,
+                                        )
+
+                                    if cleaned and "customers" in cleaned:
+                                        tmp_dir = save_to_temp(cleaned)
+                                        engine_obj, customers_df_new = load_engine(tmp_dir)
+
+                                        if (
+                                            engine_obj is not None
+                                            and customers_df_new is not None
+                                            and len(customers_df_new) > 0
+                                        ):
+                                            st.session_state.kyc_engine = engine_obj
+                                            st.session_state.customers_df = customers_df_new
+                                            st.session_state.engines_initialized = True
+                                            st.session_state.data_dir = tmp_dir
+                                            st.session_state.batch_results = None
+                                            st.session_state.data_source_label = (
+                                                f"Synthetic Portfolio — "
+                                                f"Claude-cleaned ({', '.join(cleaned.keys())})"
+                                            )
+                                            _seed_structured_provenance()
+                                            discrepancy_rows = _collect_discrepancy_report()
+                                            st.session_state.latest_discrepancy_report = discrepancy_rows
+                                            n_loaded = len(customers_df_new)
+                                            st.success(
+                                                f"Pipeline complete — Claude normalised "
+                                                f"{len(raw_tables)} messy files, "
+                                                f"{n_loaded} customers loaded into engine. "
+                                                f"Go to **Batch Results** to evaluate."
+                                            )
+                                            log("ENGINE_RELOAD", details={
+                                                "source": "synthetic_portfolio_claude_cleaned",
+                                                "customers": n_loaded,
+                                                "datasets": list(cleaned.keys()),
+                                                "generated_by": user["username"],
+                                            })
+                                            st.rerun()
+                                        else:
+                                            st.error(
+                                                "Engine could not initialise. "
+                                                "Check that customers table has a customer_id column."
+                                            )
+                                    else:
+                                        st.warning(
+                                            f"Cleaning produced: {list(cleaned.keys())}. "
+                                            "No customers table found — check the results above."
+                                        )
+
+                            except Exception as _clean_err:
+                                import traceback
+                                st.error(
+                                    f"Cleaning pipeline error: {_clean_err}\n\n"
+                                    f"```\n{traceback.format_exc()}\n```"
+                                )
+
+                    except Exception as e:
+                        st.error(f"Generation failed: {e}")
+
+            if st.session_state.get("last_generated_manifest_path"):
+                st.divider()
+                st.caption(
+                    f"Last manifest: `{st.session_state['last_generated_manifest_path']}`"
+                )
+        touch()
+        st.markdown("### Generate Synthetic KYC Portfolio")
+        st.markdown(
             "Generate a fresh synthetic portfolio of KYC customers for demo and testing purposes. "
             "Once generated, go to Data Management to load the output files into the engine."
         )
@@ -2062,91 +2281,6 @@ def render_main():
                                 )
 
                             st.caption(f"File also saved locally to: `{manifest_path_obj}`")
-
-                            # ── LLM Schema Transform Pipeline ─────────────────────
-                            st.divider()
-                            with st.spinner(
-                                "Claude is generating schema transformation script "
-                                "(~30s first run, cached after)..."
-                            ):
-                                try:
-                                    sys.path.insert(0, str(Path.cwd() / "src"))
-                                    from kyc_input_orchestrator import KYCInputOrchestrator
-
-                                    orchestrator = KYCInputOrchestrator(
-                                        project_root=Path.cwd()
-                                    )
-                                    manifest_df = orchestrator.load_structured_input(
-                                        manifest_path_obj
-                                    )
-
-                                    if manifest_df.empty:
-                                        st.error("Could not read manifest file.")
-                                    elif not orchestrator._is_scenario_manifest(manifest_df):
-                                        st.error(
-                                            f"Manifest format not recognised — "
-                                            f"columns: {list(manifest_df.columns)}"
-                                        )
-                                    else:
-                                        normalized_tables = (
-                                            orchestrator._normalize_scenario_manifest(manifest_df)
-                                        )
-
-                                        if not normalized_tables or "customers" not in normalized_tables:
-                                            st.error(
-                                                "Schema transformation returned no data. "
-                                                f"Tables returned: {list(normalized_tables.keys())}"
-                                            )
-                                        else:
-                                            tmp_dir = save_to_temp(normalized_tables)
-                                            engine_obj, customers_df_new = load_engine(tmp_dir)
-
-                                            if (
-                                                engine_obj is not None
-                                                and customers_df_new is not None
-                                                and len(customers_df_new) > 0
-                                            ):
-                                                st.session_state.kyc_engine = engine_obj
-                                                st.session_state.customers_df = customers_df_new
-                                                st.session_state.engines_initialized = True
-                                                st.session_state.data_dir = tmp_dir
-                                                st.session_state.batch_results = None
-                                                st.session_state.data_source_label = (
-                                                    "Synthetic Portfolio (LLM-transformed)"
-                                                )
-                                                _seed_structured_provenance()
-                                                n_loaded = len(customers_df_new)
-                                                tables_info = ", ".join(
-                                                    f"{k}: {len(v)}"
-                                                    for k, v in normalized_tables.items()
-                                                )
-                                                st.success(
-                                                    f"Pipeline complete — Claude generated "
-                                                    f"schema transform, {n_loaded} customers "
-                                                    f"loaded ({tables_info}). "
-                                                    f"Go to **Batch Results** to evaluate."
-                                                )
-                                                log(
-                                                    "ENGINE_RELOAD",
-                                                    details={
-                                                        "source": "synthetic_portfolio_llm_transform",
-                                                        "customers": n_loaded,
-                                                        "tables": list(normalized_tables.keys()),
-                                                        "generated_by": user["username"],
-                                                    },
-                                                )
-                                            else:
-                                                st.error(
-                                                    "Engine could not initialise from transformed "
-                                                    "tables. Check that customers table has "
-                                                    "customer_id column."
-                                                )
-                                except Exception as _orch_err:
-                                    import traceback
-                                    st.error(
-                                        f"LLM pipeline error: {_orch_err}\n\n"
-                                        f"```\n{traceback.format_exc()}\n```"
-                                    )
                         else:
                             st.warning("File generated but could not be read for download.")
 
