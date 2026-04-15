@@ -1429,22 +1429,21 @@ def render_main():
                         "rationale", "ruleset_version"]
                 rdf = pd.DataFrame(results)
 
-# Remap synthetic portfolio columns to engine schema if needed
-if "disposition" not in rdf.columns and "expected_final_decision" in rdf.columns:
-    rdf = rdf.rename(columns={"expected_final_decision": "disposition"})
-if "overall_score" not in rdf.columns:
-    rdf["overall_score"] = 0
-if "rationale" not in rdf.columns:
-    rdf["rationale"] = "Awaiting engine scoring"
-if "ruleset_version" not in rdf.columns:
-    rdf["ruleset_version"] = RULESET_VERSION
+                # Remap synthetic portfolio columns to engine schema if needed
+                if "disposition" not in rdf.columns and "expected_final_decision" in rdf.columns:
+                    rdf = rdf.rename(columns={"expected_final_decision": "disposition"})
+                if "overall_score" not in rdf.columns:
+                    rdf["overall_score"] = 0
+                if "rationale" not in rdf.columns:
+                    rdf["rationale"] = "Awaiting engine scoring"
+                if "ruleset_version" not in rdf.columns:
+                    rdf["ruleset_version"] = RULESET_VERSION
 
-rdf = rdf[[c for c in cols if c in rdf.columns]]
-num_cols = [c for c in rdf.columns if c.endswith("_score")]
-rdf[num_cols] = rdf[num_cols].fillna(0)
-rdf["disposition"] = rdf["disposition"].fillna("REVIEW")
-                rdf["overall_score"] = rdf["overall_score"].fillna(0)
-
+                rdf = rdf[[c for c in cols if c in rdf.columns]]
+                num_cols = [c for c in rdf.columns if c.endswith("_score")]
+                rdf[num_cols] = rdf[num_cols].fillna(0)
+                rdf["disposition"] = rdf["disposition"].fillna("REVIEW")
+               
                 order = {"REJECT": 0, "REVIEW": 1, "PASS_WITH_NOTES": 2, "PASS": 3}
                 rdf["_s"] = rdf["disposition"].map(order).fillna(4)
                 rdf = rdf.sort_values(["_s", "overall_score"]).drop(columns=["_s"])
