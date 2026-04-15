@@ -276,7 +276,6 @@ _DEFAULTS = {
     "dirty_customers": set(),
     "ocr_analysis_cache": {},
     "latest_discrepancy_report": None,
-    "last_generated_manifest_path": None,
 }
 for k, v in _DEFAULTS.items():
     if k not in st.session_state:
@@ -923,6 +922,43 @@ def process_file(file_obj, filename, dataset_type):
         return df, "ocr+llm", dataset_type, f"Extracted {len(df)} records"
 
 
+def _extract_json_from_response(raw: str) -> dict:
+    """
+    Robustly extract a JSON object from an LLM response string.
+    Handles: leading/trailing whitespace, markdown code fences,
+    partial responses starting mid-object, and extra text before/after.
+    """
+    if not raw:
+        raise ValueError("Empty response from LLM")
+
+    text = raw.strip()
+
+    # Strip markdown code fences
+    if text.startswith("```"):
+        lines = text.split("\n")
+        if lines and lines[0].strip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+
+    # If it doesn't start with {, try to find the first { in the text
+    if not text.startswith("{"):
+        start = text.find("{")
+        if start != -1:
+            text = text[start:]
+        else:
+            # Try wrapping loose key-value content in braces
+            text = "{" + text.strip().rstrip(",") + "}"
+
+    # Find the last } to trim any trailing content
+    end = text.rfind("}")
+    if end != -1:
+        text = text[:end + 1]
+
+    return json.loads(text)
+
+
 # ╔══════════════════════════════════════════════════════════════════════════════
 # LOGIN
 # ╚══════════════════════════════════════════════════════════════════════════════
@@ -1250,6 +1286,7 @@ def render_main():
                                         f"(from {ocr_file or 'N/A'}, {ocr_conf or 'N/A'} confidence)"
                                     )
 
+                        # Remediation (for Review or Reject)
                         if disposition in ("REJECT", "REVIEW") and role in ("Analyst", "Manager", "Admin"):
                             st.divider()
                             st.markdown("**Remediation Actions**")

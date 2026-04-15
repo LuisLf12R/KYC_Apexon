@@ -33,14 +33,12 @@ from benchmarks.config_loader import (
     load_scenario_archetypes,
 )
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
 
+# Anchor to project root regardless of where the process is launched from
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_DIR = _PROJECT_ROOT / "benchmarks" / "output"
 OUTPUT_FILE = OUTPUT_DIR / "scenario_manifest.jsonl"
-RAW_DIR = OUTPUT_DIR / "raw_kyc_tables"
 
-# ── Manifest helpers (unchanged) ──────────────────────────────────────────────
 
 def _default_run_id() -> str:
     return f"demo_run_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
@@ -48,8 +46,10 @@ def _default_run_id() -> str:
 
 def _priority_weight(priority: str) -> int:
     p = (priority or "").upper()
-    if p == "HIGH":   return 3
-    if p == "MEDIUM": return 2
+    if p == "HIGH":
+        return 3
+    if p == "MEDIUM":
+        return 2
     return 1
 
 
@@ -63,28 +63,26 @@ def _build_weighted_archetypes(archetypes: List[Dict[str, Any]]) -> List[Dict[st
 def _build_scenario(archetype: Dict[str, Any], scenario_number: int, run_id: str) -> Dict[str, Any]:
     defaults = archetype.get("default_states", {})
     scenario = {
-        "scenario_id":            f"SCENARIO_{scenario_number:04d}",
-        "customer_id":            f"SCENARIO_{scenario_number:04d}",
-        "run_id":                 run_id,
-        "archetype_id":           archetype.get("archetype_id"),
-        "archetype_name":         archetype.get("archetype_name"),
-        "customer_type":          archetype.get("customer_type"),
-        "risk_tier":              archetype.get("risk_tier"),
-        "aml_state":              defaults.get("aml_state"),
-        "identity_state":         defaults.get("identity_state"),
-        "poa_state":              defaults.get("poa_state"),
-        "ubo_state":              defaults.get("ubo_state"),
-        "activity_state":         defaults.get("activity_state"),
-        "data_quality_state":     defaults.get("data_quality_state"),
+        "scenario_id": f"SCENARIO_{scenario_number:04d}",
+        "customer_id": f"SCENARIO_{scenario_number:04d}",
+        "run_id": run_id,
+        "archetype_id": archetype.get("archetype_id"),
+        "archetype_name": archetype.get("archetype_name"),
+        "customer_type": archetype.get("customer_type"),
+        "risk_tier": archetype.get("risk_tier"),
+        "aml_state": defaults.get("aml_state"),
+        "identity_state": defaults.get("identity_state"),
+        "poa_state": defaults.get("poa_state"),
+        "ubo_state": defaults.get("ubo_state"),
+        "activity_state": defaults.get("activity_state"),
+        "data_quality_state": defaults.get("data_quality_state"),
         "expected_final_decision": archetype.get("expected_final_decision"),
-        "is_remediable_case":     bool(archetype.get("is_remediable_case", False)),
-        "coverage_tags":          archetype.get("coverage_tags", []),
-        "generated_at":           datetime.now(timezone.utc).isoformat(),
+        "is_remediable_case": bool(archetype.get("is_remediable_case", False)),
+        "coverage_tags": archetype.get("coverage_tags", []),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
     }
     if archetype.get("expected_post_remediation_decision") is not None:
-        scenario["expected_post_remediation_decision"] = archetype.get(
-            "expected_post_remediation_decision"
-        )
+        scenario["expected_post_remediation_decision"] = archetype.get("expected_post_remediation_decision")
     return scenario
 
 
@@ -95,9 +93,7 @@ def _matches_if_clause(scenario: Dict[str, Any], if_clause: Dict[str, Any]) -> b
     return True
 
 
-def _apply_constraints(
-    scenario: Dict[str, Any], constraints: List[Dict[str, Any]]
-) -> Dict[str, Any]:
+def _apply_constraints(scenario: Dict[str, Any], constraints: List[Dict[str, Any]]) -> Dict[str, Any]:
     updated = dict(scenario)
     for constraint in constraints:
         if_clause = constraint.get("if", {})
@@ -525,6 +521,7 @@ def generate_demo_portfolio(size: int, run_id: Optional[str] = None) -> str:
 
     print(f"Loaded {len(archetypes)} archetypes.")
 
+    weighted = _build_weighted_archetypes(archetypes)
     weighted  = _build_weighted_archetypes(archetypes)
     scenarios: List[Dict[str, Any]] = []
     for i in range(1, size + 1):
@@ -533,13 +530,12 @@ def generate_demo_portfolio(size: int, run_id: Optional[str] = None) -> str:
         scenario = _apply_constraints(scenario, constraints)
         scenarios.append(scenario)
 
-    # Ensure at least one BLOCKED sample for constraint S021
+    # For validation convenience in v1: ensure at least one BLOCKED sample if S021 exists.
     has_s021 = any(c.get("constraint_id") == "S021" for c in constraints)
     if has_s021 and scenarios and not any(s.get("aml_state") == "BLOCKED" for s in scenarios):
         scenarios[0]["aml_state"] = "BLOCKED"
         scenarios[0] = _apply_constraints(scenarios[0], constraints)
 
-    # ── Write manifest ────────────────────────────────────────────────────────
     out_file.parent.mkdir(parents=True, exist_ok=True)
     with out_file.open("w", encoding="utf-8") as f:
         for scenario in scenarios:
