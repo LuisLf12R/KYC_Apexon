@@ -1663,8 +1663,10 @@ def render_main():
                                 )
                                 raw_response = resp.content[0].text.strip()
 
+                                # Strip markdown code fences if present
                                 if raw_response.startswith("```"):
                                     lines = raw_response.split("\n")
+                                    # Remove first line (```json or ```) and last line (```) if present
                                     raw_response = "\n".join(
                                         lines[1:-1] if lines and lines[-1].strip() == "```" else lines[1:]
                                     )
@@ -1931,16 +1933,20 @@ def render_main():
         with cfg1:
             st.session_state.case_sla_amber_days = st.number_input(
                 "SLA amber threshold (days)",
-                min_value=1, max_value=30,
+                min_value=1,
+                max_value=30,
                 value=int(st.session_state.case_sla_amber_days),
-                step=1, key="sla_amber_input",
+                step=1,
+                key="sla_amber_input",
             )
         with cfg2:
             st.session_state.case_sla_red_days = st.number_input(
                 "SLA red threshold (days)",
-                min_value=1, max_value=60,
+                min_value=1,
+                max_value=60,
                 value=int(st.session_state.case_sla_red_days),
-                step=1, key="sla_red_input",
+                step=1,
+                key="sla_red_input",
             )
         cases = _build_cases(logger)
         if not cases:
@@ -2229,7 +2235,8 @@ def render_main():
             portfolio_size = st.number_input(
                 "Number of synthetic customers to generate",
                 min_value=5, max_value=500, value=30, step=5,
-                help="Controls how many synthetic KYC cases will be generated."
+                help="Controls how many synthetic KYC cases will be generated.",
+                key="demo_portfolio_size_input",
             )
 
             if st.button("Generate Fresh Portfolio", type="primary"):
@@ -2246,6 +2253,7 @@ def render_main():
                         })
                         st.success(f"Portfolio generated — {int(portfolio_size)} customers.")
 
+                        # Read the generated file for download
                         manifest_path_obj = Path(manifest_path)
                         if manifest_path_obj.exists():
                             raw_jsonl = manifest_path_obj.read_text(encoding="utf-8")
@@ -2293,6 +2301,7 @@ def render_main():
                 st.caption(f"Last generated manifest: `{st.session_state['last_generated_manifest_path']}`")
 
     # ════════════════════════════════════════════════════════
+    # TAB 8: AUDIT TRAIL
     # TAB 9: AUDIT TRAIL
     # ════════════════════════════════════════════════════════
     with tab8:
