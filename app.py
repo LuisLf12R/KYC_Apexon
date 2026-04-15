@@ -2089,10 +2089,47 @@ def render_main():
                             "generated_by": user["username"],
                         })
                         st.success(f"Portfolio generated — {int(portfolio_size)} customers.")
-                        st.info(f"Manifest saved to: `{manifest_path}`")
-                        st.markdown(
-                            "Go to the **Data Management** tab to upload and load these files into the engine."
-                        )
+
+                        # Read the generated file for download
+                        manifest_path_obj = Path(manifest_path)
+                        if manifest_path_obj.exists():
+                            raw_jsonl = manifest_path_obj.read_text(encoding="utf-8")
+
+                            # Parse JSONL → CSV for a friendlier download option
+                            import csv, io as _io
+                            lines = [json.loads(l) for l in raw_jsonl.strip().splitlines() if l.strip()]
+                            if lines:
+                                csv_buf = _io.StringIO()
+                                writer = csv.DictWriter(csv_buf, fieldnames=lines[0].keys())
+                                writer.writeheader()
+                                writer.writerows(lines)
+                                csv_bytes = csv_buf.getvalue().encode("utf-8")
+                            else:
+                                csv_bytes = b""
+
+                            col_a, col_b = st.columns(2)
+                            with col_a:
+                                st.download_button(
+                                    label="Download Manifest (.jsonl)",
+                                    data=raw_jsonl.encode("utf-8"),
+                                    file_name=f"kyc_portfolio_{int(portfolio_size)}_customers.jsonl",
+                                    mime="application/json",
+                                    use_container_width=True,
+                                )
+                            with col_b:
+                                st.download_button(
+                                    label="Download as CSV",
+                                    data=csv_bytes,
+                                    file_name=f"kyc_portfolio_{int(portfolio_size)}_customers.csv",
+                                    mime="text/csv",
+                                    use_container_width=True,
+                                )
+
+                            st.caption(f"File also saved locally to: `{manifest_path_obj}`")
+                        else:
+                            st.warning("File generated but could not be read for download.")
+
+                        st.markdown("Go to the **Data Management** tab to upload and load these files into the engine.")
                     except Exception as e:
                         st.error(f"Generation failed: {e}")
 
