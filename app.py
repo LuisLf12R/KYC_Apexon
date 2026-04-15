@@ -814,7 +814,7 @@ def read_structured(file_obj, filename):
         return pd.DataFrame([content])
     raise ValueError(f"Unsupported: {ext}")
 
-def ocr_file(file_bytes, filename):
+def run_ocr(file_bytes, filename):
     from google.cloud import vision as gv
     client = gv.ImageAnnotatorClient()
     if Path(filename).suffix.lower() == ".pdf":
@@ -886,7 +886,7 @@ def process_file(file_obj, filename, dataset_type):
         file_bytes = file_obj.read()
         log("OCR_RUN", prompt_id="kyc-analysis-v1.0",
             details={"filename": filename, "bytes": len(file_bytes)})
-        raw_text = ocr_file(file_bytes, filename)
+        raw_text = run_ocr(file_bytes, filename)
         if not raw_text or len(raw_text.strip()) < 20:
             raise ValueError("No usable text from OCR.")
         if dataset_type == AUTO_DETECT:
@@ -1607,7 +1607,7 @@ def render_main():
                     fbytes = uploaded_img.read()
                     log("OCR_RUN", customer_id=cid_ocr or None, prompt_id="kyc-analysis-v1.0",
                         details={"filename": uploaded_img.name})
-                    extracted = ocr_file(fbytes, uploaded_img.name)
+                    extracted = run_ocr(fbytes, uploaded_img.name)
                     if not extracted or len(extracted.strip()) < 10:
                         st.error("No text extracted. Try a clearer image.")
                     else:
