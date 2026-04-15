@@ -42,6 +42,7 @@ def _build_scenario(archetype: Dict[str, Any], scenario_number: int, run_id: str
     defaults = archetype.get("default_states", {})
     scenario = {
         "scenario_id": f"SCENARIO_{scenario_number:04d}",
+        "customer_id": f"SCENARIO_{scenario_number:04d}",
         "run_id": run_id,
         "archetype_id": archetype.get("archetype_id"),
         "archetype_name": archetype.get("archetype_name"),
