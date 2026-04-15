@@ -79,8 +79,13 @@ temp/
 test_output/
 batch_results*.csv
 debug_*.log
+benchmarks/output/
 
 # Pytest
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Benchmarks config JSONs (allow tracked config files)
+!benchmarks/config/
+!benchmarks/config/*.json
