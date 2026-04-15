@@ -14,12 +14,35 @@ import uuid
 import zipfile
 import hashlib
 import base64
+import argparse
 from pathlib import Path
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 import plotly.graph_objects as go
 
+try:
+    from benchmarks.app_integration import generate_and_get_manifest_path, get_generated_raw_tables
+    PORTFOLIO_GENERATOR_AVAILABLE = True
+except ImportError:
+    PORTFOLIO_GENERATOR_AVAILABLE = False
+
 load_dotenv()
+DEFAULT_DEMO_PORTFOLIO_SIZE = 30
+
+
+def _maybe_run_demo_generator_cli():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--generate-demo-portfolio", action="store_true")
+    parser.add_argument("--portfolio-size", type=int, default=DEFAULT_DEMO_PORTFOLIO_SIZE)
+    args, _ = parser.parse_known_args()
+    if args.generate_demo_portfolio:
+        from benchmarks.app_integration import generate_and_get_manifest_path
+        manifest_path = generate_and_get_manifest_path(size=args.portfolio_size)
+        print(f"Generated demo portfolio ({args.portfolio_size} scenarios) at: {manifest_path}")
+        sys.exit(0)
+
+
+_maybe_run_demo_generator_cli()
 
 st.set_page_config(
     page_title="KYC Compliance Platform",
@@ -27,6 +50,57 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+
+# ── Global styles ─────────────────────────────────────────────────────────────
+
+st.markdown("""
+<style>
+/* Tab list container */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 6px;
+    padding: 4px 0 0 0;
+    border-bottom: 2px solid rgba(255,255,255,0.08);
+}
+
+/* Individual tab */
+.stTabs [data-baseweb="tab"] {
+    font-size: 15px;
+    font-weight: 500;
+    padding: 12px 24px;
+    border-radius: 6px 6px 0 0;
+    color: rgba(255,255,255,0.6);
+    background: transparent;
+    border: none;
+    letter-spacing: 0.01em;
+    transition: color 0.15s ease, background 0.15s ease;
+}
+
+/* Hover state */
+.stTabs [data-baseweb="tab"]:hover {
+    color: rgba(255,255,255,0.9);
+    background: rgba(255,255,255,0.05);
+}
+
+/* Active tab */
+.stTabs [data-baseweb="tab"][aria-selected="true"] {
+    color: #ffffff;
+    font-weight: 700;
+    background: rgba(255,255,255,0.06);
+}
+
+/* Active tab underline indicator */
+.stTabs [data-baseweb="tab-highlight"] {
+    background-color: #0072B2;
+    height: 3px;
+    border-radius: 2px 2px 0 0;
+}
+
+/* Tab panel content area — give it breathing room */
+.stTabs [data-baseweb="tab-panel"] {
+    padding-top: 24px;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -171,7 +245,6 @@ def load_users():
             return {u["username"]: u for u in data.get("users", []) if u.get("active", True)}
     except Exception:
         pass
-    # Fallback includes all roles so Railway works even if users.json is missing
     return {
         "admin":    {"user_id": "fb_admin",   "username": "admin",    "password": "admin123",   "role": "Admin",   "full_name": "Administrator"},
         "manager":  {"user_id": "fb_mgr",     "username": "manager",  "password": "mgr123",     "role": "Manager", "full_name": "Compliance Manager"},
@@ -203,6 +276,7 @@ _DEFAULTS = {
     "dirty_customers": set(),
     "ocr_analysis_cache": {},
     "latest_discrepancy_report": None,
+    "last_generated_manifest_path": None,
 }
 for k, v in _DEFAULTS.items():
     if k not in st.session_state:
@@ -896,7 +970,6 @@ def _try_autoload_engine():
     2. Temp dir from a previous session this deployment (kyc_data_clean/)
     Silently skips if neither exists or neither has customers.
     """
-    # 1. Default dir
     default_dir = Path.cwd() / "Data Clean"
     if default_dir.exists():
         engine, customers = load_engine(default_dir)
@@ -909,7 +982,6 @@ def _try_autoload_engine():
             _seed_structured_provenance()
             return
 
-    # 2. Temp dir from previous upload/clean in this deployment
     tmp_dir = Path(tempfile.gettempdir()) / "kyc_data_clean"
     if tmp_dir.exists() and any(tmp_dir.glob("*.csv")):
         engine, customers = load_engine(tmp_dir)
@@ -1008,7 +1080,6 @@ def render_main():
         else:
             st.markdown("### Search & Evaluate Customer")
 
-            # Fixed layout: input full width, button below it
             cid_input = st.text_input("Customer ID", placeholder="C00001",
                                        label_visibility="collapsed")
             eval_btn = st.button("Evaluate Customer", type="primary", use_container_width=True)
@@ -1042,7 +1113,6 @@ def render_main():
                                          "triggered_rules": [r["rule_id"] for r in
                                                              reject_rules + review_rules]})
 
-                        # Save to history
                         history_entry = {
                             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                             "evaluated_by": user["username"],
@@ -1059,7 +1129,6 @@ def render_main():
                             st.session_state.customer_history[cid] = []
                         st.session_state.customer_history[cid].append(history_entry)
 
-                        # Metrics row
                         m1, m2, m3, m4 = st.columns(4)
                         m1.metric("Overall Score", f"{score}/100")
                         m2.metric("Customer ID", cid)
@@ -1069,11 +1138,9 @@ def render_main():
 
                         st.divider()
 
-                        # ── Disposition block ──────────────────────────────────
                         show_disposition(disposition)
                         st.markdown(f"**Rationale:** {rationale}")
 
-                        # Triggered reject rules
                         if reject_rules:
                             st.markdown("**Hard Rejection Rules Triggered:**")
                             for r in reject_rules:
@@ -1088,7 +1155,6 @@ def render_main():
                                     unsafe_allow_html=True
                                 )
 
-                        # Triggered review rules
                         if review_rules:
                             st.markdown("**Review Rules Triggered:**")
                             for r in review_rules:
@@ -1105,7 +1171,6 @@ def render_main():
 
                         st.divider()
 
-                        # ── Dimension breakdown ────────────────────────────────
                         dim_map = [
                             ("aml_screening",         "AML Screening",         25),
                             ("identity_verification", "Identity Verification", 20),
@@ -1127,7 +1192,6 @@ def render_main():
                             else:
                                 failing.append(entry)
 
-                        # Show failing and gap dimensions prominently
                         problem_dims = failing + minor_gaps
                         if problem_dims:
                             st.markdown("**Dimension Issues:**")
@@ -1149,7 +1213,6 @@ def render_main():
                                 for e in passing:
                                     st.markdown(f"**{e['label']}** — {e['score']}/100 — {e['finding']}")
 
-                        # Dimension chart — sorted worst first
                         all_dims = {e["label"]: e["score"] for e in
                                     sorted(passing + minor_gaps + failing, key=lambda x: x["score"])}
                         fig = go.Figure(go.Bar(
@@ -1187,7 +1250,6 @@ def render_main():
                                         f"(from {ocr_file or 'N/A'}, {ocr_conf or 'N/A'} confidence)"
                                     )
 
-                        # Remediation (for Review or Reject)
                         if disposition in ("REJECT", "REVIEW") and role in ("Analyst", "Manager", "Admin"):
                             st.divider()
                             st.markdown("**Remediation Actions**")
@@ -1221,7 +1283,6 @@ def render_main():
                                                      "requires_manager_approval": True})
                                         st.success("Clear proposed. Awaiting manager approval.")
 
-                        # Customer history
                         history = st.session_state.customer_history.get(cid, [])
                         if len(history) > 1:
                             st.divider()
@@ -1294,12 +1355,29 @@ def render_main():
                         "account_activity_score", "proof_of_address_score",
                         "beneficial_ownership_score", "data_quality_score",
                         "rationale", "ruleset_version"]
-                rdf = pd.DataFrame(results)
+
+                rdf = pd.DataFrame(results) if results else pd.DataFrame(columns=cols)
+
+                # ── Normalise synthetic portfolio columns if engine couldn't score them ──
+                # Map expected_final_decision → disposition (synthetic manifest column)
+                if "disposition" not in rdf.columns:
+                    if "expected_final_decision" in rdf.columns:
+                        rdf = rdf.rename(columns={"expected_final_decision": "disposition"})
+                    else:
+                        rdf["disposition"] = "REVIEW"
+
+                # Ensure all required columns exist with safe defaults
+                if "overall_score" not in rdf.columns:
+                    rdf["overall_score"] = 0
+                if "rationale" not in rdf.columns:
+                    rdf["rationale"] = "Awaiting engine scoring"
+                if "ruleset_version" not in rdf.columns:
+                    rdf["ruleset_version"] = RULESET_VERSION
+
                 rdf = rdf[[c for c in cols if c in rdf.columns]]
                 num_cols = [c for c in rdf.columns if c.endswith("_score")]
                 rdf[num_cols] = rdf[num_cols].fillna(0)
                 rdf["disposition"] = rdf["disposition"].fillna("REVIEW")
-                rdf["overall_score"] = rdf["overall_score"].fillna(0)
 
                 order = {"REJECT": 0, "REVIEW": 1, "PASS_WITH_NOTES": 2, "PASS": 3}
                 rdf["_s"] = rdf["disposition"].map(order).fillna(4)
@@ -1324,7 +1402,7 @@ def render_main():
                         "avg_score": float(rdf["overall_score"].mean()),
                         "flagged_customer_ids": flagged_ids,
                         "error_customer_ids": [e["id"] for e in errors],
-                        "ruleset_version": rdf["ruleset_version"].iloc[0] if "ruleset_version" in rdf.columns else "unknown",
+                        "ruleset_version": rdf["ruleset_version"].iloc[0] if "ruleset_version" in rdf.columns and len(rdf) > 0 else "unknown",
                     })
                 st.rerun()
 
@@ -1495,10 +1573,30 @@ def render_main():
                         log("ENGINE_RELOAD", details={"customers": len(customers),
                                                        "datasets": list(cleaned.keys())})
                         st.success(f"Engine loaded — {len(customers)} customers ready.")
-                        st.rerun()  # Push updated state to all tabs immediately
+                        st.rerun()
                     else:
                         st.warning("Engine could not initialize. Ensure customers dataset "
                                    "has a customer_id column.")
+
+        if st.session_state.latest_discrepancy_report is not None:
+            touch()
+            dr = st.session_state.latest_discrepancy_report
+            if dr:
+                st.divider()
+                st.markdown("#### Data Discrepancy Summary")
+                disc_df = pd.DataFrame(dr)
+                st.warning(f"{disc_df['customer_id'].nunique()} customer(s) with discrepancies detected.")
+                st.dataframe(disc_df, use_container_width=True, hide_index=True)
+                buf_disc = io.StringIO()
+                disc_df.to_csv(buf_disc, index=False)
+                st.download_button(
+                    "Download Discrepancy CSV",
+                    data=buf_disc.getvalue(),
+                    file_name=f"discrepancies_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                )
+            else:
+                st.info("No data discrepancies detected in current provenance records.")
 
         if st.session_state.latest_discrepancy_report is not None:
             touch()
@@ -1607,10 +1705,7 @@ def render_main():
                                         lines[1:-1] if lines and lines[-1].strip() == "```" else lines[1:]
                                     )
 
-                                # Strip any remaining whitespace
                                 raw_response = raw_response.strip()
-
-                                # Extract only the JSON object if extra content wraps it
                                 start = raw_response.find("{")
                                 end = raw_response.rfind("}") + 1
                                 if start != -1 and end > start:
