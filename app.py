@@ -20,6 +20,12 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 import plotly.graph_objects as go
 
+try:
+    from benchmarks.app_integration import generate_and_get_manifest_path
+    PORTFOLIO_GENERATOR_AVAILABLE = True
+except ImportError:
+    PORTFOLIO_GENERATOR_AVAILABLE = False
+
 load_dotenv()
 DEFAULT_DEMO_PORTFOLIO_SIZE = 30
 
@@ -271,6 +277,7 @@ _DEFAULTS = {
     "dirty_customers": set(),
     "ocr_analysis_cache": {},
     "latest_discrepancy_report": None,
+    "last_generated_manifest_path": None,
 }
 for k, v in _DEFAULTS.items():
     if k not in st.session_state:
@@ -289,6 +296,16 @@ def log(action_type, details=None, customer_id=None, batch_id=None, snapshot=Non
 
 def touch():
     st.session_state.last_activity = datetime.now(timezone.utc)
+
+
+def generate_live_demo_portfolio(size: int = DEFAULT_DEMO_PORTFOLIO_SIZE) -> str:
+    """
+    Generate a fresh synthetic KYC portfolio for the live demo with the specified size.
+    Returns the path to the generated scenario_manifest.jsonl.
+    """
+    from benchmarks.app_integration import generate_and_get_manifest_path
+    manifest_path = generate_and_get_manifest_path(size=size)
+    return str(manifest_path)
 
 
 def _ensure_runtime_action_types():
@@ -1061,6 +1078,9 @@ def render_main():
 
     st.divider()
 
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab_generate, tab8 = st.tabs([
+        "Individual Evaluation", "Batch Results", "Data Management",
+        "Document OCR & AI", "System Info", "Approval Queue", "Cases", "Generate Data", "Audit Trail",
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "Individual Evaluation", "Batch Results", "Data Management",
         "Document OCR & AI", "System Info", "Approval Queue", "Cases", "Audit Trail",
@@ -1992,6 +2012,51 @@ def render_main():
                                     st.rerun()
 
     # ════════════════════════════════════════════════════════
+    # TAB 8: GENERATE DATA
+    # ════════════════════════════════════════════════════════
+    with tab_generate:
+        touch()
+        st.markdown("### Generate Synthetic KYC Portfolio")
+        st.markdown(
+            "Generate a fresh synthetic portfolio of KYC customers for demo and testing purposes. "
+            "Once generated, go to Data Management to load the output files into the engine."
+        )
+
+        if not PORTFOLIO_GENERATOR_AVAILABLE:
+            st.error("Portfolio generator not available. Ensure the benchmarks package is installed.")
+        else:
+            portfolio_size = st.number_input(
+                "Number of synthetic customers to generate",
+                min_value=5, max_value=500, value=30, step=5,
+                help="Controls how many synthetic KYC cases will be generated."
+            )
+
+            if st.button("Generate Fresh Portfolio", type="primary"):
+                touch()
+                with st.spinner(f"Generating {int(portfolio_size)} synthetic customers..."):
+                    try:
+                        manifest_path = generate_and_get_manifest_path(size=int(portfolio_size))
+                        st.session_state["last_generated_manifest_path"] = str(manifest_path)
+                        log("DATA_CLEAN", details={
+                            "action": "synthetic_portfolio_generated",
+                            "size": int(portfolio_size),
+                            "manifest_path": str(manifest_path),
+                            "generated_by": user["username"],
+                        })
+                        st.success(f"Portfolio generated — {int(portfolio_size)} customers.")
+                        st.info(f"Manifest saved to: `{manifest_path}`")
+                        st.markdown(
+                            "Go to the **Data Management** tab to upload and load these files into the engine."
+                        )
+                    except Exception as e:
+                        st.error(f"Generation failed: {e}")
+
+            if "last_generated_manifest_path" in st.session_state and st.session_state["last_generated_manifest_path"]:
+                st.divider()
+                st.caption(f"Last generated manifest: `{st.session_state['last_generated_manifest_path']}`")
+
+    # ════════════════════════════════════════════════════════
+    # TAB 9: AUDIT TRAIL
     # TAB 8: AUDIT TRAIL
     # ════════════════════════════════════════════════════════
     with tab8:
