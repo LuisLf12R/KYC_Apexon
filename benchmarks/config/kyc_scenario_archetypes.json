@@ -1,0 +1,53 @@
+{
+  "archetypes": [
+    {
+      "archetype_id": "A001",
+      "archetype_name": "Clean low-risk individual",
+      "customer_type": "INDIVIDUAL",
+      "risk_tier": "LOW",
+      "primary_dimension_under_test": "OverallCompliance",
+      "default_states": {
+        "aml_state": "NO_HIT_CURRENT",
+        "identity_state": "PRIMARY_CURRENT",
+        "poa_state": "VALID_PRIMARY",
+        "ubo_state": "NOT_APPLICABLE",
+        "activity_state": "NORMAL",
+        "data_quality_state": "HIGH_QUALITY"
+      },
+      "expected_final_decision": "PASS",
+      "is_remediable_case": false,
+      "coverage_tags": [
+        "pass_case",
+        "baseline",
+        "individual_case",
+        "low_risk"
+      ],
+      "demo_priority": "HIGH"
+    },
+    {
+      "archetype_id": "A040",
+      "archetype_name": "Missing PoA remediated by utility bill upload",
+      "customer_type": "INDIVIDUAL",
+      "risk_tier": "MEDIUM",
+      "primary_dimension_under_test": "ProofOfAddress",
+      "default_states": {
+        "aml_state": "NO_HIT_CURRENT",
+        "identity_state": "PRIMARY_CURRENT",
+        "poa_state": "MISSING_POA",
+        "ubo_state": "NOT_APPLICABLE",
+        "activity_state": "NORMAL",
+        "data_quality_state": "MINOR_MISSING"
+      },
+      "expected_final_decision": "REVIEW",
+      "expected_post_remediation_decision": "PASS",
+      "is_remediable_case": true,
+      "coverage_tags": [
+        "ocr_case",
+        "remediation_case",
+        "single_upload",
+        "post_remediation_pass"
+      ],
+      "demo_priority": "HIGH"
+    }
+  ]
+}
