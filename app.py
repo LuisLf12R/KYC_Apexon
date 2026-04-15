@@ -1635,26 +1635,6 @@ def render_main():
             else:
                 st.info("No data discrepancies detected in current provenance records.")
 
-        if st.session_state.latest_discrepancy_report is not None:
-            touch()
-            dr = st.session_state.latest_discrepancy_report
-            if dr:
-                st.divider()
-                st.markdown("#### Data Discrepancy Summary")
-                disc_df = pd.DataFrame(dr)
-                st.warning(f"{disc_df['customer_id'].nunique()} customer(s) with discrepancies detected.")
-                st.dataframe(disc_df, use_container_width=True, hide_index=True)
-                buf_disc = io.StringIO()
-                disc_df.to_csv(buf_disc, index=False)
-                st.download_button(
-                    "Download Discrepancy CSV",
-                    data=buf_disc.getvalue(),
-                    file_name=f"discrepancies_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv",
-                )
-            else:
-                st.info("No data discrepancies detected in current provenance records.")
-
         st.divider()
         st.markdown("#### Download Cleaned Files")
         if st.session_state.data_dir:
@@ -1734,20 +1714,32 @@ def render_main():
                                 )
                                 raw_response = resp.content[0].text.strip()
 
-                                # Strip markdown code fences if present
-                                if raw_response.startswith("```"):
-                                    lines = raw_response.split("\n")
-                                    # Remove first line (```json or ```) and last line (```) if present
-                                    raw_response = "\n".join(
-                                        lines[1:-1] if lines and lines[-1].strip() == "```" else lines[1:]
-                                    )
+                                # Strip markdown code fences (```json ... ``` or ``` ... ```)
+                                if "```" in raw_response:
+                                    import re as _re
+                                    fence_match = _re.search(r"```(?:json)?\s*(.*?)```", raw_response, _re.DOTALL)
+                                    if fence_match:
+                                        raw_response = fence_match.group(1).strip()
 
-                                raw_response = raw_response.strip()
+                                # Extract the outermost JSON object robustly
+                                # Walk character by character to find balanced braces
                                 start = raw_response.find("{")
-                                end = raw_response.rfind("}") + 1
-                                if start != -1 and end > start:
-                                    raw_response = raw_response[start:end]
+                                if start == -1:
+                                    raise ValueError("No JSON object found in Claude response")
+                                depth = 0
+                                end = start
+                                for i, ch in enumerate(raw_response[start:], start=start):
+                                    if ch == "{":
+                                        depth += 1
+                                    elif ch == "}":
+                                        depth -= 1
+                                        if depth == 0:
+                                            end = i + 1
+                                            break
+                                else:
+                                    raise ValueError("Unbalanced braces in Claude response")
 
+                                raw_response = raw_response[start:end].strip()
                                 analysis = json.loads(raw_response)
                                 conf = analysis.get("overall_confidence", 0)
 
