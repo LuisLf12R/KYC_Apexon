@@ -281,7 +281,7 @@ class KYCInputOrchestrator:
         if input_path.is_dir():
             logger.info(f"Detected folder input: {input_path.name}")
             data = self.process_input_folder(
-                input_path,
+                input_path, 
                 doc_type_mapping=doc_type_mapping,
                 merge_with_existing=True
             )
@@ -289,17 +289,15 @@ class KYCInputOrchestrator:
             logger.info(f"Detected file input: {input_path.name}")
             df = self.load_structured_input(input_path)
             data = {input_path.stem: df}
-
+        
         if not data:
             logger.error("Pipeline failed: No data processed")
             return {
                 'pipeline_status': 'FAILED',
                 'error': 'No data processed',
             }
-
-        # Make data available to feed_to_kyc_engine
-        self.merged_data = data
-        engine = self.feed_to_kyc_engine(data)
+        
+        engine = self.feed_to_kyc_engine()
         
         results = {
             'pipeline_status': 'SUCCESS',
@@ -342,10 +340,9 @@ class KYCInputOrchestrator:
 
     def _normalize_scenario_manifest(self, df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
         """
-        Transform a flat scenario manifest DataFrame into engine-ready tables using
-        the LLM pipeline (ExecutionEngine → Claude → cached transform script).
-
-        Returns a dict mapping table name to DataFrame.
+        Transform a flat scenario manifest DataFrame into engine-ready tables.
+        Routes through ExecutionEngine → Claude generates/caches transform script.
+        Returns {table_name: DataFrame}.
         """
         TARGET_SCHEMA = {
             "customers": [
@@ -368,8 +365,11 @@ class KYCInputOrchestrator:
 
         rows = df.to_dict(orient="records")
 
-        # Import here to avoid circular imports
-        sys.path.insert(0, str(self.project_root))
+        # Import lazily to avoid circular imports and OCR dependency at import time
+        project_root_str = str(self.project_root)
+        if project_root_str not in sys.path:
+            sys.path.insert(0, project_root_str)
+
         from llm_integration.execution_engine import ExecutionEngine
 
         engine = ExecutionEngine(cache_dir=self.cache_dir)
@@ -379,6 +379,7 @@ class KYCInputOrchestrator:
             target_schema=TARGET_SCHEMA,
         )
 
+        logger.info("Schema transform returned tables: %s", list(result.keys()))
         return {
             table: pd.DataFrame(table_rows)
             for table, table_rows in result.items()
@@ -387,7 +388,7 @@ class KYCInputOrchestrator:
 
     def _convert_to_engine_format(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Convert merged data to KYC engine expected format.
+        Convert merged data to KYC engine format.
         Detects scenario manifests and normalises them via the LLM transform pipeline.
         """
         engine_data = {}
@@ -395,8 +396,7 @@ class KYCInputOrchestrator:
         for key, value in data.items():
             if isinstance(value, pd.DataFrame) and self._is_scenario_manifest(value):
                 logger.info(
-                    "Detected scenario manifest in key '%s' — "
-                    "normalising via LLM transform pipeline", key
+                    "Detected scenario manifest in '%s' — normalising via LLM pipeline", key
                 )
                 normalized = self._normalize_scenario_manifest(value)
                 engine_data.update(normalized)

@@ -264,27 +264,19 @@ class ScriptCacheManager:
 
     def execute_script(self, script_id: str, input_data, function_name: str = "cleanup") -> Dict:
         """
-        Execute a cached extraction or transformation script.
+        Execute a cached script.
 
         Args:
             script_id: Script to execute
-            input_data: OCR text string (for cleanup) or list of dicts (for transform)
-            function_name: Function to call — "cleanup" for OCR extraction,
-                           "transform" for schema transformation
-
-        Returns:
-            Extracted/transformed data
+            input_data: str for cleanup functions, list[dict] for transform functions
+            function_name: "cleanup" (default) or "transform"
         """
         script = self.load_script(script_id)
-
         namespace = {}
         exec(script['code'], namespace)
-
         if function_name in namespace:
-            result = namespace[function_name](input_data)
-            return result
-        else:
-            raise RuntimeError(f"Script {script_id} has no '{function_name}' function")
+            return namespace[function_name](input_data)
+        raise RuntimeError(f"Script {script_id} has no '{function_name}' function")
 
     def _update_last_used(self, script_id: str):
         """Update last_used timestamp for a script"""

@@ -10,7 +10,6 @@ from typing import Dict, Optional, Tuple
 from dataclasses import dataclass
 from pathlib import Path
 
-from llm_integration.ocr_handler import ocr_from_file, OCRResult
 from llm_integration.script_cache_manager import ScriptCacheManager
 from llm_integration.llm_code_generator import LLMCodeGenerator
 
@@ -75,6 +74,10 @@ class ExecutionEngine:
         """
         import time
         start_time = time.time()
+
+        # Lazy import — keeps OCR dependency out of module-level imports
+        # so ExecutionEngine can be imported without Google Vision being set up
+        from llm_integration.ocr_handler import ocr_from_file
 
         # Step 1: OCR extraction
         _log.debug("Step 1/4: OCR extraction")
@@ -247,18 +250,18 @@ class ExecutionEngine:
         target_schema: Dict[str, list],
     ) -> Dict:
         """
-        Transform a list of structured input rows into engine-ready tables.
+        Transform structured input rows into engine-ready tables via the LLM pipeline.
 
-        Uses the same cache-first pattern as extract_from_text():
-          1. Compute a fingerprint of the input schema + target schema
-          2. Look up a cached transform script
-          3. Cache miss → Claude generates the transform function
-          4. Execute and return result dict: {table_name: [row_dicts]}
+        Same cache-first pattern as extract_from_text():
+          1. Fingerprint input schema + target schema
+          2. Look up cached transform script
+          3. Cache miss → Claude generates def transform(rows) -> dict
+          4. Cache → execute → return {table_name: [row_dicts]}
 
         Args:
-            rows: List of input dicts (e.g. scenario manifest rows)
-            doc_type: Cache key identifier (e.g. "scenario_manifest_to_kyc_tables")
-            target_schema: Dict mapping table_name → list of required column names
+            rows: List of input dicts (scenario manifest rows)
+            doc_type: Cache key (e.g. "scenario_manifest_to_kyc_tables")
+            target_schema: {table_name: [column_names]}
 
         Returns:
             Dict mapping table name to list of row dicts, or {} on failure
@@ -271,14 +274,12 @@ class ExecutionEngine:
 
         start_time = time.time()
 
-        # Fingerprint = input columns + target schema (stable, order-independent)
         schema_fingerprint = _json.dumps(
             {"columns": sorted(rows[0].keys()), "target": target_schema},
             sort_keys=True,
         )
         layout_hash = self.cache_manager.compute_layout_hash(schema_fingerprint)
 
-        # Cache lookup — use high fuzzy threshold since schema must match exactly
         cached_script = self.cache_manager.find_script(
             layout_hash=layout_hash,
             ocr_text=schema_fingerprint,
@@ -291,12 +292,11 @@ class ExecutionEngine:
                 result = self.cache_manager.execute_script(
                     cached_script["id"], rows, function_name="transform"
                 )
-                _log.debug("Schema transform (cached) complete in %.2fs", time.time() - start_time)
+                _log.debug("Schema transform (cached) in %.2fs", time.time() - start_time)
                 return result
             except Exception as e:
-                _log.warning("Cached transform script failed (%s) — regenerating", e)
+                _log.warning("Cached transform failed (%s) — regenerating", e)
 
-        # Cache miss — generate with Claude
         _log.debug("Schema transform: cache miss — generating with Claude")
         generated = self.llm_generator.generate_schema_transform_script(
             input_columns=list(rows[0].keys()),
@@ -319,7 +319,7 @@ class ExecutionEngine:
             result = self.cache_manager.execute_script(
                 script_id, rows, function_name="transform"
             )
-            _log.debug("Schema transform (generated) complete in %.2fs", time.time() - start_time)
+            _log.debug("Schema transform (generated) in %.2fs", time.time() - start_time)
             return result
         except Exception as e:
             _log.error("Transform script execution failed: %s", e)

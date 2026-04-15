@@ -2063,11 +2063,11 @@ def render_main():
 
                             st.caption(f"File also saved locally to: `{manifest_path_obj}`")
 
-                            # ── LLM transform pipeline ──────────────────────────────
+                            # ── LLM Schema Transform Pipeline ─────────────────────
                             st.divider()
                             with st.spinner(
-                                "Claude is generating schema transformation script — "
-                                "this may take ~30s on first run, then cached..."
+                                "Claude is generating schema transformation script "
+                                "(~30s first run, cached after)..."
                             ):
                                 try:
                                     sys.path.insert(0, str(Path.cwd() / "src"))
@@ -2076,23 +2076,28 @@ def render_main():
                                     orchestrator = KYCInputOrchestrator(
                                         project_root=Path.cwd()
                                     )
-
-                                    # Load manifest and detect it's a scenario manifest
                                     manifest_df = orchestrator.load_structured_input(
                                         manifest_path_obj
                                     )
 
-                                    if (
-                                        not manifest_df.empty
-                                        and orchestrator._is_scenario_manifest(manifest_df)
-                                    ):
-                                        # Claude generates (or retrieves cached) transform script
-                                        normalized_tables = orchestrator._normalize_scenario_manifest(
-                                            manifest_df
+                                    if manifest_df.empty:
+                                        st.error("Could not read manifest file.")
+                                    elif not orchestrator._is_scenario_manifest(manifest_df):
+                                        st.error(
+                                            f"Manifest format not recognised — "
+                                            f"columns: {list(manifest_df.columns)}"
+                                        )
+                                    else:
+                                        normalized_tables = (
+                                            orchestrator._normalize_scenario_manifest(manifest_df)
                                         )
 
-                                        if normalized_tables and "customers" in normalized_tables:
-                                            # Save as proper CSVs and load via standard engine loader
+                                        if not normalized_tables or "customers" not in normalized_tables:
+                                            st.error(
+                                                "Schema transformation returned no data. "
+                                                f"Tables returned: {list(normalized_tables.keys())}"
+                                            )
+                                        else:
                                             tmp_dir = save_to_temp(normalized_tables)
                                             engine_obj, customers_df_new = load_engine(tmp_dir)
 
@@ -2111,10 +2116,14 @@ def render_main():
                                                 )
                                                 _seed_structured_provenance()
                                                 n_loaded = len(customers_df_new)
+                                                tables_info = ", ".join(
+                                                    f"{k}: {len(v)}"
+                                                    for k, v in normalized_tables.items()
+                                                )
                                                 st.success(
-                                                    f"Pipeline complete — Claude generated schema "
-                                                    f"transformation script, {n_loaded} customers "
-                                                    f"loaded and scored. "
+                                                    f"Pipeline complete — Claude generated "
+                                                    f"schema transform, {n_loaded} customers "
+                                                    f"loaded ({tables_info}). "
                                                     f"Go to **Batch Results** to evaluate."
                                                 )
                                                 log(
@@ -2127,24 +2136,16 @@ def render_main():
                                                     },
                                                 )
                                             else:
-                                                st.warning(
+                                                st.error(
                                                     "Engine could not initialise from transformed "
-                                                    "tables. Load via Data Management instead."
+                                                    "tables. Check that customers table has "
+                                                    "customer_id column."
                                                 )
-                                        else:
-                                            st.warning(
-                                                "Schema transformation returned no data. "
-                                                "Load via Data Management instead."
-                                            )
-                                    else:
-                                        st.warning(
-                                            "Manifest format not recognised. "
-                                            "Load via Data Management instead."
-                                        )
                                 except Exception as _orch_err:
-                                    st.warning(
-                                        f"LLM pipeline error: {_orch_err}. "
-                                        "Use Data Management tab to load files manually."
+                                    import traceback
+                                    st.error(
+                                        f"LLM pipeline error: {_orch_err}\n\n"
+                                        f"```\n{traceback.format_exc()}\n```"
                                     )
                         else:
                             st.warning("File generated but could not be read for download.")

@@ -273,19 +273,8 @@ Return ONLY the function code, nothing else. Start with "def cleanup(ocr_text: s
         doc_type: str,
     ) -> "GeneratedScript":
         """
-        Generate a schema transformation function using Claude.
-
-        Claude receives the input column names, sample rows, and target schema,
-        and writes a Python function that maps input rows to engine-ready tables.
-
-        Args:
-            input_columns: List of column names in the input data
-            sample_rows: First 3 rows of input data for Claude to inspect
-            target_schema: Dict mapping table name -> list of required column names
-            doc_type: Identifier used for caching (e.g. "scenario_manifest_to_kyc_tables")
-
-        Returns:
-            GeneratedScript with transform function code
+        Ask Claude to write a transform(rows) -> dict function that maps
+        flat input rows to engine-ready table dicts.
         """
         prompt = f"""You are given input data rows with these columns:
 {json.dumps(input_columns, indent=2)}
@@ -293,7 +282,7 @@ Return ONLY the function code, nothing else. Start with "def cleanup(ocr_text: s
 Sample rows (first {len(sample_rows)}):
 {json.dumps(sample_rows, indent=2, default=str)}
 
-Write a Python function that transforms a list of these rows into the following target tables:
+Write a Python function that transforms a list of these rows into the following target tables.
 
 Target schema (table name -> required columns):
 {json.dumps(target_schema, indent=2)}
@@ -301,35 +290,38 @@ Target schema (table name -> required columns):
 Rules:
 - Function signature must be exactly: def transform(rows: list) -> dict:
 - Return a dict where keys are table names and values are lists of row dicts
-- Each output row must contain exactly the columns specified for that table
+- Each output row must contain exactly the columns listed for that table
 - Use only Python stdlib — no imports inside the function
-- Handle None/missing/empty values with safe defaults (empty string or 0)
-- Parse all date fields to YYYY-MM-DD string format from ISO or any common format
-- Map values sensibly (e.g. risk_tier LOW->Low, aml_state NO_HIT_CURRENT->No Hit)
-- Return ONLY the raw function code starting with: def transform(rows: list) -> dict:
+- Handle None/missing values with safe defaults (empty string or 0)
+- Parse all date fields to YYYY-MM-DD string format
+- Map values sensibly, for example:
+    risk_tier: LOW->Low, MEDIUM->Medium, HIGH->High, CRITICAL->Critical
+    aml_state: NO_HIT_CURRENT->No Hit, BLOCKED->Blocked, HIT_CURRENT->Hit - Under Review, CLEARED->Cleared
+    identity_state: PRIMARY_CURRENT->Verified, PRIMARY_EXPIRED->Expired, MISSING_PRIMARY->Missing
+    customer_type: INDIVIDUAL->Individual, CORPORATE->Corporate
+- Return ONLY raw Python code starting with: def transform(rows: list) -> dict:
 """
-
         message = self.client.messages.create(
             model=self.model,
             max_tokens=3000,
             system=(
-                "You are a Python code generator. You write clean, defensive data "
-                "transformation functions. Return ONLY raw Python code with no "
-                "explanation, no markdown, no backticks."
+                "You are a Python code generator. Write clean, defensive data "
+                "transformation functions. Return ONLY raw Python code — "
+                "no explanation, no markdown, no backticks."
             ),
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
         )
 
         transform_code = message.content[0].text.strip()
 
-        # Strip markdown fences if Claude included them
+        # Strip markdown fences if present
         if transform_code.startswith("```"):
             lines = transform_code.split("\n")
             transform_code = "\n".join(
                 lines[1:-1] if lines and lines[-1].strip() == "```" else lines[1:]
             ).strip()
 
-        # Find the function start if there's preamble
+        # Find function start if there's preamble
         idx = transform_code.find("def transform")
         if idx > 0:
             transform_code = transform_code[idx:]
@@ -338,7 +330,9 @@ Rules:
         try:
             compile(transform_code, "<transform>", "exec")
         except SyntaxError as e:
-            raise RuntimeError(f"Generated transform script has syntax error: {e}\n\nCode:\n{transform_code}")
+            raise RuntimeError(
+                f"Generated transform script has syntax error: {e}\n\nCode:\n{transform_code}"
+            )
 
         return GeneratedScript(
             script_code=transform_code,
