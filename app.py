@@ -14,12 +14,35 @@ import uuid
 import zipfile
 import hashlib
 import base64
+import argparse
 from pathlib import Path
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 import plotly.graph_objects as go
 
+try:
+    from benchmarks.app_integration import generate_and_get_manifest_path
+    PORTFOLIO_GENERATOR_AVAILABLE = True
+except ImportError:
+    PORTFOLIO_GENERATOR_AVAILABLE = False
+
 load_dotenv()
+DEFAULT_DEMO_PORTFOLIO_SIZE = 30
+
+
+def _maybe_run_demo_generator_cli():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--generate-demo-portfolio", action="store_true")
+    parser.add_argument("--portfolio-size", type=int, default=DEFAULT_DEMO_PORTFOLIO_SIZE)
+    args, _ = parser.parse_known_args()
+    if args.generate_demo_portfolio:
+        from benchmarks.app_integration import generate_and_get_manifest_path
+        manifest_path = generate_and_get_manifest_path(size=args.portfolio_size)
+        print(f"Generated demo portfolio ({args.portfolio_size} scenarios) at: {manifest_path}")
+        sys.exit(0)
+
+
+_maybe_run_demo_generator_cli()
 
 st.set_page_config(
     page_title="KYC Compliance Platform",
@@ -297,6 +320,11 @@ _DEFAULTS = {
     "case_sla_amber_days": DEFAULT_SLA_AMBER_DAYS,
     "case_sla_red_days": DEFAULT_SLA_RED_DAYS,
     "latest_export_package": None,
+    "provenance_store": None,
+    "dirty_customers": set(),
+    "ocr_analysis_cache": {},
+    "latest_discrepancy_report": None,
+    "last_generated_manifest_path": None,
 }
 for k, v in _DEFAULTS.items():
     if k not in st.session_state:
@@ -317,6 +345,16 @@ def touch():
     st.session_state.last_activity = datetime.now(timezone.utc)
 
 
+def generate_live_demo_portfolio(size: int = DEFAULT_DEMO_PORTFOLIO_SIZE) -> str:
+    """
+    Generate a fresh synthetic KYC portfolio for the live demo with the specified size.
+    Returns the path to the generated scenario_manifest.jsonl.
+    """
+    from benchmarks.app_integration import generate_and_get_manifest_path
+    manifest_path = generate_and_get_manifest_path(size=size)
+    return str(manifest_path)
+
+
 def _ensure_runtime_action_types():
     """Allow app-level workflow actions without editing audit_logger.py."""
     try:
@@ -325,6 +363,182 @@ def _ensure_runtime_action_types():
         ACTION_TYPES.setdefault("CASE_CLOSED", "Manager/Admin closed a customer case")
     except Exception:
         pass
+
+
+def _get_provenance_store():
+    if st.session_state.provenance_store is None:
+        sys.path.insert(0, str(Path.cwd() / "src"))
+        from data_provenance import CustomerProvenance
+        st.session_state.provenance_store = CustomerProvenance()
+    return st.session_state.provenance_store
+
+
+def _format_conf_pct(conf):
+    if conf is None or pd.isna(conf):
+        return ""
+    return f"{int(round(float(conf) * 100))}%"
+
+
+def _seed_structured_provenance():
+    """Seed user-provided structured fields into provenance once."""
+    if not st.session_state.engines_initialized:
+        return
+    prov = _get_provenance_store()
+    engine = st.session_state.kyc_engine
+    if engine is None or engine.customers is None or len(engine.customers) == 0:
+        return
+
+    datasets = [engine.customers, engine.id_verifications, engine.screenings, engine.transactions, engine.beneficial_owners]
+    for df in datasets:
+        if df is None or len(df) == 0 or "customer_id" not in df.columns:
+            continue
+        for _, row in df.iterrows():
+            cid = str(row.get("customer_id", "")).strip()
+            if not cid:
+                continue
+            for field in df.columns:
+                if field == "customer_id":
+                    continue
+                val = row.get(field)
+                if pd.isna(val) or str(val).strip() == "":
+                    continue
+                if not prov.get_field_history(cid, field):
+                    prov.set_field(cid, field, val, source="User-Provided")
+
+
+def _collect_discrepancy_report():
+    prov = _get_provenance_store()
+    rows = []
+    customer_ids = prov.get_customer_ids()
+    for cid in customer_ids:
+        disc = prov.detect_discrepancies(cid)
+        if not disc:
+            continue
+        fields = []
+        for d in disc:
+            field = d["field_name"]
+            fields.append(field)
+            rows.append({
+                "customer_id": cid,
+                "field": field,
+                "values_by_source": json.dumps(d["values_by_source"], default=str),
+            })
+        log("FLAG_RAISED", customer_id=cid, details={"reason": "data_discrepancy", "fields": sorted(set(fields))})
+    return rows
+
+
+def _customer_in_engine(customer_id: str) -> bool:
+    if not st.session_state.engines_initialized or st.session_state.customers_df is None:
+        return False
+    cdf = st.session_state.customers_df
+    if "customer_id" not in cdf.columns:
+        return False
+    return str(customer_id) in set(cdf["customer_id"].astype(str).tolist())
+
+
+def _record_ocr_analysis_provenance(customer_id: str, analysis: dict, filename: str):
+    if not customer_id:
+        return []
+    prov = _get_provenance_store()
+    written = []
+    for k, v in analysis.items():
+        if k.endswith("_citation") or k.endswith("_confidence") or k in ("meta", "compliance_flags", "risk_indicators", "discrepancies", "extraction_summary"):
+            continue
+        if v is None or (isinstance(v, str) and not v.strip()):
+            continue
+        conf = analysis.get(f"{k}_confidence")
+        prov.set_field(customer_id, k, v, source="OCR-Extracted", source_file=filename, confidence=conf)
+        written.append({"field": k, "value": v, "confidence": conf})
+    return written
+
+
+def _update_single_customer_records(customer_id: str, doc_type: str, analysis: dict):
+    engine = st.session_state.kyc_engine
+    updated_fields = []
+    cid = str(customer_id)
+    now_date = datetime.now(timezone.utc).date().isoformat()
+
+    def _upsert(df, values: dict):
+        nonlocal updated_fields
+        if df is None:
+            return
+        for col in values.keys():
+            if col not in df.columns:
+                df[col] = None
+        match_idx = df.index[df["customer_id"].astype(str) == cid].tolist() if "customer_id" in df.columns else []
+        if match_idx:
+            idx = match_idx[0]
+            for col, val in values.items():
+                if val is not None and str(val).strip() != "":
+                    df.at[idx, col] = val
+                    updated_fields.append(col)
+        else:
+            row = {"customer_id": cid}
+            row.update({k: v for k, v in values.items() if v is not None and str(v).strip() != ""})
+            df.loc[len(df)] = row
+            updated_fields.extend(list(row.keys()))
+
+    identity_values = {
+        "document_type": "IDENTITY_DOCUMENT",
+        "document_number": analysis.get("document_number"),
+        "issue_date": analysis.get("issue_date"),
+        "expiry_date": analysis.get("expiry_date"),
+        "verification_date": now_date,
+        "document_status": "VERIFIED",
+    }
+    address_values = {
+        "jurisdiction": analysis.get("address"),
+        "country_of_origin": analysis.get("nationality"),
+    }
+
+    if "identity" in doc_type.lower() or "passport" in doc_type.lower():
+        _upsert(engine.id_verifications, identity_values)
+    elif "proof of address" in doc_type.lower():
+        _upsert(engine.customers, address_values)
+    else:
+        _upsert(engine.id_verifications, identity_values)
+        _upsert(engine.customers, address_values)
+
+    if engine.customers is not None and "customer_id" in engine.customers.columns:
+        st.session_state.customers_df = engine.customers.copy()
+    return sorted(set(updated_fields))
+
+
+def _get_provenance_table(customer_id: str):
+    prov = _get_provenance_store()
+    rows = []
+    engine = st.session_state.kyc_engine
+    base_fields = {}
+    if engine and engine.customers is not None and "customer_id" in engine.customers.columns:
+        match = engine.customers[engine.customers["customer_id"].astype(str) == str(customer_id)]
+        if not match.empty:
+            base_fields = match.iloc[0].to_dict()
+    latest = prov.get_all_fields(customer_id)
+    all_fields = sorted(set(base_fields.keys()) | set(latest.keys()))
+    for field in all_fields:
+        tag = latest.get(field)
+        if tag:
+            rows.append({
+                "Field": field,
+                "Current Value": tag.value,
+                "Source": tag.source or "User-Provided",
+                "Source File": tag.source_file or "",
+                "Confidence": _format_conf_pct(tag.confidence),
+                "Last Updated": tag.timestamp,
+            })
+        else:
+            val = base_fields.get(field, "")
+            if pd.isna(val):
+                val = ""
+            rows.append({
+                "Field": field,
+                "Current Value": val,
+                "Source": "User-Provided",
+                "Source File": "",
+                "Confidence": "",
+                "Last Updated": "",
+            })
+    return rows
 
 
 def _parse_iso(ts: str):
@@ -824,6 +1038,7 @@ def _try_autoload_engine():
             st.session_state.engines_initialized = True
             st.session_state.data_dir = default_dir
             st.session_state.data_source_label = "Data Clean/ (default)"
+            _seed_structured_provenance()
             return
 
     # 2. Temp dir from previous upload/clean in this deployment
@@ -836,6 +1051,7 @@ def _try_autoload_engine():
             st.session_state.engines_initialized = True
             st.session_state.data_dir = tmp_dir
             st.session_state.data_source_label = "Previously cleaned data (auto-loaded)"
+            _seed_structured_provenance()
 
 
 # ╔══════════════════════════════════════════════════════════════════════════════
@@ -847,6 +1063,8 @@ def render_main():
     role = user["role"]
     logger = get_logger()
     _ensure_runtime_action_types()
+    _get_provenance_store()
+    _seed_structured_provenance()
 
     # Inactivity warning banner (shown on next interaction after 13 min)
     if st.session_state.timeout_warning_logged:
@@ -907,9 +1125,10 @@ def render_main():
 
     st.divider()
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab_generate, tab8 = st.tabs([
         "Individual Evaluation", "Batch Results", "Data Management",
-        "Document OCR & AI", "System Info", "Approval Queue", "Cases", "Audit Trail",
+        "Document OCR & AI", "System Info", "Approval Queue", "Cases",
+        "Generate Data", "Audit Trail",
     ])
 
     # ════════════════════════════════════════════════════════
@@ -1077,6 +1296,29 @@ def render_main():
                                           height=300, margin=dict(l=10, r=10, t=20, b=10),
                                           plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
                         st.plotly_chart(fig, use_container_width=True)
+
+                        with st.expander("Field Provenance & Change History", expanded=False):
+                            touch()
+                            prov_rows = _get_provenance_table(cid)
+                            if prov_rows:
+                                st.dataframe(pd.DataFrame(prov_rows), use_container_width=True, hide_index=True)
+                            else:
+                                st.info("No provenance data for this customer yet.")
+
+                            discrepancies = _get_provenance_store().detect_discrepancies(cid)
+                            if discrepancies:
+                                st.warning("Discrepancies detected across data sources:")
+                                for d in discrepancies:
+                                    field = d.get("field_name", "")
+                                    vals = d.get("values_by_source", {})
+                                    user_val = vals.get("User-Provided", {}).get("value")
+                                    ocr_val = vals.get("OCR-Extracted", {}).get("value")
+                                    ocr_file = vals.get("OCR-Extracted", {}).get("source_file", "")
+                                    ocr_conf = _format_conf_pct(vals.get("OCR-Extracted", {}).get("confidence"))
+                                    st.markdown(
+                                        f"- **{field}**: User-Provided='{user_val}' vs OCR-Extracted='{ocr_val}' "
+                                        f"(from {ocr_file or 'N/A'}, {ocr_conf or 'N/A'} confidence)"
+                                    )
 
                         # Remediation (for Review or Reject)
                         if disposition in ("REJECT", "REVIEW") and role in ("Analyst", "Manager", "Admin"):
@@ -1362,6 +1604,9 @@ def render_main():
                         st.session_state.data_dir = tmp_dir
                         st.session_state.batch_results = None
                         st.session_state.data_source_label = f"Uploaded & cleaned ({', '.join(cleaned.keys())})"
+                        _seed_structured_provenance()
+                        discrepancy_rows = _collect_discrepancy_report()
+                        st.session_state.latest_discrepancy_report = discrepancy_rows
                         log("ENGINE_RELOAD", details={"customers": len(customers),
                                                        "datasets": list(cleaned.keys())})
                         st.success(f"Engine loaded — {len(customers)} customers ready.")
@@ -1372,6 +1617,26 @@ def render_main():
 
                 if proc_log:
                     st.dataframe(pd.DataFrame(proc_log), use_container_width=True, hide_index=True)
+
+        if st.session_state.latest_discrepancy_report is not None:
+            touch()
+            dr = st.session_state.latest_discrepancy_report
+            if dr:
+                st.divider()
+                st.markdown("#### Data Discrepancy Summary")
+                disc_df = pd.DataFrame(dr)
+                st.warning(f"{disc_df['customer_id'].nunique()} customer(s) with discrepancies detected.")
+                st.dataframe(disc_df, use_container_width=True, hide_index=True)
+                buf_disc = io.StringIO()
+                disc_df.to_csv(buf_disc, index=False)
+                st.download_button(
+                    "Download Discrepancy CSV",
+                    data=buf_disc.getvalue(),
+                    file_name=f"discrepancies_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                )
+            else:
+                st.info("No data discrepancies detected in current provenance records.")
 
         st.divider()
         st.markdown("#### Download Cleaned Files")
@@ -1412,7 +1677,7 @@ def render_main():
             cid_ocr = st.text_input("Customer ID (for linking)", placeholder="C00001")
         with oc2:
             if uploaded_img:
-                st.image(uploaded_img, use_column_width=True)
+                st.image(uploaded_img, use_container_width=True)
 
         if st.button("Run OCR + AI Analysis", type="primary") and uploaded_img:
             touch()
@@ -1450,7 +1715,26 @@ def render_main():
                                     system=system,
                                     messages=[{"role": "user", "content": msg}]
                                 )
-                                analysis = json.loads(resp.content[0].text.strip())
+                                raw_response = resp.content[0].text.strip()
+
+                                # Strip markdown code fences if present
+                                if raw_response.startswith("```"):
+                                    lines = raw_response.split("\n")
+                                    # Remove first line (```json or ```) and last line (```) if present
+                                    raw_response = "\n".join(
+                                        lines[1:-1] if lines and lines[-1].strip() == "```" else lines[1:]
+                                    )
+
+                                # Strip any remaining whitespace
+                                raw_response = raw_response.strip()
+
+                                # Extract only the JSON object if extra content wraps it
+                                start = raw_response.find("{")
+                                end = raw_response.rfind("}") + 1
+                                if start != -1 and end > start:
+                                    raw_response = raw_response[start:end]
+
+                                analysis = json.loads(raw_response)
                                 conf = analysis.get("overall_confidence", 0)
 
                                 am1, am2, am3 = st.columns(3)
@@ -1520,6 +1804,71 @@ def render_main():
                                     file_name=f"ocr_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
                                     mime="application/json"
                                 )
+
+                                linked_cid = (cid_ocr or "").strip().upper()
+                                if linked_cid:
+                                    written_fields = _record_ocr_analysis_provenance(
+                                        linked_cid, analysis, uploaded_img.name
+                                    )
+                                    if _customer_in_engine(linked_cid):
+                                        st.session_state.dirty_customers.add(linked_cid)
+                                    st.session_state.ocr_analysis_cache[linked_cid] = {
+                                        "analysis": analysis,
+                                        "filename": uploaded_img.name,
+                                        "doc_type": doc_type,
+                                        "written_fields": [w["field"] for w in written_fields],
+                                        "captured_at": datetime.now(timezone.utc).isoformat(),
+                                    }
+                                    st.info(
+                                        f"Provenance recorded for {linked_cid} "
+                                        f"({len(written_fields)} field(s)); customer marked dirty for optional re-score."
+                                    )
+
+                                    if st.button("Apply to Dataset & Re-score Customer", type="secondary"):
+                                        touch()
+                                        before_score = None
+                                        before_disp = None
+                                        hist = st.session_state.customer_history.get(linked_cid, [])
+                                        if hist:
+                                            before_score = hist[-1].get("overall_score")
+                                            before_disp = hist[-1].get("disposition")
+
+                                        updated_fields = _update_single_customer_records(linked_cid, doc_type, analysis)
+                                        rescored = st.session_state.kyc_engine.evaluate_customer(linked_cid)
+                                        after_score = rescored.get("overall_score")
+                                        after_disp = rescored.get("disposition")
+                                        st.session_state.dirty_customers.discard(linked_cid)
+
+                                        h_entry = {
+                                            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                            "evaluated_by": user["username"],
+                                            "overall_score": after_score,
+                                            "disposition": after_disp,
+                                            "aml_screening_score": rescored.get("aml_screening_score", 0),
+                                            "identity_verification_score": rescored.get("identity_verification_score", 0),
+                                            "account_activity_score": rescored.get("account_activity_score", 0),
+                                            "proof_of_address_score": rescored.get("proof_of_address_score", 0),
+                                            "beneficial_ownership_score": rescored.get("beneficial_ownership_score", 0),
+                                            "data_quality_score": rescored.get("data_quality_score", 0),
+                                        }
+                                        st.session_state.customer_history.setdefault(linked_cid, []).append(h_entry)
+
+                                        b1, b2 = st.columns(2)
+                                        b1.metric("Before Score / Disposition",
+                                                  f"{before_score if before_score is not None else 'N/A'} / {before_disp or 'N/A'}")
+                                        b2.metric("After Score / Disposition", f"{after_score} / {after_disp}")
+
+                                        log("ENGINE_RELOAD", customer_id=linked_cid, details={
+                                            "scope": "single_customer_rescore",
+                                            "doc_type": doc_type,
+                                            "source_file": uploaded_img.name,
+                                            "updated_fields": updated_fields,
+                                            "before_score": before_score,
+                                            "before_disposition": before_disp,
+                                            "after_score": after_score,
+                                            "after_disposition": after_disp,
+                                        })
+                                        st.success("Dataset updated and customer re-scored.")
                             except Exception as e:
                                 st.error(f"AI analysis failed: {e}")
                 except Exception as e:
@@ -1708,6 +2057,50 @@ def render_main():
                                     st.rerun()
 
     # ════════════════════════════════════════════════════════
+    # TAB 8: GENERATE DATA
+    # ════════════════════════════════════════════════════════
+    with tab_generate:
+        touch()
+        st.markdown("### Generate Synthetic KYC Portfolio")
+        st.markdown(
+            "Generate a fresh synthetic portfolio of KYC customers for demo and testing purposes. "
+            "Once generated, go to Data Management to load the output files into the engine."
+        )
+
+        if not PORTFOLIO_GENERATOR_AVAILABLE:
+            st.error("Portfolio generator not available. Ensure the benchmarks package is installed.")
+        else:
+            portfolio_size = st.number_input(
+                "Number of synthetic customers to generate",
+                min_value=5, max_value=500, value=30, step=5,
+                help="Controls how many synthetic KYC cases will be generated."
+            )
+
+            if st.button("Generate Fresh Portfolio", type="primary"):
+                touch()
+                with st.spinner(f"Generating {int(portfolio_size)} synthetic customers..."):
+                    try:
+                        manifest_path = generate_and_get_manifest_path(size=int(portfolio_size))
+                        st.session_state["last_generated_manifest_path"] = str(manifest_path)
+                        log("DATA_CLEAN", details={
+                            "action": "synthetic_portfolio_generated",
+                            "size": int(portfolio_size),
+                            "manifest_path": str(manifest_path),
+                            "generated_by": user["username"],
+                        })
+                        st.success(f"Portfolio generated — {int(portfolio_size)} customers.")
+                        st.info(f"Manifest saved to: `{manifest_path}`")
+                        st.markdown(
+                            "Go to the **Data Management** tab to upload and load these files into the engine."
+                        )
+                    except Exception as e:
+                        st.error(f"Generation failed: {e}")
+
+            if "last_generated_manifest_path" in st.session_state and st.session_state["last_generated_manifest_path"]:
+                st.divider()
+                st.caption(f"Last generated manifest: `{st.session_state['last_generated_manifest_path']}`")
+
+    # ════════════════════════════════════════════════════════
     # TAB 8: AUDIT TRAIL
     # ════════════════════════════════════════════════════════
     with tab8:
@@ -1743,6 +2136,33 @@ def render_main():
 
             st.markdown(f"**{len(filtered)} of {logger.event_count()} events**")
             st.dataframe(filtered, use_container_width=True, hide_index=True)
+
+            touch()
+            st.divider()
+            st.markdown("#### Data Provenance Summary")
+            prov = _get_provenance_store()
+            p_customers = prov.get_customer_ids()
+            if not p_customers:
+                st.info("No provenance data captured yet.")
+            else:
+                total_fields = 0
+                total_discrepancies = 0
+                for pcid in p_customers:
+                    total_fields += len(prov.get_all_fields(pcid))
+                    total_discrepancies += len(prov.detect_discrepancies(pcid))
+                ps1, ps2, ps3 = st.columns(3)
+                ps1.metric("Total Fields Tracked", total_fields)
+                ps2.metric("Customers with Provenance", len(p_customers))
+                ps3.metric("Total Discrepancies", total_discrepancies)
+
+                chosen = st.selectbox("View customer provenance history", p_customers, key="prov_customer_pick")
+                hist_rows = prov.get_customer_history_rows(chosen)
+                if hist_rows:
+                    show_df = pd.DataFrame(hist_rows)
+                    show_df["Confidence"] = show_df["Confidence"].apply(_format_conf_pct)
+                    st.dataframe(show_df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No provenance history rows for selected customer.")
 
             st.divider()
             v1, v2 = st.columns(2)
