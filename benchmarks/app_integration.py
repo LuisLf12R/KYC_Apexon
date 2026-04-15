@@ -8,5 +8,5 @@ def generate_and_get_manifest_path(size: int) -> Path:
     Generate a demo portfolio of the given size and return the Path
     to the scenario_manifest.jsonl file.
     """
-    manifest_path_str = generate_demo_portfolio(size=size, run_id=None, output_path=None)
+    manifest_path_str = generate_demo_portfolio(size=size, run_id=None)
     return Path(manifest_path_str)
