@@ -2100,7 +2100,8 @@ def render_main():
                             lines = [json.loads(l) for l in raw_jsonl.strip().splitlines() if l.strip()]
                             if lines:
                                 csv_buf = _io.StringIO()
-                                writer = csv.DictWriter(csv_buf, fieldnames=lines[0].keys())
+                                all_fields = list(dict.fromkeys(k for line in lines for k in line.keys()))
+                                writer = csv.DictWriter(csv_buf, fieldnames=all_fields, extrasaction="ignore")
                                 writer.writeheader()
                                 writer.writerows(lines)
                                 csv_bytes = csv_buf.getvalue().encode("utf-8")
