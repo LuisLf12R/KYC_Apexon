@@ -2062,6 +2062,90 @@ def render_main():
                                 )
 
                             st.caption(f"File also saved locally to: `{manifest_path_obj}`")
+
+                            # ── LLM transform pipeline ──────────────────────────────
+                            st.divider()
+                            with st.spinner(
+                                "Claude is generating schema transformation script — "
+                                "this may take ~30s on first run, then cached..."
+                            ):
+                                try:
+                                    sys.path.insert(0, str(Path.cwd() / "src"))
+                                    from kyc_input_orchestrator import KYCInputOrchestrator
+
+                                    orchestrator = KYCInputOrchestrator(
+                                        project_root=Path.cwd()
+                                    )
+
+                                    # Load manifest and detect it's a scenario manifest
+                                    manifest_df = orchestrator.load_structured_input(
+                                        manifest_path_obj
+                                    )
+
+                                    if (
+                                        not manifest_df.empty
+                                        and orchestrator._is_scenario_manifest(manifest_df)
+                                    ):
+                                        # Claude generates (or retrieves cached) transform script
+                                        normalized_tables = orchestrator._normalize_scenario_manifest(
+                                            manifest_df
+                                        )
+
+                                        if normalized_tables and "customers" in normalized_tables:
+                                            # Save as proper CSVs and load via standard engine loader
+                                            tmp_dir = save_to_temp(normalized_tables)
+                                            engine_obj, customers_df_new = load_engine(tmp_dir)
+
+                                            if (
+                                                engine_obj is not None
+                                                and customers_df_new is not None
+                                                and len(customers_df_new) > 0
+                                            ):
+                                                st.session_state.kyc_engine = engine_obj
+                                                st.session_state.customers_df = customers_df_new
+                                                st.session_state.engines_initialized = True
+                                                st.session_state.data_dir = tmp_dir
+                                                st.session_state.batch_results = None
+                                                st.session_state.data_source_label = (
+                                                    "Synthetic Portfolio (LLM-transformed)"
+                                                )
+                                                _seed_structured_provenance()
+                                                n_loaded = len(customers_df_new)
+                                                st.success(
+                                                    f"Pipeline complete — Claude generated schema "
+                                                    f"transformation script, {n_loaded} customers "
+                                                    f"loaded and scored. "
+                                                    f"Go to **Batch Results** to evaluate."
+                                                )
+                                                log(
+                                                    "ENGINE_RELOAD",
+                                                    details={
+                                                        "source": "synthetic_portfolio_llm_transform",
+                                                        "customers": n_loaded,
+                                                        "tables": list(normalized_tables.keys()),
+                                                        "generated_by": user["username"],
+                                                    },
+                                                )
+                                            else:
+                                                st.warning(
+                                                    "Engine could not initialise from transformed "
+                                                    "tables. Load via Data Management instead."
+                                                )
+                                        else:
+                                            st.warning(
+                                                "Schema transformation returned no data. "
+                                                "Load via Data Management instead."
+                                            )
+                                    else:
+                                        st.warning(
+                                            "Manifest format not recognised. "
+                                            "Load via Data Management instead."
+                                        )
+                                except Exception as _orch_err:
+                                    st.warning(
+                                        f"LLM pipeline error: {_orch_err}. "
+                                        "Use Data Management tab to load files manually."
+                                    )
                         else:
                             st.warning("File generated but could not be read for download.")
 
