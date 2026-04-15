@@ -1595,7 +1595,7 @@ def render_main():
             cid_ocr = st.text_input("Customer ID (for linking)", placeholder="C00001")
         with oc2:
             if uploaded_img:
-                st.image(uploaded_img, use_column_width=True)
+                st.image(uploaded_img, use_container_width=True)
 
         if st.button("Run OCR + AI Analysis", type="primary") and uploaded_img:
             touch()
@@ -1633,7 +1633,26 @@ def render_main():
                                     system=system,
                                     messages=[{"role": "user", "content": msg}]
                                 )
-                                analysis = json.loads(resp.content[0].text.strip())
+                                raw_response = resp.content[0].text.strip()
+
+                                # Strip markdown code fences if present
+                                if raw_response.startswith("```"):
+                                    lines = raw_response.split("\n")
+                                    # Remove first line (```json or ```) and last line (```) if present
+                                    raw_response = "\n".join(
+                                        lines[1:-1] if lines and lines[-1].strip() == "```" else lines[1:]
+                                    )
+
+                                # Strip any remaining whitespace
+                                raw_response = raw_response.strip()
+
+                                # Extract only the JSON object if extra content wraps it
+                                start = raw_response.find("{")
+                                end = raw_response.rfind("}") + 1
+                                if start != -1 and end > start:
+                                    raw_response = raw_response[start:end]
+
+                                analysis = json.loads(raw_response)
                                 conf = analysis.get("overall_confidence", 0)
 
                                 am1, am2, am3 = st.columns(3)
