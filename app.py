@@ -1403,7 +1403,7 @@ def render_main():
                         "avg_score": float(rdf["overall_score"].mean()),
                         "flagged_customer_ids": flagged_ids,
                         "error_customer_ids": [e["id"] for e in errors],
-                        "ruleset_version": rdf["ruleset_version"].iloc[0] if "ruleset_version" in rdf.columns else "unknown",
+                        "ruleset_version": rdf["ruleset_version"].iloc[0] if "ruleset_version" in rdf.columns and len(rdf) > 0 else "unknown",
                     })
                 st.rerun()
 
