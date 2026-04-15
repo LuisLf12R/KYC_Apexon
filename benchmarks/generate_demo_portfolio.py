@@ -80,6 +80,12 @@ def _apply_constraints(scenario: Dict[str, Any], constraints: List[Dict[str, Any
     return updated
 
 
+def generate_demo_portfolio(size: int, run_id: str | None = None, output_path: str | None = None) -> str:
+    """
+    Generate a demo portfolio and return absolute path to scenario_manifest.jsonl.
+    """
+    run_id = run_id or _default_run_id()
+    out_file = Path(output_path) if output_path else OUTPUT_FILE
 def generate_demo_portfolio(size: int, run_id: str) -> Path:
     _ = load_generator_matrix()  # loaded for config consistency in v1
     constraints_cfg = load_constraint_catalog()
@@ -106,6 +112,13 @@ def generate_demo_portfolio(size: int, run_id: str) -> Path:
         scenarios[0]["aml_state"] = "BLOCKED"
         scenarios[0] = _apply_constraints(scenarios[0], constraints)
 
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    with out_file.open("w", encoding="utf-8") as f:
+        for scenario in scenarios:
+            f.write(json.dumps(scenario) + "\n")
+
+    print(f"Wrote {len(scenarios)} scenarios to {out_file}")
+    return str(out_file.resolve())
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     with OUTPUT_FILE.open("w", encoding="utf-8") as f:
         for scenario in scenarios:
@@ -121,6 +134,7 @@ def main() -> None:
     parser.add_argument("--run-id", type=str, default=None, help="Optional run identifier.")
     args = parser.parse_args()
 
+    generate_demo_portfolio(size=args.size, run_id=args.run_id, output_path=None)
     run_id = args.run_id or _default_run_id()
     generate_demo_portfolio(size=args.size, run_id=run_id)
 

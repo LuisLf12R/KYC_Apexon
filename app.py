@@ -14,12 +14,29 @@ import uuid
 import zipfile
 import hashlib
 import base64
+import argparse
 from pathlib import Path
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 import plotly.graph_objects as go
 
 load_dotenv()
+DEFAULT_DEMO_PORTFOLIO_SIZE = 30
+
+
+def _maybe_run_demo_generator_cli():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--generate-demo-portfolio", action="store_true")
+    parser.add_argument("--portfolio-size", type=int, default=DEFAULT_DEMO_PORTFOLIO_SIZE)
+    args, _ = parser.parse_known_args()
+    if args.generate_demo_portfolio:
+        from benchmarks.app_integration import generate_and_get_manifest_path
+        manifest_path = generate_and_get_manifest_path(size=args.portfolio_size)
+        print(f"Generated demo portfolio ({args.portfolio_size} scenarios) at: {manifest_path}")
+        sys.exit(0)
+
+
+_maybe_run_demo_generator_cli()
 
 st.set_page_config(
     page_title="KYC Compliance Platform",
