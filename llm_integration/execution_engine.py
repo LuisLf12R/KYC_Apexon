@@ -4,12 +4,17 @@ OCR -> Cache lookup -> Script execution -> LLM generation -> Cache store
 """
 
 import os
+import sys
+import logging
 from typing import Dict, Optional, Tuple
 from dataclasses import dataclass
+from pathlib import Path
 
 from llm_integration.ocr_handler import ocr_from_file, OCRResult
 from llm_integration.script_cache_manager import ScriptCacheManager
 from llm_integration.llm_code_generator import LLMCodeGenerator
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -72,13 +77,13 @@ class ExecutionEngine:
         start_time = time.time()
 
         # Step 1: OCR extraction
-        print(f"[1/4] Extracting text from image...")
+        _log.debug("Step 1/4: OCR extraction")
         ocr_result = ocr_from_file(image_path)
         ocr_text = ocr_result.full_text
         ocr_confidence = ocr_result.confidence
 
         # Step 2: Cache lookup
-        print(f"[2/4] Checking script cache...")
+        _log.debug("Step 2/4: Cache lookup")
         layout_hash = self.cache_manager.compute_layout_hash(ocr_text)
         cached_script = self.cache_manager.find_script(
             layout_hash=layout_hash,
@@ -88,7 +93,7 @@ class ExecutionEngine:
 
         if cached_script:
             # Step 3a: Execute cached script
-            print(f"[3/4] Found cached script: {cached_script['id']}")
+            _log.debug("Step 3/4: Cache hit — script %s", cached_script['id'])
             extracted_data = self._execute_script(
                 cached_script['id'],
                 ocr_text
@@ -108,7 +113,7 @@ class ExecutionEngine:
 
         else:
             # Step 3b: Generate new script with Claude
-            print(f"[3/4] No cached script found. Generating with Claude...")
+            _log.debug("Step 3/4: Cache miss — generating with Claude")
             generated_script = self.llm_generator.generate_cleanup_script(
                 ocr_text=ocr_text,
                 doc_type=doc_type,
@@ -121,10 +126,10 @@ class ExecutionEngine:
             )
 
             if not is_valid:
-                print(f"Warning: Script validation failed: {error}")
+                _log.warning("Script validation failed: %s", error)
 
             # Step 4: Cache the generated script
-            print(f"[4/4] Caching generated script...")
+            _log.debug("Step 4/4: Caching generated script")
             script_id = self.cache_manager.save_script(
                 script_code=generated_script.script_code,
                 schema_code=generated_script.schema_code,
@@ -172,7 +177,7 @@ class ExecutionEngine:
         import time
         start_time = time.time()
 
-        print(f"[1/3] Checking script cache...")
+        _log.debug("Step 1/3: Cache lookup")
         layout_hash = self.cache_manager.compute_layout_hash(ocr_text)
         cached_script = self.cache_manager.find_script(
             layout_hash=layout_hash,
@@ -181,7 +186,7 @@ class ExecutionEngine:
         )
 
         if cached_script:
-            print(f"[2/3] Found cached script: {cached_script['id']}")
+            _log.debug("Step 2/3: Cache hit — script %s", cached_script['id'])
             extracted_data = self._execute_script(cached_script['id'], ocr_text)
 
             execution_time = time.time() - start_time
@@ -197,7 +202,7 @@ class ExecutionEngine:
             )
 
         else:
-            print(f"[2/3] Generating new script with Claude...")
+            _log.debug("Step 2/3: Cache miss — generating with Claude")
             generated_script = self.llm_generator.generate_cleanup_script(
                 ocr_text=ocr_text,
                 doc_type=doc_type
@@ -208,9 +213,9 @@ class ExecutionEngine:
             )
 
             if not is_valid:
-                print(f"Warning: Script validation failed: {error}")
+                _log.warning("Script validation failed: %s", error)
 
-            print(f"[3/3] Caching generated script...")
+            _log.debug("Step 3/3: Caching generated script")
             script_id = self.cache_manager.save_script(
                 script_code=generated_script.script_code,
                 schema_code=generated_script.schema_code,
@@ -250,7 +255,7 @@ class ExecutionEngine:
             result = self.cache_manager.execute_script(script_id, ocr_text)
             return result
         except Exception as e:
-            print(f"Warning: Script execution failed: {e}")
+            _log.warning("Script execution failed: %s", e)
             return {"error": str(e)}
 
     def list_cached_scripts(self) -> list:
@@ -268,14 +273,14 @@ class ExecutionEngine:
                 self.cache_manager.delete_script(script['id'])
             return True
         except Exception as e:
-            print(f"Error clearing cache: {e}")
+            _log.error("Cache clear failed: %s", e)
             return False
 
 
 def extract_from_image(
     image_path: str,
     doc_type: str,
-    cache_dir: str = "./scripts_cache"
+    cache_dir: str = str(Path(__file__).resolve().parent.parent / "scripts_cache")
 ) -> ExecutionResult:
     """Convenience function for single extraction"""
     engine = ExecutionEngine(cache_dir=cache_dir)
@@ -285,7 +290,7 @@ def extract_from_image(
 def extract_from_text(
     ocr_text: str,
     doc_type: str,
-    cache_dir: str = "./scripts_cache"
+    cache_dir: str = str(Path(__file__).resolve().parent.parent / "scripts_cache")
 ) -> ExecutionResult:
     """Convenience function for text extraction"""
     engine = ExecutionEngine(cache_dir=cache_dir)
@@ -293,9 +298,6 @@ def extract_from_text(
 
 
 if __name__ == "__main__":
-    import sys
-    from pathlib import Path
-
     if len(sys.argv) < 3:
         print("Usage: python execution_engine.py <image_path> <doc_type>")
         print("Example: python execution_engine.py document.jpg kyc_handwritten")
