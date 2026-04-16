@@ -1401,9 +1401,7 @@ def render_main():
     st.divider()
 
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "Individual Evaluation", "Batch Results", "Data Management",
-        "Document OCR & AI", "System Info", "Approval Queue", "Cases", "Audit Trail",
         "Document OCR & AI", "System Info", "Approval Queue", "Cases", "Audit Trail",
     ])
 
@@ -2660,7 +2658,6 @@ def render_main():
                         file_name=pkg["name"],
                         mime="application/zip",
                     )
-                )
 
             if role in ("Manager", "Admin"):
                 st.divider()
