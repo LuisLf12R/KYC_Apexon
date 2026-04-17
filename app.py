@@ -79,7 +79,7 @@ st.markdown("""
 INACTIVITY_WARNING_SEC = 13 * 60
 INACTIVITY_TIMEOUT_SEC = 15 * 60
 RULESET_VERSION = "kyc-ruleset-v1.0"
-ACCEPTED_TYPES = ["csv", "xlsx", "xls", "json", "png", "jpg", "jpeg", "tiff", "bmp", "pdf"]
+ACCEPTED_TYPES = ["csv", "xlsx", "xls", "json", "jsonl", "png", "jpg", "jpeg", "tiff", "bmp", "pdf"]
 DATASET_OPTIONS = ["customers", "screenings", "id_verifications", "transactions", "documents", "beneficial_ownership"]
 AUTO_DETECT = "Auto-detect (AI classifies)"
 LOW_CONFIDENCE_THRESHOLD = 0.6
@@ -808,6 +808,8 @@ def read_structured(file_obj, filename):
             if key in content and isinstance(content[key], list):
                 return pd.DataFrame(content[key])
         return pd.DataFrame([content])
+    elif ext == ".jsonl":
+        return pd.read_json(file_obj, lines=True)
     raise ValueError(f"Unsupported: {ext}")
 
 def run_ocr(file_bytes, filename):
@@ -870,7 +872,7 @@ def autodetect(sample, filename):
 
 def process_file(file_obj, filename, dataset_type):
     ext = Path(filename).suffix.lower()
-    if ext in {".csv", ".xlsx", ".xls", ".json"}:
+    if ext in {".csv", ".xlsx", ".xls", ".json", ".jsonl"}:
         df = read_structured(file_obj, filename)
         if dataset_type == AUTO_DETECT:
             dataset_type = autodetect(df.head(3).to_string(), filename)
@@ -1686,35 +1688,8 @@ def render_main():
                                     system=system,
                                     messages=[{"role": "user", "content": msg}]
                                 )
-                                raw_response = resp.content[0].text.strip()
-
-                                # Strip markdown code fences (```json ... ``` or ``` ... ```)
-                                if "```" in raw_response:
-                                    import re as _re
-                                    fence_match = _re.search(r"```(?:json)?\s*(.*?)```", raw_response, _re.DOTALL)
-                                    if fence_match:
-                                        raw_response = fence_match.group(1).strip()
-
-                                # Extract the outermost JSON object robustly
-                                # Walk character by character to find balanced braces
-                                start = raw_response.find("{")
-                                if start == -1:
-                                    raise ValueError("No JSON object found in Claude response")
-                                depth = 0
-                                end = start
-                                for i, ch in enumerate(raw_response[start:], start=start):
-                                    if ch == "{":
-                                        depth += 1
-                                    elif ch == "}":
-                                        depth -= 1
-                                        if depth == 0:
-                                            end = i + 1
-                                            break
-                                else:
-                                    raise ValueError("Unbalanced braces in Claude response")
-
-                                raw_response = raw_response[start:end].strip()
-                                analysis = json.loads(raw_response)
+                                raw_response = resp.content[0].text
+                                analysis = _extract_json_from_response(raw_response)
                                 conf = analysis.get("overall_confidence", 0)
 
                                 am1, am2, am3 = st.columns(3)
