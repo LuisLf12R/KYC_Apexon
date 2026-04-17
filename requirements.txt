@@ -1,5 +1,6 @@
 streamlit>=1.28.0
 pandas>=2.0.0
+pyarrow>=14.0.0
 plotly>=5.14.0
 anthropic>=0.7.0
 google-cloud-vision>=3.4.0
