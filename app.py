@@ -18,6 +18,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 import plotly.graph_objects as go
+from src.dataframe_arrow_compat import ensure_arrow_compatible
 
 load_dotenv()
 st.set_page_config(
@@ -152,6 +153,21 @@ def init_api_keys():
         if not claude_key:
             return False, "ANTHROPIC_API_KEY not configured"
         os.environ["ANTHROPIC_API_KEY"] = claude_key
+
+        # Prefer explicit ADC path if already provided by runtime/deployment.
+        google_adc_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        if google_adc_path and Path(google_adc_path).exists():
+            return True, "OK"
+
+        google_creds = (
+            google_adc_path
+            or os.getenv("GOOGLE_VISION_JSON_PATH")
+            or os.getenv("GOOGLE_VISION_JSON_BASE64")
+            or os.getenv("GOOGLE_VISION_JSON")
+        )
+        if not google_creds:
+            return False, "Google Vision API key not configured"
+
         google_key_json = None
         google_path = os.getenv("GOOGLE_VISION_JSON_PATH")
         if google_path and Path(google_path).exists():
@@ -779,6 +795,7 @@ def clean_dataframe(df, dataset_type):
                                   "ownership": "ownership_percentage", "date": "date_identified"},
     }
     df = df.rename(columns=ALIASES.get(dataset_type, {}))
+    df = ensure_arrow_compatible(df, dataset_type=dataset_type)
     for col in df.columns:
         if any(k in col for k in ["date", "expiry", "expiration"]):
             df[col] = pd.to_datetime(df[col], errors="coerce")
@@ -804,6 +821,13 @@ def clean_dataframe(df, dataset_type):
             except AttributeError:
                 pass
     return df
+
+
+def st_dataframe_safe(data, **kwargs):
+    """Render DataFrames through an Arrow-safe normalization layer."""
+    if isinstance(data, pd.DataFrame):
+        data = ensure_arrow_compatible(data)
+    st.dataframe(data, **kwargs)
 
 def save_to_temp(dataframes):
     tmp = Path(tempfile.gettempdir()) / "kyc_data_clean"
@@ -878,7 +902,7 @@ def llm_structure(raw_text, dataset_type, filename):
     records = json.loads(raw)
     if isinstance(records, dict):
         records = [records]
-    return pd.DataFrame(records)
+    return ensure_arrow_compatible(pd.DataFrame(records), dataset_type=dataset_type)
 
 def autodetect(sample, filename):
     import anthropic as ac
@@ -1313,7 +1337,7 @@ def render_main():
                             touch()
                             prov_rows = _get_provenance_table(cid)
                             if prov_rows:
-                                st.dataframe(pd.DataFrame(prov_rows), use_container_width=True, hide_index=True)
+                                st_dataframe_safe(pd.DataFrame(prov_rows), use_container_width=True, hide_index=True)
                             else:
                                 st.info("No provenance data for this customer yet.")
 
@@ -1370,7 +1394,7 @@ def render_main():
                         if len(history) > 1:
                             st.divider()
                             st.markdown("#### Evaluation History — This Session")
-                            st.dataframe(pd.DataFrame(history), use_container_width=True, hide_index=True)
+                            st_dataframe_safe(pd.DataFrame(history), use_container_width=True, hide_index=True)
                             scores = [h["overall_score"] for h in history]
                             timestamps = [h["timestamp"] for h in history]
                             fig2 = go.Figure(go.Scatter(
@@ -1539,7 +1563,7 @@ def render_main():
                     st.plotly_chart(fig, use_container_width=True)
 
                 st.markdown("#### All Results — Reject → Review → Pass with Notes → Pass")
-                st.dataframe(rdf, use_container_width=True, hide_index=True)
+                st_dataframe_safe(rdf, use_container_width=True, hide_index=True)
 
                 buf = io.StringIO()
                 rdf.to_csv(buf, index=False)
@@ -1650,7 +1674,7 @@ def render_main():
 
                 if proc_log:
                     proc_df = pd.DataFrame(proc_log)
-                    st.dataframe(proc_df, use_container_width=True, hide_index=True)
+                    st_dataframe_safe(proc_df, use_container_width=True, hide_index=True)
                     failed_rows = proc_df[proc_df["Status"].str.startswith("FAILED", na=False)]
                     rejected_rows = proc_df[proc_df["Status"].str.startswith("REJECTED", na=False)]
                     if not failed_rows.empty:
@@ -1742,7 +1766,7 @@ def render_main():
                 st.markdown("#### Data Discrepancy Summary")
                 disc_df = pd.DataFrame(dr)
                 st.warning(f"{disc_df['customer_id'].nunique()} customer(s) with discrepancies detected.")
-                st.dataframe(disc_df, use_container_width=True, hide_index=True)
+                st_dataframe_safe(disc_df, use_container_width=True, hide_index=True)
                 buf_disc = io.StringIO()
                 disc_df.to_csv(buf_disc, index=False)
                 st.download_button(
@@ -1875,6 +1899,7 @@ def render_main():
                                 st.markdown("#### Extracted Fields")
                                 extracted_df = pd.DataFrame(extracted_rows)
                                 display_df = extracted_df[["Field", "Extracted value", "Confidence"]].copy()
+                                display_df = ensure_arrow_compatible(display_df)
                                 display_df["Confidence"] = display_df["Confidence"].map(lambda x: f"{x*100:.0f}%")
                                 low_conf_fields = [r for r in extracted_rows if r["Confidence"] < 0.75]
 
@@ -1884,7 +1909,7 @@ def render_main():
                                         return ["background-color: #FFF3CD"] * len(row)
                                     return [""] * len(row)
 
-                                st.dataframe(
+                                st_dataframe_safe(
                                     display_df.style.apply(_highlight_low_confidence, axis=1),
                                     use_container_width=True,
                                     hide_index=True,
@@ -2154,7 +2179,7 @@ def render_main():
                         f"**SLA aging:** {c['sla_badge']}"
                     )
                     st.markdown("**Case history (chronological):**")
-                    st.dataframe(pd.DataFrame(c["case_history"]), use_container_width=True, hide_index=True)
+                    st_dataframe_safe(pd.DataFrame(c["case_history"]), use_container_width=True, hide_index=True)
 
                     note_key = f"case_note_{c['case_id']}"
                     note_text = st.text_area("Add case note", key=note_key, placeholder="Write note and click Add Note.")
@@ -2222,7 +2247,7 @@ def render_main():
                 filtered = filtered[filtered["User"] == fu]
 
             st.markdown(f"**{len(filtered)} of {logger.event_count()} events**")
-            st.dataframe(filtered, use_container_width=True, hide_index=True)
+            st_dataframe_safe(filtered, use_container_width=True, hide_index=True)
 
             touch()
             st.divider()
@@ -2247,7 +2272,7 @@ def render_main():
                 if hist_rows:
                     show_df = pd.DataFrame(hist_rows)
                     show_df["Confidence"] = show_df["Confidence"].apply(_format_conf_pct)
-                    st.dataframe(show_df, use_container_width=True, hide_index=True)
+                    st_dataframe_safe(show_df, use_container_width=True, hide_index=True)
                 else:
                     st.info("No provenance history rows for selected customer.")
 
@@ -2296,7 +2321,7 @@ def render_main():
                 pkg = st.session_state.latest_export_package
                 if pkg:
                     st.caption("Included files:")
-                    st.dataframe(pd.DataFrame(pkg["manifest"]), use_container_width=True, hide_index=True)
+                    st_dataframe_safe(pd.DataFrame(pkg["manifest"]), use_container_width=True, hide_index=True)
                     st.download_button(
                         "Download Export Package (.zip)",
                         data=pkg["bytes"],

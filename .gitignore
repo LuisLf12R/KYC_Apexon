@@ -51,6 +51,8 @@ Thumbs.db
 .env.local
 .env.*
 !.env.example
+google-vision-sa-checkpoint.json
+/tmp/google-credentials.json
 Credentials/
 *.json
 *.pem
@@ -84,4 +86,3 @@ debug_*.log
 .pytest_cache/
 .coverage
 htmlcov/
-
