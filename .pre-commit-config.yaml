@@ -4,3 +4,11 @@ repos:
     hooks:
       - id: ruff
       - id: ruff-format
+  - repo: local
+    hooks:
+      - id: no-google-credentials
+        name: Don't commit Google credentials
+        entry: google-vision-sa.*\\.json
+        language: pygrep
+        types: [file]
+        stages: [pre-commit]
