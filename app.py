@@ -180,6 +180,16 @@ if not keys_ok:
     st.error(f"Configuration Error: {keys_msg}")
     st.stop()
 
+# One-time cache purge: scripts generated under prior canonical schemas
+# produce invalid output and must be regenerated.
+if "_schema_cache_purged" not in st.session_state:
+    try:
+        from src.schema_harmonizer import SchemaHarmonizer
+        SchemaHarmonizer().purge_stale_cache()
+    except Exception:
+        pass
+    st.session_state._schema_cache_purged = True
+
 # ── Prompt registry ───────────────────────────────────────────────────────────
 
 @st.cache_resource
@@ -894,14 +904,13 @@ def process_file(file_obj, filename, dataset_type):
             dataset_type = autodetect(df.head(3).to_string(), filename)
             log("AUTODETECT_RUN", prompt_id="autodetect-v1.0",
                 details={"filename": filename, "detected": dataset_type})
-
-        # Harmonize to canonical schema BEFORE clean_dataframe, so column
-        # renaming and value normalization both land correctly.
-        try:
-            from src.schema_harmonizer import SchemaHarmonizer
-            harmonizer = SchemaHarmonizer()
-            if dataset_type in harmonizer.SUPPORTED_TARGETS:
-                df_before_cols = list(df.columns)
+        # Harmonize to canonical schema BEFORE clean_dataframe.
+        # HarmonizationRejected propagates; generic errors log and fall back.
+        from src.schema_harmonizer import SchemaHarmonizer, HarmonizationRejected
+        harmonizer = SchemaHarmonizer()
+        if dataset_type in harmonizer.SUPPORTED_TARGETS:
+            df_before_cols = list(df.columns)
+            try:
                 df, harmonize_meta = harmonizer.normalize(df, dataset_type)
                 log(
                     "SCHEMA_HARMONIZED",
@@ -911,22 +920,33 @@ def process_file(file_obj, filename, dataset_type):
                         "source": harmonize_meta["source"],
                         "script_id": harmonize_meta["script_id"],
                         "input_columns": df_before_cols,
-                        "output_columns": harmonize_meta["output_columns"],
                         "rows_in": harmonize_meta["row_count_in"],
                         "rows_out": harmonize_meta["row_count_out"],
+                        "critical_coverage": harmonize_meta["critical_coverage"],
+                        "nice_coverage": harmonize_meta["nice_coverage"],
                     },
                 )
-        except Exception as e:
-            # Harmonization failure should not kill the upload — fall back
-            # to raw DataFrame and let downstream validation surface gaps.
-            log(
-                "SCHEMA_HARMONIZE_FAILED",
-                details={
-                    "filename": filename,
-                    "target_type": dataset_type,
-                    "error": str(e),
-                },
-            )
+            except HarmonizationRejected as rej:
+                log(
+                    "SCHEMA_HARMONIZE_REJECTED",
+                    details={
+                        "filename": filename,
+                        "target_type": dataset_type,
+                        "report": rej.report,
+                    },
+                )
+                # Re-raise so caller can render a dedicated rejection UI
+                raise
+            except Exception as e:
+                log(
+                    "SCHEMA_HARMONIZE_FAILED",
+                    details={
+                        "filename": filename,
+                        "target_type": dataset_type,
+                        "error": str(e),
+                    },
+                )
+                # Generic failure: continue with raw DataFrame
 
         df = clean_dataframe(df, dataset_type)
         return df, "direct", dataset_type, f"Loaded {len(df)} rows"
@@ -1573,7 +1593,7 @@ def render_main():
                 bar = st.progress(0)
                 txt = st.empty()
                 total = len(batch_files)
-                st.markdown("#### Step 1: Claude is reading and normalising your data")
+                st.markdown("#### Step 1: Reading and normalising your data")
                 with st.spinner("Running data cleaning pipeline..."):
                     for i, (idx, (fo, dtype)) in enumerate(file_type_map.items()):
                         fn = fo.name
@@ -1598,13 +1618,31 @@ def render_main():
                                 "Status": "OK",
                             })
                         except Exception as e:
-                            proc_log.append({
-                                "File": fn,
-                                "Dataset type detected": dtype if dtype != AUTO_DETECT else "auto_detect",
-                                "Rows loaded": 0,
-                                "Method": "error",
-                                "Status": f"FAILED: {str(e)[:120]}",
-                            })
+                            # Import here to avoid circular import at module top
+                            from src.schema_harmonizer import HarmonizationRejected
+                            if isinstance(e, HarmonizationRejected):
+                                proc_log.append({
+                                    "File": fn,
+                                    "Dataset type detected": dtype if dtype != AUTO_DETECT else "auto_detect",
+                                    "Rows loaded": 0,
+                                    "Method": "harmonization_rejected",
+                                    "Status": "REJECTED: critical fields below coverage threshold",
+                                })
+                                # Stash the report for detailed rendering after the loop
+                                rejection_reports = st.session_state.get("_rejection_reports", [])
+                                rejection_reports.append({
+                                    "filename": fn,
+                                    "report": e.report,
+                                })
+                                st.session_state._rejection_reports = rejection_reports
+                            else:
+                                proc_log.append({
+                                    "File": fn,
+                                    "Dataset type detected": dtype if dtype != AUTO_DETECT else "auto_detect",
+                                    "Rows loaded": 0,
+                                    "Method": "error",
+                                    "Status": f"FAILED: {str(e)[:120]}",
+                                })
                         bar.progress((i + 1) / total)
 
                 bar.empty()
@@ -1614,13 +1652,68 @@ def render_main():
                     proc_df = pd.DataFrame(proc_log)
                     st.dataframe(proc_df, use_container_width=True, hide_index=True)
                     failed_rows = proc_df[proc_df["Status"].str.startswith("FAILED", na=False)]
+                    rejected_rows = proc_df[proc_df["Status"].str.startswith("REJECTED", na=False)]
                     if not failed_rows.empty:
                         for _, row in failed_rows.iterrows():
                             st.error(f"{row['File']}: {row['Status']}")
-                    else:
+                    if not rejected_rows.empty:
+                        reports = st.session_state.get("_rejection_reports", [])
+                        for rep in reports:
+                            report = rep["report"]
+                            st.error(f"**{rep['filename']} — harmonization rejected**")
+                            with st.container(border=True):
+                                st.markdown(f"**Dataset type:** `{report['target_type']}`")
+                                st.markdown(f"**Rows analyzed:** {report['row_count']}")
+                                st.markdown(
+                                    f"**Coverage threshold:** {report['threshold_pct']}% "
+                                    f"of rows must have each critical field populated"
+                                )
+                                st.markdown("")
+                                st.markdown("**Critical fields below threshold:**")
+                                for fd in report["failing_fields"]:
+                                    st.markdown(
+                                        f"- `{fd['field']}` — {fd['missing_rows']} of {report['row_count']} "
+                                        f"rows ({fd['missing_pct']}%) unmappable "
+                                        f"(coverage: {fd['coverage_pct']}%)"
+                                    )
+                                    if fd["likely_source_keys"]:
+                                        st.caption(
+                                            f"Looked for: {', '.join(fd['likely_source_keys'])} "
+                                            "— present but unmappable"
+                                        )
+                                    else:
+                                        st.caption(
+                                            "Source DataFrame had no columns resembling this field"
+                                        )
+                                st.markdown("")
+                                st.markdown("**Root cause:** source system did not export the required data.")
+                                st.markdown(
+                                    "**Fix:** enrich the upstream export with these fields and re-upload. "
+                                    "Do not attempt to work around the missing data — these fields drive "
+                                    "compliance evaluation and gaps here produce unreliable results."
+                                )
+                                with st.expander("Technical detail (for data owner)"):
+                                    st.json({
+                                        "input_columns_seen": report["input_columns_seen"],
+                                        "critical_fields_required": report["critical_fields_required"],
+                                        "harmonization_source": report["harmonization_source"],
+                                        "script_id": report["script_id"],
+                                    })
+                        # Clear the cached reports so they don't re-render on next run
+                        st.session_state._rejection_reports = []
+                    if failed_rows.empty and rejected_rows.empty:
                         st.success("All files were processed cleanly through the cleaning pipeline.")
 
-                if cleaned:
+                any_rejected = not rejected_rows.empty if proc_log else False
+
+                if any_rejected:
+                    st.error(
+                        "Engine not initialized. One or more files were rejected during "
+                        "harmonization. Compliance evaluation requires all datasets to pass "
+                        "critical-field coverage. Fix the rejected files above and re-upload "
+                        "the full set."
+                    )
+                elif cleaned:
                     tmp_dir = save_to_temp(cleaned)
                     engine, customers = load_engine(tmp_dir)
                     if engine is not None and customers is not None and len(customers) > 0:

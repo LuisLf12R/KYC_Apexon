@@ -269,69 +269,132 @@ Return ONLY the function code, nothing else. Start with "def cleanup(ocr_text: s
         self,
         input_columns: List[str],
         sample_rows: List[Dict],
-        canonical_fields: List[str],
-        target_type: str,
+        schema,
     ) -> GeneratedScript:
         """
-        Ask Claude to write a normalize(df) -> pd.DataFrame function that
-        maps a DataFrame with heterogeneous real-world schema into the
-        canonical schema defined by contracts.py.
+        Generate a normalize(df) -> pd.DataFrame function that maps heterogeneous
+        real-world input into the canonical schema defined by a CanonicalSchema.
 
-        The generated function must:
-          - Accept a pandas DataFrame
-          - Return a pandas DataFrame with canonical column names
-          - Handle duplicate/missing/variant keys across rows
-          - Normalize vocabularies (risk tiers, document types, AML states)
-          - Normalize date formats to YYYY-MM-DD strings
-          - Strip whitespace, normalize case where semantically appropriate
-          - Keep rows with partial data (fill missing canonical fields with None)
-          - Use only pandas + Python stdlib, no external imports inside function body
+        `schema` is a CanonicalSchema from src.canonical_schemas.
         """
-        prompt = f"""You are given a pandas DataFrame containing customer data from a bank.
-The DataFrame has arbitrary real-world schema that varies row-to-row.
+        target_type = schema.target_type
+        critical_fields = schema.critical_fields
+        nice_fields = schema.nice_fields
+        enum_hints = schema.enum_hints
+        date_fields = schema.date_fields
 
-Input columns observed:
+        all_canonical = critical_fields + nice_fields
+
+        prompt = f"""You are generating a Python function that normalizes bank KYC data
+into a strictly defined canonical schema.
+
+TARGET DATASET TYPE: {target_type}
+
+CRITICAL FIELDS (must be mapped whenever the source contains the information):
+{json.dumps(critical_fields, indent=2)}
+
+NICE-TO-HAVE FIELDS (map if source has them; return None otherwise):
+{json.dumps(nice_fields, indent=2)}
+
+ENUM NORMALIZATIONS (output values must belong to these sets when the field is one of the keys):
+{json.dumps(enum_hints, indent=2) if enum_hints else "(none)"}
+
+DATE FIELDS (output format must be YYYY-MM-DD string, or None if unparseable):
+{json.dumps(date_fields, indent=2)}
+
+INPUT COLUMNS OBSERVED IN THE SOURCE DATAFRAME:
 {json.dumps(input_columns, indent=2)}
 
-Sample rows (first {len(sample_rows)}):
+SAMPLE INPUT ROWS (first {len(sample_rows)}):
 {json.dumps(sample_rows, indent=2, default=str)}
 
-Your task: write a Python function that normalizes this DataFrame into the
-canonical KYC schema for dataset type '{target_type}'.
+REAL-WORLD MAPPING RULES you MUST apply:
 
-Canonical columns required in the output DataFrame:
-{json.dumps(canonical_fields, indent=2)}
+1. Customer name assembly:
+   - If source has first_name + last_name → concatenate with space
+   - If source has full_name OR name → use as-is
+   - If format is "Last, First" → reorder to "First Last"
+   - PRESERVE unicode characters: "Jöhn Døe" stays "Jöhn Døe", NEVER strip accents
+   - Strip ONLY leading/trailing whitespace, never internal characters
 
-Rules for the generated function:
-- Function signature must be exactly: def normalize(df):
-- Must return a pandas DataFrame with the canonical columns above
-- Rows with partial data are kept; missing canonical fields filled with None
-- Handle the following real-world messiness:
-  * Same concept under different keys across rows (first_name+last_name vs full_name vs name)
-  * Same concept with different vocabularies (INDV/INDIVIDUAL/IND → INDIVIDUAL)
-  * Same concept with different date formats (ISO, US, abbreviated, natural language)
-  * Leading/trailing whitespace and unicode characters to strip
-  * Name order variation ("Last, First" vs "First Last")
-  * Fields that may be strings, lists, or absent entirely
-- Vocabulary normalization suggestions (apply when relevant):
-  * Risk tiers → LOW / MEDIUM / HIGH
-  * Entity type → INDIVIDUAL / LEGAL_ENTITY
-  * AML states → NO_HIT / HIT / CLEARED (preserve nuance if possible)
-  * Document types → PASSPORT / NATIONAL_ID / DRIVERS_LICENSE etc. (canonical enums from contracts)
-- Date fields → YYYY-MM-DD strings (or None if unparseable)
-- You may use pandas operations, str methods, regex, and dateutil patterns
-- Do NOT import anything — pandas is available as pd in the execution namespace
-- Do NOT raise on malformed rows — handle gracefully with None
-- Return ONLY the function code, starting with: def normalize(df):
-- No markdown fences, no explanation, no preamble
+2. Entity / customer type vocabulary (when target field is entity_type):
+   - "INDV" | "IND" | "INDIVIDUAL" | "individual" | "person" | "natural person" → "INDIVIDUAL"
+   - "CORP" | "CORPORATE" | "Corp." | "Company" | "LE" | "LEGAL_ENTITY" → "LEGAL_ENTITY"
+
+3. Risk rating vocabulary (when target field is risk_rating):
+   - "Low" | "LOW" | "LOW_RISK" | "L" | "Tier 1" → "LOW"
+   - "Med" | "Medium" | "MEDIUM" | "M" | "Tier 2" → "MEDIUM"
+   - "High" | "HIGH" | "HIGH_RISK" | "H" | "Tier 3" → "HIGH"
+
+4. AML screening result vocabulary (when target field is screening_result):
+   - "No hits found" | "NO_HIT" | "NO_HIT_CURRENT" | "Clear" | "clean" | "OK" | "PASS" → "NO_MATCH"
+   - "Hit" | "Match" | "Possible Match" | "HIT_CURRENT" → "MATCH"
+
+5. Hit status vocabulary (when target field is hit_status):
+   - "confirmed" | "true match" | "CONFIRMED" → "CONFIRMED"
+   - "false positive" | "FP" | "cleared" → "FALSE_POSITIVE"
+   - "under review" | "REVIEW" | "pending" → "UNDER_REVIEW"
+
+6. Document type vocabulary (when target field is document_type under id_verifications):
+   - "Passport" | "PP" | "passport" → "PASSPORT"
+   - "NatID" | "National ID" | "Nat ID" | "Nat. ID Card" → "NATIONAL_ID"
+   - "DL" | "Driver's Licence" | "Drivers License" | "Driver License" → "DRIVERS_LICENSE"
+   - "State ID" | "State Identification" → "STATE_ID"
+   - "Residence Permit" | "RP" → "RESIDENCE_PERMIT"
+
+7. Document type vocabulary (when target field is document_type under documents / PoA):
+   - "Utility Bill" | "utility bill" | "UTILITY" | "Bank stm." (misc abbreviation) → map sensibly
+   - "Bank Statement" | "Bank Stmt" | "Bank stm." → "BANK_STATEMENT"
+   - "Utility Bill" | "Electric bill" | "Water bill" → "UTILITY_BILL"
+   - "Lease" | "Lease Agreement" | "Lease agrmt" | "Rental Agreement" → "LEASE_AGREEMENT"
+   - "Council Tax Bill" → "COUNCIL_TAX_BILL"
+   - "Tax Notice" | "Tax Bill" → "TAX_NOTICE"
+   - "Insurance" | "Insurance Certificate" → "INSURANCE_CERTIFICATE"
+   - Unknown types → "OTHER"
+
+8. Document category (documents dataset only): all proof-of-address documents
+   must produce document_category = "POA"
+
+9. Document status (id_verifications):
+   - "APPROVED" | "Verified" | "valid" → "VERIFIED"
+   - "expired" | "EXPIRED" | "lapsed" → "EXPIRED"
+   - "pending" | "in review" → "PENDING"
+   - "rejected" | "declined" | "manual override" → "REJECTED"
+
+10. Date parsing — handle ALL these formats, output YYYY-MM-DD:
+    - ISO: "2024-01-20", "2024-01-20T14:30:00Z"
+    - US slash: "01/20/2024", "1/20/24"
+    - EU slash: "20/01/2024"
+    - Dashes: "20-01-2024", "01-20-24"
+    - Two-digit years: "08-22-85" → assume 1900s if year > current 2-digit year, else 2000s
+    - Natural language: "Aug 22 2023", "22 Aug 2023", "August 22, 2023"
+    - If genuinely unparseable, return None. NEVER guess a date.
+    - You may `from datetime import datetime` inside the function body.
+
+STRICT PROHIBITIONS:
+- Do NOT invent values for fields missing from the source. Return None.
+- Do NOT drop rows. Every input row must produce exactly one output row.
+- Do NOT modify customer_id values. Preserve them exactly as given.
+- Do NOT strip unicode characters from names or other text fields.
+- Do NOT collapse rows that share a customer_id. One row in → one row out.
+
+OUTPUT CONTRACT:
+- Function signature: def normalize(df):
+- Returns a pandas DataFrame with EXACTLY these columns (all of them, in any order):
+  {json.dumps(all_canonical)}
+- pandas is available as `pd`. You may import from Python stdlib inside the function body.
+- Return ONLY raw Python code. No markdown fences. No explanation. No preamble.
+- First characters of your response must be: def normalize(df):
 """
 
         message = self.client.messages.create(
             model=self.model,
-            max_tokens=3000,
+            max_tokens=4000,
             system=(
-                "You are a Python code generator specializing in data normalization. "
-                "Write clean, defensive pandas transformations. "
+                "You are a Python code generator specializing in bank data normalization. "
+                "You write defensive pandas code that handles real-world schema drift, "
+                "vocabulary variance, and format inconsistency. You never invent data, "
+                "never drop rows, and never strip unicode from text. "
                 "Return ONLY raw Python code — no explanation, no markdown, no backticks."
             ),
             messages=[{"role": "user", "content": prompt}],
@@ -339,7 +402,7 @@ Rules for the generated function:
 
         script_code = message.content[0].text.strip()
 
-        # Strip markdown fences if Claude included them anyway
+        # Strip markdown fences if present
         if script_code.startswith("```"):
             lines = script_code.split("\n")
             if lines and lines[0].strip().startswith("```"):
@@ -348,12 +411,11 @@ Rules for the generated function:
                 lines = lines[:-1]
             script_code = "\n".join(lines).strip()
 
-        # Trim any preamble before `def normalize`
+        # Trim preamble before `def normalize`
         idx = script_code.find("def normalize")
         if idx > 0:
             script_code = script_code[idx:]
 
-        # Validate compiles
         try:
             compile(script_code, "<normalize>", "exec")
         except SyntaxError as e:
@@ -364,9 +426,9 @@ Rules for the generated function:
         return GeneratedScript(
             script_code=script_code,
             schema_code="",
-            fields=canonical_fields,
-            confidence=0.85,
-            explanation=f"Claude-generated schema normalizer for {target_type}",
+            fields=all_canonical,
+            confidence=0.90,
+            explanation=f"Schema normalizer for {target_type}",
         )
 
     def validate_generated_script(self, script: GeneratedScript) -> Tuple[bool, str]:
