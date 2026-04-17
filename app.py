@@ -153,6 +153,21 @@ def init_api_keys():
         if not claude_key:
             return False, "ANTHROPIC_API_KEY not configured"
         os.environ["ANTHROPIC_API_KEY"] = claude_key
+
+        # Prefer explicit ADC path if already provided by runtime/deployment.
+        google_adc_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        if google_adc_path and Path(google_adc_path).exists():
+            return True, "OK"
+
+        google_creds = (
+            google_adc_path
+            or os.getenv("GOOGLE_VISION_JSON_PATH")
+            or os.getenv("GOOGLE_VISION_JSON_BASE64")
+            or os.getenv("GOOGLE_VISION_JSON")
+        )
+        if not google_creds:
+            return False, "Google Vision API key not configured"
+
         google_key_json = None
         google_path = os.getenv("GOOGLE_VISION_JSON_PATH")
         if google_path and Path(google_path).exists():
