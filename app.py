@@ -13,39 +13,13 @@ import tempfile
 import uuid
 import zipfile
 import hashlib
-import zipfile
-import hashlib
 import base64
-import argparse
 from pathlib import Path
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 import plotly.graph_objects as go
 
-try:
-    from benchmarks.app_integration import generate_and_get_manifest_path, get_generated_raw_tables
-    PORTFOLIO_GENERATOR_AVAILABLE = True
-except ImportError:
-    PORTFOLIO_GENERATOR_AVAILABLE = False
-
 load_dotenv()
-DEFAULT_DEMO_PORTFOLIO_SIZE = 30
-
-
-def _maybe_run_demo_generator_cli():
-    parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--generate-demo-portfolio", action="store_true")
-    parser.add_argument("--portfolio-size", type=int, default=DEFAULT_DEMO_PORTFOLIO_SIZE)
-    args, _ = parser.parse_known_args()
-    if args.generate_demo_portfolio:
-        from benchmarks.app_integration import generate_and_get_manifest_path
-        manifest_path = generate_and_get_manifest_path(size=args.portfolio_size)
-        print(f"Generated demo portfolio ({args.portfolio_size} scenarios) at: {manifest_path}")
-        sys.exit(0)
-
-
-_maybe_run_demo_generator_cli()
-
 st.set_page_config(
     page_title="KYC Compliance Platform",
     page_icon="🏦",
@@ -100,57 +74,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# ── Global styles ─────────────────────────────────────────────────────────────
-
-st.markdown("""
-<style>
-/* Tab list container */
-.stTabs [data-baseweb="tab-list"] {
-    gap: 6px;
-    padding: 4px 0 0 0;
-    border-bottom: 2px solid rgba(255,255,255,0.08);
-}
-
-/* Individual tab */
-.stTabs [data-baseweb="tab"] {
-    font-size: 15px;
-    font-weight: 500;
-    padding: 12px 24px;
-    border-radius: 6px 6px 0 0;
-    color: rgba(255,255,255,0.6);
-    background: transparent;
-    border: none;
-    letter-spacing: 0.01em;
-    transition: color 0.15s ease, background 0.15s ease;
-}
-
-/* Hover state */
-.stTabs [data-baseweb="tab"]:hover {
-    color: rgba(255,255,255,0.9);
-    background: rgba(255,255,255,0.05);
-}
-
-/* Active tab */
-.stTabs [data-baseweb="tab"][aria-selected="true"] {
-    color: #ffffff;
-    font-weight: 700;
-    background: rgba(255,255,255,0.06);
-}
-
-/* Active tab underline indicator */
-.stTabs [data-baseweb="tab-highlight"] {
-    background-color: #0072B2;
-    height: 3px;
-    border-radius: 2px 2px 0 0;
-}
-
-/* Tab panel content area — give it breathing room */
-.stTabs [data-baseweb="tab-panel"] {
-    padding-top: 24px;
-}
-</style>
-""", unsafe_allow_html=True)
-
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 INACTIVITY_WARNING_SEC = 13 * 60
@@ -160,8 +83,6 @@ ACCEPTED_TYPES = ["csv", "xlsx", "xls", "json", "png", "jpg", "jpeg", "tiff", "b
 DATASET_OPTIONS = ["customers", "screenings", "id_verifications", "transactions", "documents", "beneficial_ownership"]
 AUTO_DETECT = "Auto-detect (AI classifies)"
 LOW_CONFIDENCE_THRESHOLD = 0.6
-DEFAULT_SLA_AMBER_DAYS = 3
-DEFAULT_SLA_RED_DAYS = 7
 DEFAULT_SLA_AMBER_DAYS = 3
 DEFAULT_SLA_RED_DAYS = 7
 
@@ -327,9 +248,6 @@ _DEFAULTS = {
     "dirty_customers": set(),
     "ocr_analysis_cache": {},
     "latest_discrepancy_report": None,
-    "case_sla_amber_days": DEFAULT_SLA_AMBER_DAYS,
-    "case_sla_red_days": DEFAULT_SLA_RED_DAYS,
-    "latest_export_package": None,
 }
 for k, v in _DEFAULTS.items():
     if k not in st.session_state:
@@ -770,248 +688,6 @@ def _build_export_package(logger, user):
     return zbuf.getvalue(), zip_name, manifest
 
 
-def _ensure_runtime_action_types():
-    """Allow app-level workflow actions without editing audit_logger.py."""
-    try:
-        sys.path.insert(0, str(Path.cwd() / "src"))
-        from audit_logger import ACTION_TYPES
-        ACTION_TYPES.setdefault("CASE_CLOSED", "Manager/Admin closed a customer case")
-    except Exception:
-        pass
-
-
-def _parse_iso(ts: str):
-    if not ts:
-        return None
-    try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except Exception:
-        return None
-
-
-def _format_ago(ts: str) -> str:
-    dt = _parse_iso(ts)
-    if not dt:
-        return "unknown"
-    delta = datetime.now(timezone.utc) - dt
-    mins = int(delta.total_seconds() // 60)
-    if mins < 1:
-        return "just now"
-    if mins < 60:
-        return f"{mins}m ago"
-    hrs = mins // 60
-    if hrs < 24:
-        return f"{hrs}h ago"
-    return f"{hrs // 24}d ago"
-
-
-def _get_current_customer_state(customer_id: str):
-    disposition, score = "N/A", "N/A"
-    history = st.session_state.customer_history.get(customer_id, [])
-    if history:
-        disposition = history[-1].get("disposition", disposition)
-        score = history[-1].get("overall_score", score)
-    elif st.session_state.batch_results is not None:
-        rdf = st.session_state.batch_results
-        row = rdf[rdf["customer_id"].astype(str) == str(customer_id)]
-        if not row.empty:
-            disposition = row.iloc[0].get("disposition", disposition)
-            score = row.iloc[0].get("overall_score", score)
-    return disposition, score
-
-
-def _get_pending_clear_approvals(logger):
-    if not logger:
-        return []
-    pending = {}
-    for e in logger.events:
-        cid = e.get("customer_id")
-        action = e.get("action_type")
-        if not cid:
-            continue
-        if action == "CLEAR_PROPOSED":
-            pending[cid] = e
-        elif action in ("CLEAR_APPROVED", "CLEAR_REJECTED"):
-            pending.pop(cid, None)
-    rows = []
-    for cid, e in pending.items():
-        details = e.get("details", {})
-        disposition, score = _get_current_customer_state(cid)
-        rows.append({
-            "customer_id": cid,
-            "proposed_by": e.get("username", ""),
-            "reason_code": details.get("reason_code", ""),
-            "note": details.get("note", ""),
-            "proposed_at": e.get("timestamp"),
-            "proposed_at_ago": _format_ago(e.get("timestamp")),
-            "disposition": disposition,
-            "score": score,
-            "event_id": e.get("event_id"),
-        })
-    return sorted(rows, key=lambda x: x.get("proposed_at", ""))
-
-
-def _sla_badge(case_opened_at: str, case_status: str) -> str:
-    if case_status == "Closed":
-        return "🟢 On time"
-    opened = _parse_iso(case_opened_at)
-    if not opened:
-        return "⚪ Unknown"
-    age_days = (datetime.now(timezone.utc) - opened).total_seconds() / 86400
-    amber = st.session_state.case_sla_amber_days
-    red = st.session_state.case_sla_red_days
-    if age_days >= red:
-        return f"🔴 {int(age_days)}d open"
-    if age_days >= amber:
-        return f"🟠 {int(age_days)}d open"
-    return f"🟢 {int(age_days)}d open"
-
-
-def _build_cases(logger):
-    if not logger:
-        return []
-    events = logger.events
-    trigger_actions = {"FLAG_RAISED", "CLEAR_PROPOSED", "CUSTOMER_ESCALATED", "CLEAR_APPROVED", "CLEAR_REJECTED"}
-    close_actions = {"CASE_CLOSED"}
-    by_customer = {}
-    for e in events:
-        cid = e.get("customer_id")
-        if not cid:
-            continue
-        by_customer.setdefault(cid, []).append(e)
-
-    cases = []
-    for cid, history in by_customer.items():
-        history = sorted(history, key=lambda x: x.get("timestamp", ""))
-        has_trigger = False
-        opened_event = None
-        for e in history:
-            action = e.get("action_type")
-            if action in trigger_actions:
-                has_trigger = True
-                opened_event = opened_event or e
-            if action == "CUSTOMER_VIEW":
-                disp = (e.get("snapshot") or {}).get("disposition")
-                if disp in ("REJECT", "REVIEW"):
-                    has_trigger = True
-                    opened_event = opened_event or e
-        if not has_trigger:
-            continue
-
-        latest = history[-1]
-        disposition, score = _get_current_customer_state(cid)
-        if disposition == "N/A":
-            for e in reversed(history):
-                disp = (e.get("snapshot") or {}).get("disposition")
-                if disp:
-                    disposition = disp
-                    score = (e.get("snapshot") or {}).get("overall_score", score)
-                    break
-        has_closed = any(e.get("action_type") in close_actions for e in history)
-        has_pending = any(e.get("action_type") == "CLEAR_PROPOSED" for e in history) and not any(
-            e.get("action_type") in ("CLEAR_APPROVED", "CLEAR_REJECTED") for e in history
-        )
-        case_status = "Closed" if has_closed else ("Pending Approval" if has_pending else "Open")
-        opened_at = opened_event.get("timestamp") if opened_event else latest.get("timestamp")
-        case_id = f"CASE-{cid}-{(_parse_iso(opened_at) or datetime.now(timezone.utc)).strftime('%Y%m%d')}"
-
-        case_rows = []
-        for e in history:
-            case_rows.append({
-                "timestamp": e.get("timestamp"),
-                "action": e.get("action_type"),
-                "user": e.get("username"),
-                "role": e.get("role"),
-                "details": json.dumps(e.get("details", {}), default=str),
-            })
-
-        cases.append({
-            "case_id": case_id,
-            "customer_id": cid,
-            "current_disposition": disposition,
-            "current_score": score,
-            "case_status": case_status,
-            "opened_by": opened_event.get("username") if opened_event else latest.get("username"),
-            "opened_at": opened_at,
-            "case_history": case_rows,
-            "sla_badge": _sla_badge(opened_at, case_status),
-        })
-    return sorted(cases, key=lambda x: x["opened_at"], reverse=True)
-
-
-def _build_export_package(logger, user):
-    session_id = logger.session_id
-    batch_id = st.session_state.batch_id or "no_batch"
-    export_ts = datetime.now(timezone.utc)
-    export_ts_str = export_ts.strftime("%Y%m%d_%H%M%S")
-
-    files = {}
-    audit_payload = logger.finalize()
-    audit_name = f"audit_log_{session_id}.json"
-    files[audit_name] = json.dumps(audit_payload, indent=2, default=str)
-
-    batch_name = f"batch_results_{batch_id}.csv"
-    flagged_name = f"flagged_customers_{batch_id}.csv"
-    if st.session_state.batch_results is not None:
-        rdf = st.session_state.batch_results.copy()
-        batch_buf = io.StringIO()
-        rdf.to_csv(batch_buf, index=False)
-        files[batch_name] = batch_buf.getvalue()
-        flagged = rdf[rdf["disposition"].isin(["REJECT", "REVIEW"])].copy()
-        flag_buf = io.StringIO()
-        if flagged.empty:
-            flag_buf.write("note\nNo REJECT or REVIEW customers in latest batch.\n")
-        else:
-            include_cols = [c for c in ["customer_id", "disposition", "overall_score", "rationale"] if c in flagged.columns]
-            flagged[include_cols].to_csv(flag_buf, index=False)
-        files[flagged_name] = flag_buf.getvalue()
-        total_customers = len(rdf)
-    else:
-        files[batch_name] = "note\nNo batch evaluation was run in this session.\n"
-        files[flagged_name] = "note\nNo batch evaluation was run in this session.\n"
-        total_customers = 0
-
-    metadata = {
-        "session_id": session_id,
-        "user_id": user["user_id"],
-        "username": user["username"],
-        "role": user["role"],
-        "session_start_time": logger.session_start,
-        "export_timestamp": export_ts.isoformat(),
-        "ruleset_version_active": RULESET_VERSION,
-        "prompt_versions_active": {pid: p.get("version", "unknown") for pid, p in PROMPTS.items()},
-        "total_audit_events": logger.event_count(),
-        "total_customers_evaluated_in_batch": total_customers,
-    }
-    files["session_metadata.json"] = json.dumps(metadata, indent=2, default=str)
-
-    verification_hash = hashlib.sha256(
-        (
-            str(audit_payload.get("previous_session_hash", ""))
-            + json.dumps(audit_payload.get("events", []), sort_keys=True, default=str)
-        ).encode("utf-8")
-    ).hexdigest()
-    files["README.txt"] = (
-        "KYC Compliance Export Package\n\n"
-        f"- {audit_name}: Finalized session audit log with appended session_hash.\n"
-        f"- {batch_name}: Latest batch results (or note when no batch exists).\n"
-        f"- {flagged_name}: Batch subset where disposition is REJECT or REVIEW.\n"
-        "- session_metadata.json: Session and export metadata.\n"
-        "- README.txt: Package guidance.\n\n"
-        "Audit verification:\n"
-        "Recompute SHA-256 of (previous_session_hash + sorted JSON events) and compare to session_hash.\n"
-        f"Computed hash for this export: {verification_hash}\n"
-    )
-
-    zbuf = io.BytesIO()
-    with zipfile.ZipFile(zbuf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for name, content in files.items():
-            zf.writestr(name, content if isinstance(content, str) else str(content))
-    zbuf.seek(0)
-
-    manifest = [{"file": name, "size_bytes": len(content.encode("utf-8"))} for name, content in files.items()]
-    zip_name = f"kyc_export_{user['username']}_{export_ts_str}.zip"
-    return zbuf.getvalue(), zip_name, manifest
 
 # ── Timeout ───────────────────────────────────────────────────────────────────
 
@@ -1339,7 +1015,6 @@ def render_main():
     _ensure_runtime_action_types()
     _get_provenance_store()
     _seed_structured_provenance()
-    _ensure_runtime_action_types()
 
     # Inactivity warning banner (shown on next interaction after 13 min)
     if st.session_state.timeout_warning_logged:
@@ -2249,156 +1924,8 @@ def render_main():
 
     # ════════════════════════════════════════════════════════
     # TAB 6: APPROVAL QUEUE
-    # TAB 6: APPROVAL QUEUE
     # ════════════════════════════════════════════════════════
     with tab6:
-        touch()
-        st.markdown("### Approval Queue")
-        if role not in ("Manager", "Admin"):
-            st.info("Approvals are handled by a Manager or Admin.")
-        else:
-            pending = _get_pending_clear_approvals(logger)
-            if not pending:
-                st.success("No pending clear approvals.")
-            else:
-                st.caption(f"{len(pending)} pending item(s) awaiting maker-checker approval.")
-                for idx, item in enumerate(pending):
-                    with st.container(border=True):
-                        st.markdown(
-                            f"**Customer:** `{item['customer_id']}`  \n"
-                            f"**Proposed by:** `{item['proposed_by']}`  \n"
-                            f"**Reason code:** {item['reason_code']}  \n"
-                            f"**Analyst note:** {item['note']}  \n"
-                            f"**Current disposition/score:** {item['disposition']} / {item['score']}  \n"
-                            f"**Proposed:** {item['proposed_at_ago']}"
-                        )
-                        manager_note = st.text_input(
-                            "Manager note (required)",
-                            key=f"approval_note_{idx}_{item['event_id']}",
-                        )
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            approve_disabled = user["username"] == item["proposed_by"]
-                            if st.button("Approve Clear", key=f"approve_{idx}_{item['event_id']}", disabled=approve_disabled):
-                                if approve_disabled:
-                                    st.error("Maker-checker: proposer cannot approve their own clear.")
-                                elif not manager_note.strip():
-                                    st.error("Manager note is required.")
-                                else:
-                                    touch()
-                                    log(
-                                        "CLEAR_APPROVED",
-                                        customer_id=item["customer_id"],
-                                        details={
-                                            "proposed_by": item["proposed_by"],
-                                            "reason_code": item["reason_code"],
-                                            "manager_note": manager_note,
-                                            "approved_by": user["username"],
-                                            "approved_at": datetime.now(timezone.utc).isoformat(),
-                                        },
-                                    )
-                                    st.success("Clear approved.")
-                                    st.rerun()
-                        with c2:
-                            if st.button("Reject Clear", key=f"reject_{idx}_{item['event_id']}"):
-                                if not manager_note.strip():
-                                    st.error("Manager note is required.")
-                                else:
-                                    touch()
-                                    log(
-                                        "CLEAR_REJECTED",
-                                        customer_id=item["customer_id"],
-                                        details={
-                                            "proposed_by": item["proposed_by"],
-                                            "reason_code": item["reason_code"],
-                                            "manager_note": manager_note,
-                                            "rejected_by": user["username"],
-                                            "rejected_at": datetime.now(timezone.utc).isoformat(),
-                                        },
-                                    )
-                                    st.success("Clear rejected.")
-                                    st.rerun()
-
-    # ════════════════════════════════════════════════════════
-    # TAB 7: CASES
-    # ════════════════════════════════════════════════════════
-    with tab7:
-        touch()
-        st.markdown("### Cases")
-        cfg1, cfg2 = st.columns(2)
-        with cfg1:
-            st.session_state.case_sla_amber_days = st.number_input(
-                "SLA amber threshold (days)",
-                min_value=1,
-                max_value=30,
-                value=int(st.session_state.case_sla_amber_days),
-                step=1,
-                key="sla_amber_input",
-            )
-        with cfg2:
-            st.session_state.case_sla_red_days = st.number_input(
-                "SLA red threshold (days)",
-                min_value=1,
-                max_value=60,
-                value=int(st.session_state.case_sla_red_days),
-                step=1,
-                key="sla_red_input",
-            )
-        cases = _build_cases(logger)
-        if not cases:
-            st.info("No cases generated yet in this session.")
-        else:
-            st.caption(f"{len(cases)} case(s) derived from session audit events.")
-            for c in cases:
-                with st.expander(f"{c['case_id']} · {c['customer_id']} · {c['case_status']} · {c['sla_badge']}", expanded=False):
-                    st.markdown(
-                        f"**Case ID:** `{c['case_id']}`  \n"
-                        f"**Customer ID:** `{c['customer_id']}`  \n"
-                        f"**Current disposition:** {c['current_disposition']}  \n"
-                        f"**Current score:** {c['current_score']}  \n"
-                        f"**Status:** {c['case_status']}  \n"
-                        f"**Opened by:** {c['opened_by']}  \n"
-                        f"**Opened at:** {c['opened_at']}  \n"
-                        f"**SLA aging:** {c['sla_badge']}"
-                    )
-                    st.markdown("**Case history (chronological):**")
-                    st.dataframe(pd.DataFrame(c["case_history"]), use_container_width=True, hide_index=True)
-
-                    note_key = f"case_note_{c['case_id']}"
-                    note_text = st.text_area("Add case note", key=note_key, placeholder="Write note and click Add Note.")
-                    col_a, col_b = st.columns(2)
-                    with col_a:
-                        if role in ("Analyst", "Manager", "Admin"):
-                            if st.button("Add Note", key=f"add_note_{c['case_id']}"):
-                                if not note_text.strip():
-                                    st.error("Note is required.")
-                                else:
-                                    touch()
-                                    log("NOTE_ADDED", customer_id=c["customer_id"],
-                                        details={"case_id": c["case_id"], "note": note_text.strip()})
-                                    st.success("Case note added.")
-                                    st.rerun()
-                    with col_b:
-                        if role in ("Manager", "Admin") and c["case_status"] != "Closed":
-                            close_note = st.text_input(
-                                "Closure note (required)",
-                                key=f"close_note_{c['case_id']}",
-                                placeholder="Reason for closure",
-                            )
-                            if st.button("Close Case", key=f"close_case_{c['case_id']}"):
-                                if not close_note.strip():
-                                    st.error("Closure note is required.")
-                                else:
-                                    touch()
-                                    log("CASE_CLOSED", customer_id=c["customer_id"],
-                                        details={"case_id": c["case_id"], "note": close_note.strip()})
-                                    st.success("Case closed.")
-                                    st.rerun()
-
-    # ════════════════════════════════════════════════════════
-    # TAB 8: AUDIT TRAIL
-    # ════════════════════════════════════════════════════════
-    with tab8:
         touch()
         st.markdown("### Approval Queue")
         if role not in ("Manager", "Admin"):
@@ -2658,37 +2185,7 @@ def render_main():
                         file_name=pkg["name"],
                         mime="application/zip",
                     )
-                )
 
-            if role in ("Manager", "Admin"):
-                st.divider()
-                st.markdown("#### Export Package")
-                if st.button("Generate Export Package", type="primary"):
-                    touch()
-                    _, _, manifest = _build_export_package(logger, user)
-                    log("EXPORT_PACKAGE_CREATED", details={
-                        "created_by": user["username"],
-                        "files_included": manifest,
-                        "generated_at": datetime.now(timezone.utc).isoformat(),
-                    })
-                    export_bytes, export_name, manifest = _build_export_package(logger, user)
-                    st.session_state.latest_export_package = {
-                        "bytes": export_bytes,
-                        "name": export_name,
-                        "manifest": manifest,
-                    }
-                    st.success("Export package generated.")
-
-                pkg = st.session_state.latest_export_package
-                if pkg:
-                    st.caption("Included files:")
-                    st.dataframe(pd.DataFrame(pkg["manifest"]), use_container_width=True, hide_index=True)
-                    st.download_button(
-                        "Download Export Package (.zip)",
-                        data=pkg["bytes"],
-                        file_name=pkg["name"],
-                        mime="application/zip",
-                    )
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
