@@ -265,6 +265,110 @@ Return ONLY the function code, nothing else. Start with "def cleanup(ocr_text: s
 
         return cleanup_code
 
+    def generate_schema_normalize_script(
+        self,
+        input_columns: List[str],
+        sample_rows: List[Dict],
+        canonical_fields: List[str],
+        target_type: str,
+    ) -> GeneratedScript:
+        """
+        Ask Claude to write a normalize(df) -> pd.DataFrame function that
+        maps a DataFrame with heterogeneous real-world schema into the
+        canonical schema defined by contracts.py.
+
+        The generated function must:
+          - Accept a pandas DataFrame
+          - Return a pandas DataFrame with canonical column names
+          - Handle duplicate/missing/variant keys across rows
+          - Normalize vocabularies (risk tiers, document types, AML states)
+          - Normalize date formats to YYYY-MM-DD strings
+          - Strip whitespace, normalize case where semantically appropriate
+          - Keep rows with partial data (fill missing canonical fields with None)
+          - Use only pandas + Python stdlib, no external imports inside function body
+        """
+        prompt = f"""You are given a pandas DataFrame containing customer data from a bank.
+The DataFrame has arbitrary real-world schema that varies row-to-row.
+
+Input columns observed:
+{json.dumps(input_columns, indent=2)}
+
+Sample rows (first {len(sample_rows)}):
+{json.dumps(sample_rows, indent=2, default=str)}
+
+Your task: write a Python function that normalizes this DataFrame into the
+canonical KYC schema for dataset type '{target_type}'.
+
+Canonical columns required in the output DataFrame:
+{json.dumps(canonical_fields, indent=2)}
+
+Rules for the generated function:
+- Function signature must be exactly: def normalize(df):
+- Must return a pandas DataFrame with the canonical columns above
+- Rows with partial data are kept; missing canonical fields filled with None
+- Handle the following real-world messiness:
+  * Same concept under different keys across rows (first_name+last_name vs full_name vs name)
+  * Same concept with different vocabularies (INDV/INDIVIDUAL/IND → INDIVIDUAL)
+  * Same concept with different date formats (ISO, US, abbreviated, natural language)
+  * Leading/trailing whitespace and unicode characters to strip
+  * Name order variation ("Last, First" vs "First Last")
+  * Fields that may be strings, lists, or absent entirely
+- Vocabulary normalization suggestions (apply when relevant):
+  * Risk tiers → LOW / MEDIUM / HIGH
+  * Entity type → INDIVIDUAL / LEGAL_ENTITY
+  * AML states → NO_HIT / HIT / CLEARED (preserve nuance if possible)
+  * Document types → PASSPORT / NATIONAL_ID / DRIVERS_LICENSE etc. (canonical enums from contracts)
+- Date fields → YYYY-MM-DD strings (or None if unparseable)
+- You may use pandas operations, str methods, regex, and dateutil patterns
+- Do NOT import anything — pandas is available as pd in the execution namespace
+- Do NOT raise on malformed rows — handle gracefully with None
+- Return ONLY the function code, starting with: def normalize(df):
+- No markdown fences, no explanation, no preamble
+"""
+
+        message = self.client.messages.create(
+            model=self.model,
+            max_tokens=3000,
+            system=(
+                "You are a Python code generator specializing in data normalization. "
+                "Write clean, defensive pandas transformations. "
+                "Return ONLY raw Python code — no explanation, no markdown, no backticks."
+            ),
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        script_code = message.content[0].text.strip()
+
+        # Strip markdown fences if Claude included them anyway
+        if script_code.startswith("```"):
+            lines = script_code.split("\n")
+            if lines and lines[0].strip().startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            script_code = "\n".join(lines).strip()
+
+        # Trim any preamble before `def normalize`
+        idx = script_code.find("def normalize")
+        if idx > 0:
+            script_code = script_code[idx:]
+
+        # Validate compiles
+        try:
+            compile(script_code, "<normalize>", "exec")
+        except SyntaxError as e:
+            raise RuntimeError(
+                f"Generated normalize script has syntax error: {e}\n\nCode:\n{script_code}"
+            )
+
+        return GeneratedScript(
+            script_code=script_code,
+            schema_code="",
+            fields=canonical_fields,
+            confidence=0.85,
+            explanation=f"Claude-generated schema normalizer for {target_type}",
+        )
+
     def validate_generated_script(self, script: GeneratedScript) -> Tuple[bool, str]:
         """
         Validate that generated script is syntactically correct.
