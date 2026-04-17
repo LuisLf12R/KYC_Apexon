@@ -1,6 +1,10 @@
 import pandas as pd
 
-from src.dataframe_arrow_compat import coerce_expected_text_columns, make_arrow_compatible
+from src.dataframe_arrow_compat import (
+    coerce_expected_text_columns,
+    ensure_arrow_compatible,
+    make_arrow_compatible,
+)
 
 
 def test_coerce_expected_text_columns_converts_boolean_status_values():
@@ -52,3 +56,19 @@ def test_make_arrow_compatible_preserves_missing_and_empty_values():
     assert pd.isna(out.loc[2, "document_status"])
     assert pd.isna(out.loc[3, "document_status"])
     assert pd.isna(out.loc[4, "document_status"])
+
+
+def test_ensure_arrow_compatible_applies_source_and_display_hardening():
+    df = pd.DataFrame(
+        {
+            "screening_result": [True, "MATCH", ""],
+            "notes": [{"reason": "ocr"}, "manual", None],
+        }
+    )
+
+    out = ensure_arrow_compatible(df, dataset_type="screenings")
+
+    assert str(out["screening_result"].dtype) == "string"
+    assert str(out["notes"].dtype) == "string"
+    assert out.loc[0, "screening_result"] == "TRUE"
+    assert pd.isna(out.loc[2, "screening_result"])

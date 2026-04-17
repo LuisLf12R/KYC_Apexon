@@ -18,7 +18,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 import plotly.graph_objects as go
-from src.dataframe_arrow_compat import coerce_expected_text_columns, make_arrow_compatible
+from src.dataframe_arrow_compat import ensure_arrow_compatible
 
 load_dotenv()
 st.set_page_config(
@@ -780,7 +780,7 @@ def clean_dataframe(df, dataset_type):
                                   "ownership": "ownership_percentage", "date": "date_identified"},
     }
     df = df.rename(columns=ALIASES.get(dataset_type, {}))
-    df = coerce_expected_text_columns(df, dataset_type=dataset_type)
+    df = ensure_arrow_compatible(df, dataset_type=dataset_type)
     for col in df.columns:
         if any(k in col for k in ["date", "expiry", "expiration"]):
             df[col] = pd.to_datetime(df[col], errors="coerce")
@@ -811,7 +811,7 @@ def clean_dataframe(df, dataset_type):
 def st_dataframe_safe(data, **kwargs):
     """Render DataFrames through an Arrow-safe normalization layer."""
     if isinstance(data, pd.DataFrame):
-        data = make_arrow_compatible(data)
+        data = ensure_arrow_compatible(data)
     st.dataframe(data, **kwargs)
 
 def save_to_temp(dataframes):
@@ -887,7 +887,7 @@ def llm_structure(raw_text, dataset_type, filename):
     records = json.loads(raw)
     if isinstance(records, dict):
         records = [records]
-    return pd.DataFrame(records)
+    return ensure_arrow_compatible(pd.DataFrame(records), dataset_type=dataset_type)
 
 def autodetect(sample, filename):
     import anthropic as ac
@@ -1884,6 +1884,7 @@ def render_main():
                                 st.markdown("#### Extracted Fields")
                                 extracted_df = pd.DataFrame(extracted_rows)
                                 display_df = extracted_df[["Field", "Extracted value", "Confidence"]].copy()
+                                display_df = ensure_arrow_compatible(display_df)
                                 display_df["Confidence"] = display_df["Confidence"].map(lambda x: f"{x*100:.0f}%")
                                 low_conf_fields = [r for r in extracted_rows if r["Confidence"] < 0.75]
 
@@ -1893,7 +1894,7 @@ def render_main():
                                         return ["background-color: #FFF3CD"] * len(row)
                                     return [""] * len(row)
 
-                                st.dataframe(
+                                st_dataframe_safe(
                                     display_df.style.apply(_highlight_low_confidence, axis=1),
                                     use_container_width=True,
                                     hide_index=True,

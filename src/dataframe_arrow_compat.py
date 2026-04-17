@@ -90,3 +90,25 @@ def make_arrow_compatible(df: pd.DataFrame) -> pd.DataFrame:
             safe_df[col] = series.map(_to_text).astype("string")
 
     return safe_df
+
+
+def ensure_arrow_compatible(
+    df: pd.DataFrame,
+    dataset_type: Optional[str] = None,
+    additional_columns: Optional[Iterable[str]] = None,
+) -> pd.DataFrame:
+    """
+    End-to-end hardening for source + display paths.
+
+    1) Coerce known canonical text fields to string dtype.
+    2) Normalize mixed object columns for Arrow conversion safety.
+    """
+    if df is None or df.empty:
+        return df
+
+    hardened = coerce_expected_text_columns(
+        df.copy(),
+        dataset_type=dataset_type,
+        additional_columns=additional_columns,
+    )
+    return make_arrow_compatible(hardened)
