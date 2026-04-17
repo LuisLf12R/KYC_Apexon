@@ -51,6 +51,20 @@ cp .env.example .env
 
 See `.env.example` for all required environment variables.
 
+### Local Development - Google Vision API
+
+1. Download `google-vision-sa-checkpoint.json` from Google Cloud.
+2. Place the file in the project root.
+3. Set in `.env`:
+   ```bash
+   GOOGLE_APPLICATION_CREDENTIALS=./google-vision-sa-checkpoint.json
+   ```
+4. Validate:
+   ```bash
+   python scripts/test_google_credentials.py
+   ```
+5. **Never commit the JSON file** (it is ignored by `.gitignore`).
+
 ### Run
 
 ```bash
