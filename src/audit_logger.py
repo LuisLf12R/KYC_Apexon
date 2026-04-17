@@ -57,6 +57,9 @@ ACTION_TYPES = {
     "OCR_RUN":                  "Google Vision OCR executed on a document",
     "LLM_CALL":                 "Claude API call made (structuring or analysis)",
     "DATA_CLEAN":               "Cleaning pipeline applied to a dataset",
+    "SCHEMA_HARMONIZED":        "Schema harmonizer normalized input to canonical schema",
+    "SCHEMA_HARMONIZE_FAILED":  "Schema harmonizer failed; raw DataFrame retained as fallback",
+    "SCHEMA_HARMONIZE_REJECTED":"Harmonization rejected source data for missing critical fields",
     "ENGINE_RELOAD":            "KYC engine reloaded with new dataset",
     "AUTODETECT_RUN":           "Claude used to classify dataset type of a file",
 
