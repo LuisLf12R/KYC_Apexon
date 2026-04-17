@@ -17,6 +17,7 @@ Scripts cached under doc_type "schema_normalize_<target_type>".
 import hashlib
 import json
 import logging
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -196,6 +197,9 @@ class SchemaHarmonizer:
         return generated.script_code
 
     def _validate_normalize_script(self, script_code: str) -> Tuple[bool, str]:
+        """
+        Compile-check the script and confirm it defines normalize(df).
+        """
         try:
             compile(script_code, "<normalize>", "exec")
         except SyntaxError as e:
@@ -217,7 +221,14 @@ class SchemaHarmonizer:
             )
         return result
 
-    def _enforce_canonical_columns(self, df: pd.DataFrame, canonical_fields) -> pd.DataFrame:
+    def _enforce_canonical_columns(
+        self, df: pd.DataFrame, canonical_fields: List[str]
+    ) -> pd.DataFrame:
+        """
+        Ensure every canonical field exists as a column. Missing fields are
+        filled with None. Extra columns not in the canonical schema are kept
+        (for audit/debug) but the canonical ones are guaranteed.
+        """
         for field in canonical_fields:
             if field not in df.columns:
                 df[field] = None
