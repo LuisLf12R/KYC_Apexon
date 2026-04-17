@@ -773,10 +773,26 @@ def clean_dataframe(df, dataset_type):
         if any(k in col for k in ["date", "expiry", "expiration"]):
             df[col] = pd.to_datetime(df[col], errors="coerce")
     for col in df.select_dtypes(include="object").columns:
-        df[col] = df[col].str.strip()
+        series = df[col]
+        if isinstance(series, pd.DataFrame):
+            # Duplicate column name — keep first occurrence
+            series = series.iloc[:, 0]
+            df = df.loc[:, ~df.columns.duplicated()]
+        try:
+            df[col] = series.str.strip()
+        except AttributeError:
+            # Column contains non-string values (lists, dicts); leave as-is
+            pass
     for col in ["screening_result", "hit_status", "document_status", "risk_rating"]:
         if col in df.columns:
-            df[col] = df[col].str.upper()
+            series = df[col]
+            if isinstance(series, pd.DataFrame):
+                series = series.iloc[:, 0]
+                df = df.loc[:, ~df.columns.duplicated()]
+            try:
+                df[col] = series.str.upper()
+            except AttributeError:
+                pass
     return df
 
 def save_to_temp(dataframes):
@@ -878,6 +894,40 @@ def process_file(file_obj, filename, dataset_type):
             dataset_type = autodetect(df.head(3).to_string(), filename)
             log("AUTODETECT_RUN", prompt_id="autodetect-v1.0",
                 details={"filename": filename, "detected": dataset_type})
+
+        # Harmonize to canonical schema BEFORE clean_dataframe, so column
+        # renaming and value normalization both land correctly.
+        try:
+            from src.schema_harmonizer import SchemaHarmonizer
+            harmonizer = SchemaHarmonizer()
+            if dataset_type in harmonizer.SUPPORTED_TARGETS:
+                df_before_cols = list(df.columns)
+                df, harmonize_meta = harmonizer.normalize(df, dataset_type)
+                log(
+                    "SCHEMA_HARMONIZED",
+                    details={
+                        "filename": filename,
+                        "target_type": dataset_type,
+                        "source": harmonize_meta["source"],
+                        "script_id": harmonize_meta["script_id"],
+                        "input_columns": df_before_cols,
+                        "output_columns": harmonize_meta["output_columns"],
+                        "rows_in": harmonize_meta["row_count_in"],
+                        "rows_out": harmonize_meta["row_count_out"],
+                    },
+                )
+        except Exception as e:
+            # Harmonization failure should not kill the upload — fall back
+            # to raw DataFrame and let downstream validation surface gaps.
+            log(
+                "SCHEMA_HARMONIZE_FAILED",
+                details={
+                    "filename": filename,
+                    "target_type": dataset_type,
+                    "error": str(e),
+                },
+            )
+
         df = clean_dataframe(df, dataset_type)
         return df, "direct", dataset_type, f"Loaded {len(df)} rows"
     else:
