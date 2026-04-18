@@ -767,8 +767,7 @@ def mask(value, field_type="default"):
 
 def load_engine(data_dir):
     try:
-        sys.path.insert(0, str(Path.cwd() / "src"))
-        from kyc_engine import KYCComplianceEngine
+        from src.kyc_engine import KYCComplianceEngine
         engine = KYCComplianceEngine(data_clean_dir=data_dir)
         return engine, engine.customers
     except Exception as e:
@@ -905,7 +904,6 @@ def llm_structure(raw_text, dataset_type, filename):
     return ensure_arrow_compatible(pd.DataFrame(records), dataset_type=dataset_type)
 
 def autodetect(sample, filename):
-    import anthropic as ac
     cfg = get_prompt("autodetect-v1.0")
     system = cfg.get("system", f"Classify into: {', '.join(DATASET_OPTIONS)}. Return type only.")
     tmpl = cfg.get("user_template", "Filename: {filename}\n\nSample:\n{sample}")
@@ -2304,13 +2302,12 @@ def render_main():
                 st.markdown("#### Export Package")
                 if st.button("Generate Export Package", type="primary"):
                     touch()
-                    _, _, manifest = _build_export_package(logger, user)
+                    export_bytes, export_name, manifest = _build_export_package(logger, user)
                     log("EXPORT_PACKAGE_CREATED", details={
                         "created_by": user["username"],
                         "files_included": manifest,
                         "generated_at": datetime.now(timezone.utc).isoformat(),
                     })
-                    export_bytes, export_name, manifest = _build_export_package(logger, user)
                     st.session_state.latest_export_package = {
                         "bytes": export_bytes,
                         "name": export_name,
