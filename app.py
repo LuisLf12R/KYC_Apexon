@@ -19,6 +19,35 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 import plotly.graph_objects as go
 from src.dataframe_arrow_compat import ensure_arrow_compatible
+from kyc_dashboard.components import (
+    disposition_badge,
+    show_disposition,
+    mask,
+    _format_conf_pct,
+    st_dataframe_safe,
+)
+from kyc_dashboard.styles import inject_styles
+from kyc_dashboard.state import (
+    INACTIVITY_WARNING_SEC,
+    INACTIVITY_TIMEOUT_SEC,
+    RULESET_VERSION,
+    ACCEPTED_TYPES,
+    DATASET_OPTIONS,
+    AUTO_DETECT,
+    LOW_CONFIDENCE_THRESHOLD,
+    DEFAULT_SLA_AMBER_DAYS,
+    DEFAULT_SLA_RED_DAYS,
+    KYC_SCHEMAS_HINT,
+    FALSE_POSITIVE_CODES,
+    COLORS,
+    DISPOSITION_CONFIG,
+    _DEFAULTS,
+    touch,
+    get_logger,
+    log,
+    check_timeout,
+    can_unmask,
+)
 
 load_dotenv()
 st.set_page_config(
@@ -28,121 +57,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ── Global styles ─────────────────────────────────────────────────────────────
-
-st.markdown("""
-<style>
-/* Tab list container */
-.stTabs [data-baseweb="tab-list"] {
-    gap: 6px;
-    padding: 4px 0 0 0;
-    border-bottom: 2px solid rgba(255,255,255,0.08);
-}
-/* Individual tab */
-.stTabs [data-baseweb="tab"] {
-    font-size: 15px;
-    font-weight: 500;
-    padding: 12px 24px;
-    border-radius: 6px 6px 0 0;
-    color: rgba(255,255,255,0.6);
-    background: transparent;
-    border: none;
-    letter-spacing: 0.01em;
-    transition: color 0.15s ease, background 0.15s ease;
-}
-/* Hover state */
-.stTabs [data-baseweb="tab"]:hover {
-    color: rgba(255,255,255,0.9);
-    background: rgba(255,255,255,0.05);
-}
-/* Active tab */
-.stTabs [data-baseweb="tab"][aria-selected="true"] {
-    color: #ffffff;
-    font-weight: 700;
-    background: rgba(255,255,255,0.06);
-}
-/* Active tab underline indicator */
-.stTabs [data-baseweb="tab-highlight"] {
-    background-color: #0072B2;
-    height: 3px;
-    border-radius: 2px 2px 0 0;
-}
-/* Tab panel content area */
-.stTabs [data-baseweb="tab-panel"] {
-    padding-top: 24px;
-}
-</style>
-""", unsafe_allow_html=True)
-
-
-# ── Constants ─────────────────────────────────────────────────────────────────
-
-INACTIVITY_WARNING_SEC = 13 * 60
-INACTIVITY_TIMEOUT_SEC = 15 * 60
-RULESET_VERSION = "kyc-ruleset-v1.0"
-ACCEPTED_TYPES = ["csv", "xlsx", "xls", "json", "jsonl", "png", "jpg", "jpeg", "tiff", "bmp", "pdf"]
-DATASET_OPTIONS = ["customers", "screenings", "id_verifications", "transactions", "documents", "beneficial_ownership"]
-AUTO_DETECT = "Auto-detect (AI classifies)"
-LOW_CONFIDENCE_THRESHOLD = 0.6
-DEFAULT_SLA_AMBER_DAYS = 3
-DEFAULT_SLA_RED_DAYS = 7
-
-KYC_SCHEMAS_HINT = {
-    "customers": "customer_id, entity_type, jurisdiction, risk_rating, account_open_date, last_kyc_review_date, country_of_origin",
-    "screenings": "customer_id, screening_date, screening_result, match_name, list_reference, hit_status",
-    "id_verifications": "customer_id, document_type, document_number, issue_date, expiry_date, verification_date, document_status",
-    "transactions": "customer_id, last_txn_date, txn_count, total_volume",
-    "documents": "customer_id, document_type, issue_date, expiry_date, document_category",
-    "beneficial_ownership": "customer_id, ubo_name, ownership_percentage, nationality, date_identified",
-}
-
-FALSE_POSITIVE_CODES = [
-    "OCR Error — Extraction Misread",
-    "Name Match Cleared — Verified Different Person",
-    "Address Variant Accepted — Same Location Different Format",
-    "Acceptable Risk Exception — Approved by Policy",
-    "Duplicate Record — Same Customer Different ID",
-    "Expired Document — Renewal Confirmed",
-    "Other — See Notes",
-]
-
-# Okabe-Ito colorblind-safe palette
-COLORS = {
-    "compliant":     "#009E73",
-    "minor":         "#E69F00",
-    "non_compliant": "#D55E00",
-    "blue":          "#0072B2",
-    "gray":          "#999999",
-}
-
-DISPOSITION_CONFIG = {
-    "REJECT":          {"label": "Reject",           "color": "#D55E00", "icon": "🚫"},
-    "REVIEW":          {"label": "Review Required",  "color": "#E69F00", "icon": "⚠️"},
-    "PASS_WITH_NOTES": {"label": "Pass with Notes",  "color": "#0072B2", "icon": "📋"},
-    "PASS":            {"label": "Pass",             "color": "#009E73", "icon": "✅"},
-}
-
-def disposition_badge(disposition: str) -> str:
-    """Return an HTML badge for a disposition value."""
-    cfg = DISPOSITION_CONFIG.get(disposition, {"label": disposition, "color": "#999999", "icon": "?"})
-    return (
-        f"<span style='background:{cfg['color']};color:white;padding:3px 10px;"
-        f"border-radius:4px;font-weight:bold;font-size:13px'>"
-        f"{cfg['icon']} {cfg['label']}</span>"
-    )
-
-def show_disposition(disposition: str):
-    """Render the appropriate Streamlit status element for a disposition."""
-    cfg = DISPOSITION_CONFIG.get(disposition, {"label": disposition, "color": "#999", "icon": "?"})
-    label = f"{cfg['icon']} {cfg['label']}"
-    if disposition == "REJECT":
-        st.error(label)
-    elif disposition == "REVIEW":
-        st.warning(label)
-    elif disposition == "PASS_WITH_NOTES":
-        st.info(label)
-    else:
-        st.success(label)
+inject_styles()
 
 # ── API keys ──────────────────────────────────────────────────────────────────
 
@@ -258,42 +173,6 @@ def authenticate(username, password):
         return u
     return None
 
-# ── Session state defaults ────────────────────────────────────────────────────
-
-_DEFAULTS = {
-    "authenticated": False, "current_user": None, "audit_logger": None,
-    "last_activity": None, "timeout_warning_logged": False, "pii_masked": True,
-    "kyc_engine": None, "engines_initialized": False, "customers_df": None,
-    "data_dir": None, "batch_results": None, "batch_id": None, "batch_run_at": None,
-    "customer_history": {},
-    "data_source_label": None,
-    "case_sla_amber_days": DEFAULT_SLA_AMBER_DAYS,
-    "case_sla_red_days": DEFAULT_SLA_RED_DAYS,
-    "latest_export_package": None,
-    "provenance_store": None,
-    "dirty_customers": set(),
-    "ocr_analysis_cache": {},
-    "latest_discrepancy_report": None,
-}
-for k, v in _DEFAULTS.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
-
-# ── Audit helpers ─────────────────────────────────────────────────────────────
-
-def get_logger():
-    return st.session_state.get("audit_logger")
-
-def log(action_type, details=None, customer_id=None, batch_id=None, snapshot=None, prompt_id=None):
-    lg = get_logger()
-    if lg:
-        lg.log(action_type, details=details, customer_id=customer_id,
-               batch_id=batch_id, snapshot=snapshot, prompt_id=prompt_id)
-
-def touch():
-    st.session_state.last_activity = datetime.now(timezone.utc)
-
-
 def _ensure_runtime_action_types():
     """Allow app-level workflow actions without editing audit_logger.py."""
     try:
@@ -310,13 +189,6 @@ def _get_provenance_store():
         from data_provenance import CustomerProvenance
         st.session_state.provenance_store = CustomerProvenance()
     return st.session_state.provenance_store
-
-
-def _format_conf_pct(conf):
-    if conf is None or pd.isna(conf):
-        return ""
-    return f"{int(round(float(conf) * 100))}%"
-
 
 def _seed_structured_provenance():
     """Seed user-provided structured fields into provenance once."""
@@ -715,54 +587,6 @@ def _build_export_package(logger, user):
 
 
 
-# ── Timeout ───────────────────────────────────────────────────────────────────
-
-def check_timeout():
-    if not st.session_state.authenticated:
-        return False
-    last = st.session_state.last_activity
-    if last is None:
-        return True
-    elapsed = (datetime.now(timezone.utc) - last).total_seconds()
-    if elapsed >= INACTIVITY_TIMEOUT_SEC:
-        log("SESSION_EXPIRED", details={"elapsed_seconds": int(elapsed),
-                                         "reason": "15-min FFIEC/PSD2 inactivity limit"})
-        _force_logout()
-        return False
-    if elapsed >= INACTIVITY_WARNING_SEC and not st.session_state.timeout_warning_logged:
-        log("SESSION_TIMEOUT_WARNING", details={"elapsed_seconds": int(elapsed),
-             "note": "Logged so auditors can understand re-login patterns within short time windows."})
-        st.session_state.timeout_warning_logged = True
-    return True
-
-def _force_logout():
-    lg = get_logger()
-    final = lg.export_json() if lg else None
-    for k in list(st.session_state.keys()):
-        if k != "_final_log":
-            del st.session_state[k]
-    for k, v in _DEFAULTS.items():
-        st.session_state[k] = v
-    if final:
-        st.session_state["_final_log"] = final
-
-# ── PII masking ───────────────────────────────────────────────────────────────
-
-def can_unmask():
-    u = st.session_state.current_user
-    return u and u.get("role") in ("Manager", "Admin")
-
-def mask(value, field_type="default"):
-    if not st.session_state.pii_masked or can_unmask():
-        return str(value) if value is not None else "N/A"
-    masks = {
-        "ssn": "***-**-****", "dob": "**/**/****",
-        "account": f"****{str(value)[-4:]}" if value and len(str(value)) >= 4 else "****",
-        "name": f"{str(value)[0]}***" if value else "***",
-        "address": "[MASKED]", "default": "[MASKED]",
-    }
-    return masks.get(field_type, masks["default"])
-
 # ── Engine loader ─────────────────────────────────────────────────────────────
 
 def load_engine(data_dir):
@@ -820,13 +644,6 @@ def clean_dataframe(df, dataset_type):
             except AttributeError:
                 pass
     return df
-
-
-def st_dataframe_safe(data, **kwargs):
-    """Render DataFrames through an Arrow-safe normalization layer."""
-    if isinstance(data, pd.DataFrame):
-        data = ensure_arrow_compatible(data)
-    st.dataframe(data, **kwargs)
 
 def save_to_temp(dataframes):
     tmp = Path(tempfile.gettempdir()) / "kyc_data_clean"
