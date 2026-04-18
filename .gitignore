@@ -60,6 +60,7 @@ Credentials/
 base64_key.txt
 service-account*.json
 *-sa.json
+*-sa*.json
 
 # Data files — use cloud storage or DVC instead
 Data Raw/
