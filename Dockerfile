@@ -3,7 +3,8 @@ FROM python:3.13-slim
 WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
 
 # Google Vision API credentials are injected via Railway secret at build time
 # Secret name: GOOGLE_CREDENTIALS_JSON (set in Railway project settings)
