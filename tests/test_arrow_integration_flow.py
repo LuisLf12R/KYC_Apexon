@@ -1,7 +1,7 @@
 import pandas as pd
 import pyarrow as pa
 
-from src.dataframe_arrow_compat import ensure_arrow_compatible
+from kyc_engine.dataframe_arrow_compat import ensure_arrow_compatible
 
 
 def test_llm_like_records_can_convert_to_arrow_after_hardening():

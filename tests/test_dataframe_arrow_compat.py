@@ -1,6 +1,6 @@
 import pandas as pd
 
-from src.dataframe_arrow_compat import (
+from kyc_engine.dataframe_arrow_compat import (
     coerce_expected_text_columns,
     ensure_arrow_compatible,
     make_arrow_compatible,

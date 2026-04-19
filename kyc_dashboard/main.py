@@ -17,7 +17,7 @@ import base64
 from pathlib import Path
 from datetime import datetime, timezone
 import plotly.graph_objects as go
-from src.dataframe_arrow_compat import ensure_arrow_compatible
+from kyc_engine.dataframe_arrow_compat import ensure_arrow_compatible
 from kyc_dashboard.components import (
     disposition_badge,
     show_disposition,
