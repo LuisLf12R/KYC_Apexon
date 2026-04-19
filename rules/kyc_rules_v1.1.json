@@ -3,12 +3,18 @@
   "effective_date": "2026-04-14",
   "created_by": "Apexon KYC Platform Team",
   "description": "Phase 1 extension of v1.0. Adds per-rule provenance (regulator, jurisdiction, source_url, regulatory_refs, effective_from, effective_until) and dimension_parameters block. No behavioral changes from v1.0.",
-
   "changelog": [
-    {"version": "1.0", "date": "2026-04-14", "change": "Initial ruleset"},
-    {"version": "1.1", "date": "2026-04-18", "change": "Phase 1: added provenance fields and dimension_parameters to all rules. Source URLs and regulatory_refs hand-authored from primary regulatory documents. snapshot_hash is null for all hand-authored entries (no automated fetch occurred)."}
+    {
+      "version": "1.0",
+      "date": "2026-04-14",
+      "change": "Initial ruleset"
+    },
+    {
+      "version": "1.1",
+      "date": "2026-04-18",
+      "change": "Phase 1: added provenance fields and dimension_parameters to all rules. Source URLs and regulatory_refs hand-authored from primary regulatory documents. snapshot_hash is null for all hand-authored entries (no automated fetch occurred)."
+    }
   ],
-
   "disposition_levels": {
     "REJECT": {
       "description": "Hard fail. Customer must not be onboarded or must be offboarded. No score threshold can override a Reject.",
@@ -35,7 +41,6 @@
       "can_be_cleared_by": null
     }
   },
-
   "hard_reject_rules": [
     {
       "rule_id": "HR-001",
@@ -44,7 +49,7 @@
       "dimension": "aml_screening",
       "condition_field": "status",
       "condition_value": "confirmed_match",
-      "policy_reference": "AML Policy 4.1 — Sanctions Screening",
+      "policy_reference": "AML Policy 4.1 \u2014 Sanctions Screening",
       "provenance": {
         "regulator": "FATF",
         "jurisdiction": "supranational",
@@ -53,7 +58,10 @@
         "published_at": "2012-02-16",
         "effective_from": "2012-02-16",
         "effective_until": null,
-        "regulatory_refs": ["FATF Rec 6 — Targeted Financial Sanctions", "FATF Rec 7 — Targeted Financial Sanctions (Proliferation)"]
+        "regulatory_refs": [
+          "FATF Rec 6 \u2014 Targeted Financial Sanctions",
+          "FATF Rec 7 \u2014 Targeted Financial Sanctions (Proliferation)"
+        ]
       }
     },
     {
@@ -63,7 +71,7 @@
       "dimension": "identity_verification",
       "condition_field": "status",
       "condition_value": "no_documents",
-      "policy_reference": "KYC Policy 2.1 — Identity Verification Minimum Standard",
+      "policy_reference": "KYC Policy 2.1 \u2014 Identity Verification Minimum Standard",
       "provenance": {
         "regulator": "FATF",
         "jurisdiction": "supranational",
@@ -72,7 +80,10 @@
         "published_at": "2012-02-16",
         "effective_from": "2012-02-16",
         "effective_until": null,
-        "regulatory_refs": ["FATF Rec 10 — Customer Due Diligence", "Wolfsberg Private Banking Principles 2012 s.2.1"]
+        "regulatory_refs": [
+          "FATF Rec 10 \u2014 Customer Due Diligence",
+          "Wolfsberg Private Banking Principles 2012 s.2.1"
+        ]
       }
     },
     {
@@ -82,7 +93,7 @@
       "dimension": "identity_verification",
       "condition_field": "status",
       "condition_value": "all_rejected",
-      "policy_reference": "KYC Policy 2.1 — Identity Verification Minimum Standard",
+      "policy_reference": "KYC Policy 2.1 \u2014 Identity Verification Minimum Standard",
       "provenance": {
         "regulator": "FATF",
         "jurisdiction": "supranational",
@@ -91,7 +102,10 @@
         "published_at": "2012-02-16",
         "effective_from": "2012-02-16",
         "effective_until": null,
-        "regulatory_refs": ["FATF Rec 10 — Customer Due Diligence", "Wolfsberg Private Banking Principles 2012 s.2.1"]
+        "regulatory_refs": [
+          "FATF Rec 10 \u2014 Customer Due Diligence",
+          "Wolfsberg Private Banking Principles 2012 s.2.1"
+        ]
       }
     },
     {
@@ -101,7 +115,7 @@
       "dimension": "aml_screening",
       "condition_field": "status",
       "condition_value": "no_screening_record",
-      "policy_reference": "AML Policy 4.2 — Mandatory Screening Requirement",
+      "policy_reference": "AML Policy 4.2 \u2014 Mandatory Screening Requirement",
       "provenance": {
         "regulator": "FinCEN",
         "jurisdiction": "USA",
@@ -110,11 +124,13 @@
         "published_at": "2016-05-11",
         "effective_from": "2018-05-11",
         "effective_until": null,
-        "regulatory_refs": ["FinCEN CDD Rule 31 CFR 1010.230(b)(1)", "FATF Rec 10 — Customer Due Diligence"]
+        "regulatory_refs": [
+          "FinCEN CDD Rule 31 CFR 1010.230(b)(1)",
+          "FATF Rec 10 \u2014 Customer Due Diligence"
+        ]
       }
     }
   ],
-
   "review_rules": [
     {
       "rule_id": "RV-001",
@@ -123,7 +139,7 @@
       "dimension": "aml_screening",
       "condition_field": "status",
       "condition_value": "match_requires_review",
-      "policy_reference": "AML Policy 4.3 — Unresolved Match Handling",
+      "policy_reference": "AML Policy 4.3 \u2014 Unresolved Match Handling",
       "provenance": {
         "regulator": "FATF",
         "jurisdiction": "supranational",
@@ -132,7 +148,10 @@
         "published_at": "2012-02-16",
         "effective_from": "2012-02-16",
         "effective_until": null,
-        "regulatory_refs": ["FATF Rec 6 — Targeted Financial Sanctions", "FATF INR 6 — False Positive Management"]
+        "regulatory_refs": [
+          "FATF Rec 6 \u2014 Targeted Financial Sanctions",
+          "FATF INR 6 \u2014 False Positive Management"
+        ]
       }
     },
     {
@@ -142,7 +161,7 @@
       "dimension": "identity_verification",
       "condition_field": "status",
       "condition_value": "all_expired",
-      "policy_reference": "KYC Policy 2.3 — Document Expiry Management",
+      "policy_reference": "KYC Policy 2.3 \u2014 Document Expiry Management",
       "provenance": {
         "regulator": "FCA",
         "jurisdiction": "GBR",
@@ -151,7 +170,10 @@
         "published_at": "2017-06-26",
         "effective_from": "2017-06-26",
         "effective_until": null,
-        "regulatory_refs": ["JMLSG Part I 5.3.15 — Ongoing Monitoring of Customer Documents", "MLR 2017 reg 28(11) — Ongoing Monitoring"]
+        "regulatory_refs": [
+          "JMLSG Part I 5.3.15 \u2014 Ongoing Monitoring of Customer Documents",
+          "MLR 2017 reg 28(11) \u2014 Ongoing Monitoring"
+        ]
       }
     },
     {
@@ -161,7 +183,7 @@
       "dimension": "aml_screening",
       "condition_field": "status",
       "condition_value": "stale_screening",
-      "policy_reference": "AML Policy 4.4 — Screening Refresh Frequency",
+      "policy_reference": "AML Policy 4.4 \u2014 Screening Refresh Frequency",
       "provenance": {
         "regulator": "Wolfsberg",
         "jurisdiction": "supranational",
@@ -170,7 +192,10 @@
         "published_at": "2012-05-01",
         "effective_from": "2012-05-01",
         "effective_until": null,
-        "regulatory_refs": ["Wolfsberg Private Banking Principles 2012 s.6.1 — Periodic Review", "FATF Rec 10(d) — Ongoing Due Diligence"]
+        "regulatory_refs": [
+          "Wolfsberg Private Banking Principles 2012 s.6.1 \u2014 Periodic Review",
+          "FATF Rec 10(d) \u2014 Ongoing Due Diligence"
+        ]
       }
     },
     {
@@ -180,7 +205,7 @@
       "dimension": "identity_verification",
       "condition_field": "status",
       "condition_value": "pending",
-      "policy_reference": "KYC Policy 2.2 — Verification Completion Requirement",
+      "policy_reference": "KYC Policy 2.2 \u2014 Verification Completion Requirement",
       "provenance": {
         "regulator": "FinCEN",
         "jurisdiction": "USA",
@@ -189,7 +214,10 @@
         "published_at": "2016-05-11",
         "effective_from": "2018-05-11",
         "effective_until": null,
-        "regulatory_refs": ["FinCEN CDD Rule 31 CFR 1010.230(a) — General Requirements", "FATF Rec 10 — CDD Before Establishing Relationship"]
+        "regulatory_refs": [
+          "FinCEN CDD Rule 31 CFR 1010.230(a) \u2014 General Requirements",
+          "FATF Rec 10 \u2014 CDD Before Establishing Relationship"
+        ]
       }
     },
     {
@@ -199,7 +227,7 @@
       "dimension": "beneficial_ownership",
       "condition_field": "status",
       "condition_value": "insufficient_ubo_data",
-      "policy_reference": "KYC Policy 3.1 — Beneficial Ownership Minimum Standard",
+      "policy_reference": "KYC Policy 3.1 \u2014 Beneficial Ownership Minimum Standard",
       "provenance": {
         "regulator": "FinCEN",
         "jurisdiction": "USA",
@@ -208,7 +236,11 @@
         "published_at": "2016-05-11",
         "effective_from": "2018-05-11",
         "effective_until": null,
-        "regulatory_refs": ["FinCEN CDD Rule 31 CFR 1010.230(d) — Beneficial Ownership Identification", "FATF Rec 24 — Transparency of Legal Persons", "Wolfsberg Private Banking Principles 2012 s.2.3"]
+        "regulatory_refs": [
+          "FinCEN CDD Rule 31 CFR 1010.230(d) \u2014 Beneficial Ownership Identification",
+          "FATF Rec 24 \u2014 Transparency of Legal Persons",
+          "Wolfsberg Private Banking Principles 2012 s.2.3"
+        ]
       }
     },
     {
@@ -218,7 +250,7 @@
       "dimension": "data_quality",
       "condition_field": "quality_rating",
       "condition_value": "Poor",
-      "policy_reference": "Data Governance Policy 1.2 — Record Completeness",
+      "policy_reference": "Data Governance Policy 1.2 \u2014 Record Completeness",
       "provenance": {
         "regulator": "FCA",
         "jurisdiction": "GBR",
@@ -227,22 +259,28 @@
         "published_at": "2017-06-26",
         "effective_from": "2017-06-26",
         "effective_until": null,
-        "regulatory_refs": ["JMLSG Part I 5.3.4 — Customer Records", "MLR 2017 reg 40 — Record Keeping"]
+        "regulatory_refs": [
+          "JMLSG Part I 5.3.4 \u2014 Customer Records",
+          "MLR 2017 reg 40 \u2014 Record Keeping"
+        ]
       }
     }
   ],
-
   "score_thresholds": {
     "pass_minimum": 70,
     "pass_with_notes_minimum": 50,
     "note": "These thresholds only apply when no Reject or Review triggers are hit. Score still shown for context on all dispositions."
   },
-
   "dimension_parameters": {
     "identity": {
       "min_verified_docs": 1,
       "doc_expiry_warning_days": 30,
-      "accepted_doc_types": ["passport", "national_id", "driving_licence", "residence_permit"]
+      "accepted_doc_types": [
+        "passport",
+        "national_id",
+        "driving_licence",
+        "residence_permit"
+      ]
     },
     "screening": {
       "max_screening_age_days": 180,
@@ -258,10 +296,23 @@
     },
     "documents": {
       "max_doc_age_days": 90,
-      "accepted_proof_of_address_types": ["utility_bill", "bank_statement", "government_letter", "tax_document"]
+      "accepted_proof_of_address_types": [
+        "utility_bill",
+        "bank_statement",
+        "government_letter",
+        "tax_document"
+      ]
     },
     "data_quality": {
-      "critical_fields": ["full_name", "date_of_birth", "nationality", "country_of_residence", "source_of_wealth"],
+      "critical_fields": [
+        "customer_id",
+        "entity_type",
+        "jurisdiction",
+        "risk_rating",
+        "account_open_date",
+        "last_kyc_review_date",
+        "country_of_origin"
+      ],
       "poor_quality_threshold": 0.2
     }
   }

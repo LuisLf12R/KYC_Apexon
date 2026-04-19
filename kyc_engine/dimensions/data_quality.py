@@ -27,6 +27,7 @@ from typing import Dict, List, Any, Tuple
 import pandas as pd
 import logging
 
+from rules.schema.dimensions import DataQualityParameters
 logger = logging.getLogger(__name__)
 
 
@@ -82,8 +83,9 @@ class DataQualityDimension:
         'transaction_date': 2,
     }
     
-    def __init__(self, evaluation_date: datetime = None):
-        self.evaluation_date = evaluation_date or self.EVALUATION_DATE
+    def __init__(self, params: DataQualityParameters, evaluation_date=None):
+        self.params = params
+        self.evaluation_date = evaluation_date or datetime.now()
         logger.info(f"DataQualityDimension initialized. Evaluation date: {self.evaluation_date}")
     
     def evaluate(self, customer_id: str, data: Dict[str, Any]) -> Dict:
@@ -204,7 +206,7 @@ class DataQualityDimension:
         score = 100
         
         # Required fields: customer_id, entity_type, jurisdiction, risk_rating
-        required_fields = ['customer_id', 'entity_type', 'jurisdiction', 'risk_rating']
+        required_fields = list(self.params.critical_fields)
         for field in required_fields:
             if pd.isna(customer.get(field)):
                 findings.append(f'[CRITICAL] Missing required field: {field}')

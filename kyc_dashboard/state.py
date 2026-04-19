@@ -1,10 +1,11 @@
 from datetime import datetime, timezone
 
 import streamlit as st
+from kyc_engine.ruleset import get_active_ruleset_version as _get_version
 
 INACTIVITY_WARNING_SEC = 13 * 60
 INACTIVITY_TIMEOUT_SEC = 15 * 60
-RULESET_VERSION = "kyc-ruleset-v1.0"
+RULESET_VERSION = _get_version()
 ACCEPTED_TYPES = ["csv", "xlsx", "xls", "json", "jsonl", "png", "jpg", "jpeg", "tiff", "bmp", "pdf"]
 DATASET_OPTIONS = ["customers", "screenings", "id_verifications", "transactions", "documents", "beneficial_ownership"]
 AUTO_DETECT = "Auto-detect (AI classifies)"

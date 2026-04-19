@@ -15,7 +15,7 @@ from typing import Dict, Any, List, Optional
 import pandas as pd
 import logging
 
-from src.data.contracts import get_contract
+from rules.schema.dimensions import TransactionParameters
 
 logger = logging.getLogger(__name__)
 
@@ -51,14 +51,15 @@ class AccountActivityDimension:
     # Minimum transaction count for spike detection
     MIN_TXN_COUNT_FOR_SPIKE = 5
     
-    def __init__(self, evaluation_date: datetime = None):
+    def __init__(self, params: TransactionParameters, evaluation_date=None):
         """
         Initialize Account Activity Dimension.
         
         Args:
             evaluation_date: Fixed date for compliance evaluation (default: 2026-04-09)
         """
-        self.evaluation_date = evaluation_date or datetime(2026, 4, 9)
+        self.params = params
+        self.evaluation_date = evaluation_date or datetime.now()
         logger.info(f"AccountActivityDimension initialized. Evaluation date: {self.evaluation_date.date()}")
     
     def evaluate(self, customer_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -220,7 +221,7 @@ class AccountActivityDimension:
         days_span = (max_date - min_date).days
         
         # Count transactions in different periods
-        cutoff_30d = self.evaluation_date - timedelta(days=30)
+        cutoff_30d = self.evaluation_date - timedelta(days=self.params.velocity_window_days)
         cutoff_12m = self.evaluation_date - timedelta(days=365)
         
         txn_count_30d = len(txn_df[txn_df['last_txn_date'] >= cutoff_30d])
@@ -231,7 +232,7 @@ class AccountActivityDimension:
         
         # Calculate average monthly volume
         if days_span > 0:
-            months_active = max(days_span / 30, 1)
+            months_active = max(days_span / self.params.velocity_window_days, 1)
             avg_monthly_txn = txn_count_12m / months_active
         else:
             avg_monthly_txn = 0
@@ -269,8 +270,8 @@ class AccountActivityDimension:
         recent_30d = txn_metrics['txn_count_30d']
         
         if avg_monthly > 0:
-            recent_avg_daily = recent_30d / 30
-            historical_avg_daily = avg_monthly / 30
+            recent_avg_daily = recent_30d / self.params.velocity_window_days
+            historical_avg_daily = avg_monthly / self.params.velocity_window_days
             
             if (recent_30d >= self.MIN_TXN_COUNT_FOR_SPIKE and 
                 recent_avg_daily > (self.VOLUME_SPIKE_MULTIPLIER * historical_avg_daily)):
@@ -442,9 +443,6 @@ class AccountActivityDimension:
 
 # For testing
 if __name__ == "__main__":
-    from src.logging_config import setup_logging
-    from src.config import Config
-    from src.data_loader import DataLoader
     
     setup_logging("INFO")
     
