@@ -1,7 +1,7 @@
 import pandas as pd
 import streamlit as st
 
-from src.dataframe_arrow_compat import ensure_arrow_compatible
+from kyc_engine.dataframe_arrow_compat import ensure_arrow_compatible
 from .state import DISPOSITION_CONFIG, can_unmask
 
 
