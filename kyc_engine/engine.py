@@ -15,7 +15,11 @@ from kyc_engine.dimensions.beneficial_ownership import BeneficialOwnershipDimens
 from kyc_engine.dimensions.data_quality import DataQualityDimension
 from kyc_engine.dimensions.identity import IdentityVerificationDimension
 from kyc_engine.dimensions.proof_of_address import ProofOfAddressDimension
-from kyc_engine.ruleset import get_active_ruleset_version, load_ruleset
+from kyc_engine.ruleset import (
+    get_active_ruleset_version,
+    get_jurisdiction_params,
+    load_ruleset,
+)
 
 
 class KYCComplianceEngine:
@@ -177,12 +181,68 @@ class KYCComplianceEngine:
     def evaluate_customer(self, customer_id: str) -> dict:
         data = self._load_all_data(customer_id)
 
-        identity_result = self._dimensions["identity"].evaluate(customer_id, data)
-        screening_result = self._dimensions["screening"].evaluate(customer_id, data)
-        ubo_result = self._dimensions["beneficial_ownership"].evaluate(customer_id, data)
-        txn_result = self._dimensions["transactions"].evaluate(customer_id, data)
-        doc_result = self._dimensions["documents"].evaluate(customer_id, data)
-        dq_result = self._dimensions["data_quality"].evaluate(customer_id, data)
+        customer_row = (
+            data["customers"][data["customers"]["customer_id"] == customer_id]
+            if data.get("customers") is not None and "customer_id" in data["customers"].columns
+            else pd.DataFrame()
+        )
+
+        # Resolve jurisdiction and fetch merged params for this customer
+        jurisdiction = None
+        if data.get("customers") is not None:
+            cust_df = data["customers"]
+            cust_row = cust_df[cust_df["customer_id"] == customer_id]
+            if not cust_row.empty and "jurisdiction" in cust_row.columns:
+                jurisdiction = str(cust_row.iloc[0]["jurisdiction"]).strip()
+
+        jurisdiction_code = jurisdiction if jurisdiction else "UNKNOWN"
+        merged_params = get_jurisdiction_params(jurisdiction_code)
+
+        screening_cfg = merged_params.get("screening", {})
+        aml_params = self._manifest.dimension_parameters.screening.__class__(
+            max_screening_age_days=screening_cfg.get("max_screening_age_days", 365),
+            fuzzy_match_threshold=screening_cfg.get("fuzzy_match_threshold", 0.85),
+        )
+
+        identity_cfg = merged_params.get("identity", {})
+        identity_params = self._manifest.dimension_parameters.identity.__class__(
+            min_verified_docs=identity_cfg.get("min_verified_docs", 1),
+            doc_expiry_warning_days=identity_cfg.get("doc_expiry_warning_days", 90),
+            accepted_doc_types=identity_cfg.get("accepted_doc_types", ["passport"]),
+        )
+
+        ubo_cfg = merged_params.get("beneficial_ownership", {})
+        ubo_params = self._manifest.dimension_parameters.beneficial_ownership.__class__(
+            ownership_threshold_pct=ubo_cfg.get("ownership_threshold_pct", 25.0),
+            max_chain_depth=ubo_cfg.get("max_chain_depth", 4),
+        )
+
+        tx_cfg = merged_params.get("transactions", {})
+        tx_params = self._manifest.dimension_parameters.transactions.__class__(
+            edd_trigger_threshold_usd=tx_cfg.get("edd_trigger_threshold_usd", 10000.0),
+            velocity_window_days=tx_cfg.get("velocity_window_days", 90),
+        )
+
+        doc_cfg = merged_params.get("documents", {})
+        doc_params = self._manifest.dimension_parameters.documents.__class__(
+            max_doc_age_days=doc_cfg.get("max_doc_age_days", 90),
+            accepted_proof_of_address_types=doc_cfg.get(
+                "accepted_proof_of_address_types", ["utility_bill"]
+            ),
+        )
+
+        dq_cfg = merged_params.get("data_quality", {})
+        dq_params = self._manifest.dimension_parameters.data_quality.__class__(
+            critical_fields=dq_cfg.get("critical_fields", ["customer_id"]),
+            poor_quality_threshold=dq_cfg.get("poor_quality_threshold", 0.2),
+        )
+
+        identity_result = IdentityVerificationDimension(identity_params).evaluate(customer_id, data)
+        screening_result = AMLScreeningDimension(aml_params).evaluate(customer_id, data)
+        ubo_result = BeneficialOwnershipDimension(ubo_params).evaluate(customer_id, data)
+        txn_result = AccountActivityDimension(tx_params).evaluate(customer_id, data)
+        doc_result = ProofOfAddressDimension(doc_params).evaluate(customer_id, data)
+        dq_result = DataQualityDimension(dq_params).evaluate(customer_id, data)
 
         dimension_results = {
             "identity": identity_result,
@@ -194,14 +254,19 @@ class KYCComplianceEngine:
         }
 
         screening_row = self.screenings[self.screenings["customer_id"] == customer_id] if "customer_id" in self.screenings.columns else pd.DataFrame()
+        # TODO P3: residual inline AML scoring — replace with
+        # _extract_score(aml_result) after AMLScreeningDimension
+        # score field is verified in regression suite.
         if screening_row.empty:
             aml_status = "no_screening_data"
             aml_score = 30.0
             aml_finding = "No AML screening record on file — mandatory before onboarding"
+            aml_hit_status = ""
         else:
             s = screening_row.iloc[0]
             screening_result_value = str(s.get("screening_result", "")).upper()
             hit_status = str(s.get("hit_status", "")).upper()
+            aml_hit_status = hit_status
             if screening_result_value == "MATCH" and hit_status == "CONFIRMED":
                 aml_status = "confirmed_match"
                 aml_score = 0.0
@@ -215,19 +280,26 @@ class KYCComplianceEngine:
                 aml_score = 100.0
                 aml_finding = "No match on sanctions lists — screening current"
 
-        def score_from_result(result: dict, fallback_pass=80.0, fallback_fail=40.0) -> float:
-            details = result.get("evaluation_details", {})
-            if "data_quality_score" in details:
-                return float(details.get("data_quality_score", fallback_pass if result.get("passed") else fallback_fail))
-            return float(fallback_pass if result.get("passed") else fallback_fail)
+        def _extract_score(
+            result: dict,
+            fallback_pass: int = 80,
+            fallback_fail: int = 40,
+        ) -> int:
+            """
+            Extract the actual computed score from a dimension result dict.
+            Falls back to pass/fail approximation only when no score key present.
+            """
+            if "score" in result and result["score"] is not None:
+                return int(result["score"])
+            return fallback_pass if result.get("passed") else fallback_fail
 
-        id_score = score_from_result(identity_result)
-        act_score = score_from_result(txn_result)
-        poa_score = score_from_result(doc_result)
-        ubo_score = score_from_result(ubo_result)
-        dq_score = score_from_result(dq_result)
+        id_score = _extract_score(identity_result)
+        act_score = _extract_score(txn_result)
+        poa_score = _extract_score(doc_result)
+        ubo_score = _extract_score(ubo_result)
+        dq_score = _extract_score(dq_result)
 
-        aml_details = {"status": aml_status, "finding": aml_finding}
+        aml_details = {"status": aml_status, "hit_status": aml_hit_status, "finding": aml_finding}
         id_details = {
             "status": "verified" if identity_result.get("passed") else "no_documents",
             "finding": "; ".join(identity_result.get("findings", [])[:2]),
@@ -262,6 +334,7 @@ class KYCComplianceEngine:
 
         result = {
             "customer_id": customer_id,
+            "jurisdiction": jurisdiction_code,
             "overall_score": overall_score,
             "aml_screening_score": round(aml_score, 1),
             "aml_screening_details": aml_details,

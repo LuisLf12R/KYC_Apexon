@@ -1,6 +1,6 @@
 from __future__ import annotations
-from typing import List
-from pydantic import BaseModel, Field
+from typing import Any, Dict, List, Optional
+from pydantic import BaseModel, Field, field_validator
 
 
 class IdentityParameters(BaseModel):
@@ -126,3 +126,47 @@ class DimensionParameters(BaseModel):
     transactions: TransactionParameters
     documents: DocumentParameters
     data_quality: DataQualityParameters
+
+class JurisdictionOverlay(BaseModel):
+    """
+    Per-jurisdiction parameter overrides applied on top of the baseline
+    dimension_parameters block. Only fields that differ from baseline need
+    to be specified. Engine merges: baseline_params | jurisdiction_overrides.
+
+    Fields:
+        jurisdiction_code   ISO 3166-1 alpha-3 (USA, GBR, CHE, SGP, HKG, AUS)
+                            or regional code (EU, supranational).
+        regulators          Short names of primary regulators for this jurisdiction.
+                            E.g. ["FinCEN", "OFAC", "OCC"] for USA.
+        dimension_overrides Partial dimension parameter blocks. Any sub-field
+                            omitted here falls back to the baseline value.
+                            Keys must match DimensionParameters field names:
+                            identity, screening, beneficial_ownership,
+                            transactions, documents, data_quality.
+        additional_hard_reject_rules
+                            Hard-reject rules that apply only in this jurisdiction,
+                            in addition to the baseline hard_reject_rules.
+        additional_review_rules
+                            Review rules that apply only in this jurisdiction,
+                            in addition to the baseline review_rules.
+    """
+
+    jurisdiction_code: str
+    regulators: List[str]
+    dimension_overrides: Dict[str, Any] = {}
+    additional_hard_reject_rules: List[Any] = []
+    additional_review_rules: List[Any] = []
+
+    @field_validator("jurisdiction_code")
+    @classmethod
+    def code_not_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("jurisdiction_code must not be empty")
+        return v
+
+    @field_validator("regulators")
+    @classmethod
+    def regulators_not_empty(cls, v: List[str]) -> List[str]:
+        if not v:
+            raise ValueError("regulators must contain at least one entry")
+        return v

@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, model_validator
 
 from .rule_base import HardRejectRule, ReviewRule
-from .dimensions import DimensionParameters
+from .dimensions import DimensionParameters, JurisdictionOverlay
 
 
 class DispositionLevel(BaseModel):
@@ -59,6 +59,7 @@ class RulesetManifest(BaseModel):
     review_rules: List[ReviewRule]
     score_thresholds: ScoreThresholds
     dimension_parameters: DimensionParameters
+    jurisdictions: Dict[str, JurisdictionOverlay] = {}
 
     @model_validator(mode="after")
     def no_duplicate_rule_ids(self) -> "RulesetManifest":
