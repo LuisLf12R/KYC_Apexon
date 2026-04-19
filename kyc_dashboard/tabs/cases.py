@@ -2,7 +2,7 @@ TAB_CODE = '    touch()\n    st.markdown("### Cases")\n    cfg1, cfg2 = st.colum
 
 
 def render(user, role, logger):
-    import app as a
+    import kyc_dashboard.main as a
 
     ns = dict(a.__dict__)
     ns.update({'user': user, 'role': role, 'logger': logger})

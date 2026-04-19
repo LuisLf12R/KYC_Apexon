@@ -64,9 +64,10 @@ _DEFAULTS = {
 }
 
 
-for k, v in _DEFAULTS.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
+def init_state():
+    for k, v in _DEFAULTS.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
 
 
 def get_logger():

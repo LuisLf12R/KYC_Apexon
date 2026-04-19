@@ -2,7 +2,7 @@ TAB_CODE = '    touch()\n    if not st.session_state.engines_initialized:\n     
 
 
 def render(user, role, logger):
-    import app as a
+    import kyc_dashboard.main as a
 
     ns = dict(a.__dict__)
     ns.update({'user': user, 'role': role, 'logger': logger})
