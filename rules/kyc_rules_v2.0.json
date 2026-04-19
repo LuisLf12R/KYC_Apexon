@@ -1,0 +1,464 @@
+{
+  "version": "kyc-rules-v2.0",
+  "effective_date": "2026-01-01",
+  "description": "PWM jurisdiction-aware KYC ruleset v2.0. Baseline: FATF Recommendations and Wolfsberg Private Banking Principles. Jurisdiction overlays for USA, GBR, EU, CHE, SGP, HKG, AUS. China deferred post-v1.",
+  "created_by": "hand-authored",
+  "changelog": [
+    {
+      "version": "kyc-rules-v2.0",
+      "date": "2026-04-19",
+      "change": "Phase 3: jurisdiction-aware ruleset. Baseline lifted from v1.1. Eight jurisdiction overlays added: USA, GBR, EU, CHE, SGP, HKG, AUS. HKG SFC 10% UBO threshold, SGP MAS 30-day velocity window, EU/CHE 180-day rescreening interval, GBR 60-day doc expiry warning. China deferred post-v1.",
+      "author": "hand-authored",
+      "reviewed_by": null
+    },
+    {
+      "version": "kyc-rules-v1.1",
+      "date": "2026-01-01",
+      "change": "Phase 1/2: added dimension_parameters block, provenance on all rules, corrected data_quality critical_fields to match actual CSV schema.",
+      "author": "hand-authored",
+      "reviewed_by": null
+    }
+  ],
+
+  "hard_reject_rules": [
+    {
+      "rule_id": "HR-001",
+      "name": "Confirmed Sanctions Match",
+      "description": "Customer has a confirmed match on an active sanctions list. Onboarding is prohibited.",
+      "dimension": "aml_screening",
+      "condition_field": "hit_status",
+      "condition_value": "CONFIRMED",
+      "policy_reference": "AML Policy 4.1 — Sanctions Zero Tolerance",
+      "provenance": {
+        "regulator": "FATF",
+        "jurisdiction": "supranational",
+        "source_url": "https://www.fatf-gafi.org/content/dam/fatf-gafi/recommendations/FATF%20Recommendations%202012.pdf",
+        "snapshot_hash": null,
+        "published_at": "2012-02-16",
+        "effective_from": "2012-02-16",
+        "effective_until": null,
+        "regulatory_refs": [
+          "FATF Rec 6 — Targeted Financial Sanctions",
+          "FATF Rec 7 — Proliferation Financing Sanctions",
+          "Wolfsberg Private Banking Principles 2012 s.4"
+        ]
+      }
+    },
+    {
+      "rule_id": "HR-002",
+      "name": "High-Risk Jurisdiction — Unmitigated",
+      "description": "Customer is domiciled in or transacts through a FATF black-listed or grey-listed jurisdiction with no documented EDD mitigation.",
+      "dimension": "aml_screening",
+      "condition_field": "status",
+      "condition_value": "high_risk_jurisdiction_unmitigated",
+      "policy_reference": "AML Policy 5.1 — High-Risk Jurisdiction Controls",
+      "provenance": {
+        "regulator": "FATF",
+        "jurisdiction": "supranational",
+        "source_url": "https://www.fatf-gafi.org/content/dam/fatf-gafi/recommendations/FATF%20Recommendations%202012.pdf",
+        "snapshot_hash": null,
+        "published_at": "2012-02-16",
+        "effective_from": "2012-02-16",
+        "effective_until": null,
+        "regulatory_refs": [
+          "FATF Rec 19 — Higher-Risk Countries",
+          "FATF INR 19 — Enhanced Due Diligence for High-Risk Countries"
+        ]
+      }
+    },
+    {
+      "rule_id": "HR-003",
+      "name": "Identity Cannot Be Established",
+      "description": "All submitted identity verification attempts have been rejected. Identity cannot be established.",
+      "dimension": "identity_verification",
+      "condition_field": "status",
+      "condition_value": "all_rejected",
+      "policy_reference": "KYC Policy 2.1 — Identity Verification Minimum Standard",
+      "provenance": {
+        "regulator": "FATF",
+        "jurisdiction": "supranational",
+        "source_url": "https://www.fatf-gafi.org/content/dam/fatf-gafi/recommendations/FATF%20Recommendations%202012.pdf",
+        "snapshot_hash": null,
+        "published_at": "2012-02-16",
+        "effective_from": "2012-02-16",
+        "effective_until": null,
+        "regulatory_refs": [
+          "FATF Rec 10 — Customer Due Diligence",
+          "Wolfsberg Private Banking Principles 2012 s.2.1"
+        ]
+      }
+    },
+    {
+      "rule_id": "HR-004",
+      "name": "No Screening Record",
+      "description": "No AML screening record exists for this customer. Screening is mandatory before onboarding.",
+      "dimension": "aml_screening",
+      "condition_field": "status",
+      "condition_value": "no_screening_record",
+      "policy_reference": "AML Policy 4.2 — Mandatory Screening Requirement",
+      "provenance": {
+        "regulator": "FinCEN",
+        "jurisdiction": "USA",
+        "source_url": "https://www.ecfr.gov/current/title-31/subtitle-B/chapter-X/part-1010/subpart-B/section-1010.230",
+        "snapshot_hash": null,
+        "published_at": "2016-05-11",
+        "effective_from": "2018-05-11",
+        "effective_until": null,
+        "regulatory_refs": [
+          "FinCEN CDD Rule 31 CFR 1010.230(b)(1)",
+          "FATF Rec 10 — Customer Due Diligence"
+        ]
+      }
+    }
+  ],
+
+  "review_rules": [
+    {
+      "rule_id": "RV-001",
+      "name": "Unresolved Sanctions Match",
+      "description": "Customer has a sanctions match not confirmed but not cleared as false positive. Requires analyst investigation.",
+      "dimension": "aml_screening",
+      "condition_field": "status",
+      "condition_value": "match_requires_review",
+      "policy_reference": "AML Policy 4.3 — Unresolved Match Handling",
+      "provenance": {
+        "regulator": "FATF",
+        "jurisdiction": "supranational",
+        "source_url": "https://www.fatf-gafi.org/content/dam/fatf-gafi/recommendations/FATF%20Recommendations%202012.pdf",
+        "snapshot_hash": null,
+        "published_at": "2012-02-16",
+        "effective_from": "2012-02-16",
+        "effective_until": null,
+        "regulatory_refs": [
+          "FATF Rec 6 — Targeted Financial Sanctions",
+          "FATF INR 6 — False Positive Management"
+        ]
+      }
+    },
+    {
+      "rule_id": "RV-002",
+      "name": "All Identity Documents Expired",
+      "description": "Customer has no currently valid identity documents. Re-verification required.",
+      "dimension": "identity_verification",
+      "condition_field": "status",
+      "condition_value": "all_expired",
+      "policy_reference": "KYC Policy 2.3 — Document Expiry Management",
+      "provenance": {
+        "regulator": "FCA",
+        "jurisdiction": "GBR",
+        "source_url": "https://www.handbook.fca.org.uk/handbook/JMLSG/",
+        "snapshot_hash": null,
+        "published_at": "2017-06-26",
+        "effective_from": "2017-06-26",
+        "effective_until": null,
+        "regulatory_refs": [
+          "JMLSG Part I 5.3.15 — Ongoing Monitoring of Customer Documents",
+          "MLR 2017 reg 28(11) — Ongoing Monitoring"
+        ]
+      }
+    },
+    {
+      "rule_id": "RV-003",
+      "name": "Stale AML Screening",
+      "description": "Most recent AML screening is older than the threshold in dimension_parameters.screening.max_screening_age_days. Re-screening required.",
+      "dimension": "aml_screening",
+      "condition_field": "status",
+      "condition_value": "stale_screening",
+      "policy_reference": "AML Policy 4.4 — Screening Refresh Frequency",
+      "provenance": {
+        "regulator": "Wolfsberg",
+        "jurisdiction": "supranational",
+        "source_url": "https://www.wolfsberg-principles.com/sites/default/files/wb/pdfs/wolfsberg-standards/Wolfsberg-Private-Banking-Principles-May-2012.pdf",
+        "snapshot_hash": null,
+        "published_at": "2012-05-01",
+        "effective_from": "2012-05-01",
+        "effective_until": null,
+        "regulatory_refs": [
+          "Wolfsberg Private Banking Principles 2012 s.6.1 — Periodic Review",
+          "FATF Rec 10(d) — Ongoing Due Diligence"
+        ]
+      }
+    },
+    {
+      "rule_id": "RV-004",
+      "name": "Identity Verification Pending",
+      "description": "Identity verification is in progress but not yet completed. Cannot approve until resolved.",
+      "dimension": "identity_verification",
+      "condition_field": "status",
+      "condition_value": "pending",
+      "policy_reference": "KYC Policy 2.2 — Verification Completion Requirement",
+      "provenance": {
+        "regulator": "FinCEN",
+        "jurisdiction": "USA",
+        "source_url": "https://www.ecfr.gov/current/title-31/subtitle-B/chapter-X/part-1010/subpart-B/section-1010.230",
+        "snapshot_hash": null,
+        "published_at": "2016-05-11",
+        "effective_from": "2018-05-11",
+        "effective_until": null,
+        "regulatory_refs": [
+          "FinCEN CDD Rule 31 CFR 1010.230(a) — General Requirements",
+          "FATF Rec 10 — CDD Before Establishing Relationship"
+        ]
+      }
+    },
+    {
+      "rule_id": "RV-005",
+      "name": "Beneficial Ownership Below Minimum Data Quality",
+      "description": "Beneficial ownership data is present but critically incomplete. UBO cannot be confirmed.",
+      "dimension": "beneficial_ownership",
+      "condition_field": "status",
+      "condition_value": "insufficient_ubo_data",
+      "policy_reference": "KYC Policy 3.1 — Beneficial Ownership Minimum Standard",
+      "provenance": {
+        "regulator": "FinCEN",
+        "jurisdiction": "USA",
+        "source_url": "https://www.ecfr.gov/current/title-31/subtitle-B/chapter-X/part-1010/subpart-B/section-1010.230",
+        "snapshot_hash": null,
+        "published_at": "2016-05-11",
+        "effective_from": "2018-05-11",
+        "effective_until": null,
+        "regulatory_refs": [
+          "FinCEN CDD Rule 31 CFR 1010.230(d) — Beneficial Ownership Identification",
+          "FATF Rec 24 — Transparency of Legal Persons",
+          "Wolfsberg Private Banking Principles 2012 s.2.3"
+        ]
+      }
+    },
+    {
+      "rule_id": "RV-006",
+      "name": "Critical Data Quality Failure",
+      "description": "Core customer record fields are missing or corrupt. Record integrity is in question.",
+      "dimension": "data_quality",
+      "condition_field": "quality_rating",
+      "condition_value": "Poor",
+      "policy_reference": "Data Governance Policy 1.2 — Record Completeness",
+      "provenance": {
+        "regulator": "FCA",
+        "jurisdiction": "GBR",
+        "source_url": "https://www.handbook.fca.org.uk/handbook/JMLSG/",
+        "snapshot_hash": null,
+        "published_at": "2017-06-26",
+        "effective_from": "2017-06-26",
+        "effective_until": null,
+        "regulatory_refs": [
+          "JMLSG Part I 5.3.4 — Customer Records",
+          "MLR 2017 reg 40 — Record Keeping"
+        ]
+      }
+    }
+  ],
+
+  "score_thresholds": {
+    "pass_minimum": 70,
+    "pass_with_notes_minimum": 50,
+    "note": "Thresholds apply only when no Reject or Review triggers are hit. Score shown on all dispositions for context."
+  },
+
+  "disposition_levels": {
+    "PASS": {
+      "description": "Customer meets all KYC requirements. No hard-reject or review triggers fired. Score at or above pass_minimum.",
+      "color": "green",
+      "requires_human_action": false,
+      "can_be_cleared_by": null
+    },
+    "PASS_WITH_NOTES": {
+      "description": "Customer meets minimum KYC requirements but one or more advisory findings were recorded. Score between pass_with_notes_minimum and pass_minimum.",
+      "color": "yellow",
+      "requires_human_action": false,
+      "can_be_cleared_by": null
+    },
+    "REVIEW": {
+      "description": "One or more review rules triggered. Compliance analyst must clear the case before onboarding can proceed.",
+      "color": "orange",
+      "requires_human_action": true,
+      "can_be_cleared_by": "compliance_analyst"
+    },
+    "REJECT": {
+      "description": "One or more hard-reject rules triggered. Onboarding is prohibited. No score threshold can override.",
+      "color": "red",
+      "requires_human_action": true,
+      "can_be_cleared_by": "senior_compliance_officer"
+    }
+  },
+
+  "dimension_parameters": {
+    "identity": {
+      "min_verified_docs": 1,
+      "doc_expiry_warning_days": 90,
+      "accepted_doc_types": [
+        "passport",
+        "national_id",
+        "driving_licence",
+        "residence_permit"
+      ]
+    },
+    "screening": {
+      "max_screening_age_days": 365,
+      "fuzzy_match_threshold": 0.85
+    },
+    "beneficial_ownership": {
+      "ownership_threshold_pct": 25.0,
+      "max_chain_depth": 4
+    },
+    "transactions": {
+      "edd_trigger_threshold_usd": 10000.0,
+      "velocity_window_days": 90
+    },
+    "documents": {
+      "max_doc_age_days": 90,
+      "accepted_proof_of_address_types": [
+        "utility_bill",
+        "bank_statement",
+        "government_letter",
+        "tax_document"
+      ]
+    },
+    "data_quality": {
+      "critical_fields": [
+        "customer_id",
+        "entity_type",
+        "jurisdiction",
+        "risk_rating",
+        "account_open_date",
+        "last_kyc_review_date",
+        "country_of_origin"
+      ],
+      "poor_quality_threshold": 0.2
+    }
+  },
+
+  "jurisdictions": {
+    "USA": {
+      "jurisdiction_code": "USA",
+      "regulators": ["FinCEN", "OFAC", "OCC", "Federal Reserve"],
+      "dimension_overrides": {
+        "beneficial_ownership": {
+          "ownership_threshold_pct": 25.0
+        },
+        "identity": {
+          "doc_expiry_warning_days": 90
+        },
+        "screening": {
+          "max_screening_age_days": 365
+        },
+        "transactions": {
+          "edd_trigger_threshold_usd": 10000.0,
+          "velocity_window_days": 90
+        }
+      },
+      "additional_hard_reject_rules": [],
+      "additional_review_rules": []
+    },
+    "GBR": {
+      "jurisdiction_code": "GBR",
+      "regulators": ["FCA", "JMLSG", "OFSI"],
+      "dimension_overrides": {
+        "identity": {
+          "doc_expiry_warning_days": 60
+        },
+        "beneficial_ownership": {
+          "ownership_threshold_pct": 25.0
+        },
+        "screening": {
+          "max_screening_age_days": 365
+        }
+      },
+      "additional_hard_reject_rules": [],
+      "additional_review_rules": []
+    },
+    "EU": {
+      "jurisdiction_code": "EU",
+      "regulators": ["EBA", "BaFin", "ACPR", "CSSF", "Bank of Italy", "CNMV"],
+      "dimension_overrides": {
+        "beneficial_ownership": {
+          "ownership_threshold_pct": 25.0
+        },
+        "screening": {
+          "max_screening_age_days": 180
+        },
+        "transactions": {
+          "velocity_window_days": 90
+        }
+      },
+      "additional_hard_reject_rules": [],
+      "additional_review_rules": []
+    },
+    "CHE": {
+      "jurisdiction_code": "CHE",
+      "regulators": ["FINMA"],
+      "dimension_overrides": {
+        "beneficial_ownership": {
+          "ownership_threshold_pct": 25.0
+        },
+        "screening": {
+          "max_screening_age_days": 180
+        },
+        "transactions": {
+          "velocity_window_days": 60
+        }
+      },
+      "additional_hard_reject_rules": [],
+      "additional_review_rules": []
+    },
+    "SGP": {
+      "jurisdiction_code": "SGP",
+      "regulators": ["MAS"],
+      "dimension_overrides": {
+        "beneficial_ownership": {
+          "ownership_threshold_pct": 25.0
+        },
+        "screening": {
+          "max_screening_age_days": 365
+        },
+        "transactions": {
+          "velocity_window_days": 30
+        }
+      },
+      "additional_hard_reject_rules": [],
+      "additional_review_rules": []
+    },
+    "HKG": {
+      "jurisdiction_code": "HKG",
+      "regulators": ["HKMA", "SFC"],
+      "dimension_overrides": {
+        "beneficial_ownership": {
+          "ownership_threshold_pct": 10.0
+        },
+        "screening": {
+          "max_screening_age_days": 365
+        },
+        "transactions": {
+          "velocity_window_days": 90
+        }
+      },
+      "additional_hard_reject_rules": [],
+      "additional_review_rules": []
+    },
+    "AUS": {
+      "jurisdiction_code": "AUS",
+      "regulators": ["AUSTRAC"],
+      "dimension_overrides": {
+        "beneficial_ownership": {
+          "ownership_threshold_pct": 25.0
+        },
+        "screening": {
+          "max_screening_age_days": 365
+        },
+        "transactions": {
+          "edd_trigger_threshold_usd": 10000.0,
+          "velocity_window_days": 90
+        }
+      },
+      "additional_hard_reject_rules": [],
+      "additional_review_rules": []
+    },
+    "CHN": {
+      "jurisdiction_code": "CHN",
+      "regulators": ["PBOC"],
+      "dimension_overrides": {},
+      "additional_hard_reject_rules": [],
+      "additional_review_rules": [],
+      "_note": "China deferred post-v1. Overlay present as placeholder only. Engine falls back to baseline for all params."
+    }
+  }
+}

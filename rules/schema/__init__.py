@@ -2,7 +2,7 @@
 KYC Ruleset Schema — public surface.
 """
 from .rule_base import RuleProvenance, HardRejectRule, ReviewRule
-from .dimensions import DimensionParameters
+from .dimensions import DimensionParameters, JurisdictionOverlay
 from .ruleset import RulesetManifest
 
 __all__ = [
@@ -11,4 +11,5 @@ __all__ = [
     "ReviewRule",
     "DimensionParameters",
     "RulesetManifest",
+    "JurisdictionOverlay",
 ]
