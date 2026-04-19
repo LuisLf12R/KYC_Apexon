@@ -28,6 +28,7 @@ from typing import Dict, List, Optional, Any
 import pandas as pd
 import logging
 
+from rules.schema.dimensions import BeneficialOwnershipParameters
 logger = logging.getLogger(__name__)
 
 
@@ -71,8 +72,9 @@ class BeneficialOwnershipDimension:
         'WEAK_AML_FRAMEWORK', 'OFFSHORE_FINANCIAL_CENTER'
     }
     
-    def __init__(self, evaluation_date: datetime = None):
-        self.evaluation_date = evaluation_date or datetime(2026, 4, 9)
+    def __init__(self, params: BeneficialOwnershipParameters, evaluation_date=None):
+        self.params = params
+        self.evaluation_date = evaluation_date or datetime.now()
         logger.info(f"BeneficialOwnershipDimension initialized. Evaluation date: {self.evaluation_date}")
     
     def evaluate(self, customer_id: str, data: Dict[str, Any]) -> Dict:
@@ -334,7 +336,7 @@ class BeneficialOwnershipDimension:
     
     def _get_ownership_threshold(self, jurisdiction: str) -> float:
         """Return ownership threshold for jurisdiction in percent."""
-        return self.JURISDICTIONAL_THRESHOLDS.get(jurisdiction, self.JURISDICTIONAL_THRESHOLDS['default'])
+        return self.JURISDICTIONAL_THRESHOLDS.get(jurisdiction, self.params.ownership_threshold_pct)
     
     def _get_ubo_refresh_cycle(self, risk_rating: str) -> int:
         """Return UBO refresh cycle for risk rating in days."""

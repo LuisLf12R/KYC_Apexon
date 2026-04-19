@@ -20,6 +20,7 @@ from typing import Dict, List, Optional, Any
 import pandas as pd
 import logging
 
+from rules.schema.dimensions import DocumentParameters
 logger = logging.getLogger(__name__)
 
 
@@ -71,8 +72,9 @@ class ProofOfAddressDimension:
         'LOW': 1095,
     }
     
-    def __init__(self, evaluation_date: datetime = None):
-        self.evaluation_date = evaluation_date or datetime(2026, 4, 9)
+    def __init__(self, params: DocumentParameters, evaluation_date=None):
+        self.params = params
+        self.evaluation_date = evaluation_date or datetime.now()
         logger.info(f"ProofOfAddressDimension initialized. Evaluation date: {self.evaluation_date}")
     
     def evaluate(self, customer_id: str, data: Dict[str, Any]) -> Dict:
@@ -143,7 +145,7 @@ class ProofOfAddressDimension:
                     
                     if pd.notna(issue_date):
                         jurisdiction = customer.get('jurisdiction', 'default')
-                        validity_days = self.JURISDICTIONAL_VALIDITY_DAYS.get(jurisdiction, 180)
+                        validity_days = self.JURISDICTIONAL_VALIDITY_DAYS.get(jurisdiction, self.params.max_doc_age_days)
                         min_issue_date = self.evaluation_date - timedelta(days=validity_days)
                         
                         if issue_date < min_issue_date:

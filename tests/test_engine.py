@@ -3,7 +3,7 @@ Engine tests — must run without Streamlit installed.
 """
 import pytest
 from pathlib import Path
-from kyc_engine import KYCComplianceEngine, load_ruleset
+from kyc_engine import KYCComplianceEngine
 
 
 def make_engine():
@@ -65,8 +65,11 @@ def test_ruleset_version_flows_through():
 
 
 def test_load_ruleset_returns_dict():
-    ruleset = load_ruleset()
-    assert isinstance(ruleset, dict)
-    assert "hard_reject_rules" in ruleset
-    assert "review_rules" in ruleset
-    assert "score_thresholds" in ruleset
+    from kyc_engine.ruleset import load_ruleset, reset_ruleset_cache
+    from rules.schema.ruleset import RulesetManifest
+
+    reset_ruleset_cache()
+    manifest = load_ruleset()
+    assert isinstance(manifest, RulesetManifest)
+    assert manifest.version.startswith("kyc-rules-v")
+    assert manifest.dimension_parameters is not None

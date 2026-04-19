@@ -16,7 +16,7 @@ from typing import Dict, Any, List
 import pandas as pd
 import logging
 
-from src.data.contracts import get_contract
+from rules.schema.dimensions import ScreeningParameters
 
 logger = logging.getLogger(__name__)
 
@@ -49,14 +49,15 @@ class AMLScreeningDimension:
     RESOLVED_STATUSES = {'FALSE_POSITIVE', 'RESOLVED_APPROVED', 'RESOLVED_BLOCKED'}
     UNRESOLVED_STATUSES = {'UNRESOLVED', 'UNDER_REVIEW'}
     
-    def __init__(self, evaluation_date: datetime = None):
+    def __init__(self, params: ScreeningParameters, evaluation_date=None):
         """
         Initialize AML Screening Dimension.
         
         Args:
             evaluation_date: Fixed date for compliance evaluation (default: 2026-04-09)
         """
-        self.evaluation_date = evaluation_date or datetime(2026, 4, 9)
+        self.params = params
+        self.evaluation_date = evaluation_date or datetime.now()
         logger.info(f"AMLScreeningDimension initialized. Evaluation date: {self.evaluation_date.date()}")
     
     def evaluate(self, customer_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -71,6 +72,29 @@ class AMLScreeningDimension:
             Dict with compliance status, findings, and remediation guidance
         """
         try:
+            if self._has_no_screening_data(data):
+                return {
+                    'customer_id': customer_id,
+                    'dimension': 'AML Screening',
+                    'score': 0,
+                    'passed': False,
+                    'status': 'Non-Compliant',
+                    'evaluation_details': {
+                        'risk_rating': 'UNKNOWN',
+                        'jurisdiction': 'UNKNOWN',
+                        'screening_evaluation': None,
+                        'rescreening_evaluation': None,
+                        'hit_evaluation': None,
+                        'status': 'no_screening_record',
+                    },
+                    'findings': [
+                        '✗ No AML screening records found for customer',
+                        'HR-004: No screening record exists',
+                    ],
+                    'remediation_required': True,
+                    'next_review_date': self.evaluation_date.date().isoformat(),
+                }
+
             customers_df = data['customers']
             screenings_df = data['screenings']
             
@@ -147,6 +171,22 @@ class AMLScreeningDimension:
         except Exception as e:
             logger.error(f"Error evaluating customer {customer_id}: {e}")
             return self._error_result(customer_id, str(e))
+
+    def _has_no_screening_data(self, data: dict) -> bool:
+        if "screening" not in data:
+            return True
+
+        screening_value = data.get("screening")
+        if screening_value is None:
+            return True
+        if isinstance(screening_value, str) and screening_value.strip().lower() == "no_screening_record":
+            return True
+        if isinstance(screening_value, list) and len(screening_value) == 0:
+            return True
+        if isinstance(screening_value, pd.DataFrame) and len(screening_value) == 0:
+            return True
+
+        return False
     
     def _evaluate_screening_result(self, screening_record: pd.Series) -> Dict[str, Any]:
         """
@@ -185,7 +225,7 @@ class AMLScreeningDimension:
         Returns:
             Dict with rescreening schedule and overdue flag
         """
-        allowed_interval = self.SCREENING_INTERVALS.get(risk_rating, 365)
+        allowed_interval = self.SCREENING_INTERVALS.get(risk_rating, self.params.max_screening_age_days)
         
         days_since = (self.evaluation_date - last_screening_date).days
         next_screening_due = last_screening_date + timedelta(days=allowed_interval)
@@ -362,9 +402,6 @@ class AMLScreeningDimension:
 
 # For testing
 if __name__ == "__main__":
-    from src.logging_config import setup_logging
-    from src.config import Config
-    from src.data_loader import DataLoader
     
     setup_logging("INFO")
     

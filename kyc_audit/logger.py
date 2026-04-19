@@ -38,10 +38,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from kyc_engine.ruleset import get_active_ruleset_version as _get_version
+
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-RULESET_VERSION = "kyc-ruleset-v1.0"
+RULESET_VERSION = _get_version()
 CHAIN_FILE = Path(tempfile.gettempdir()) / "kyc_audit_chain.json"
 
 # All valid action types — add new ones here, never remove old ones

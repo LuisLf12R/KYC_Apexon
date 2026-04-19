@@ -22,6 +22,7 @@ from typing import Dict, List, Optional, Any
 import pandas as pd
 import logging
 
+from rules.schema.dimensions import IdentityParameters
 logger = logging.getLogger(__name__)
 
 
@@ -78,8 +79,9 @@ class IdentityVerificationDimension(BaseDimension):
         'LOW': 1095,      # Triennial
     }
     
-    def __init__(self, evaluation_date: datetime = None):
-        super().__init__(evaluation_date)
+    def __init__(self, params: IdentityParameters, evaluation_date=None):
+        self.params = params
+        self.evaluation_date = evaluation_date or datetime.now()
         logger.info(f"IdentityVerificationDimension initialized. Evaluation date: {self.evaluation_date}")
     
     def evaluate(self, customer_id: str, data: Dict[str, Any]) -> Dict:
