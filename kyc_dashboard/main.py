@@ -105,7 +105,7 @@ if not keys_ok:
 # produce invalid output and must be regenerated.
 if "_schema_cache_purged" not in st.session_state:
     try:
-        from src.schema_harmonizer import SchemaHarmonizer
+        SchemaHarmonizer = __import__("src.schema_harmonizer", fromlist=["SchemaHarmonizer"]).SchemaHarmonizer
         SchemaHarmonizer().purge_stale_cache()
     except Exception:
         pass
@@ -167,7 +167,7 @@ def _ensure_runtime_action_types():
     """Allow app-level workflow actions without editing audit_logger.py."""
     try:
         sys.path.insert(0, str(Path.cwd() / "src"))
-        from audit_logger import ACTION_TYPES
+        from kyc_audit.logger import ACTION_TYPES
         ACTION_TYPES.setdefault("CASE_CLOSED", "Manager/Admin closed a customer case")
     except Exception:
         pass
@@ -176,7 +176,7 @@ def _ensure_runtime_action_types():
 def _get_provenance_store():
     if st.session_state.provenance_store is None:
         sys.path.insert(0, str(Path.cwd() / "src"))
-        from data_provenance import CustomerProvenance
+        from kyc_audit.provenance import CustomerProvenance
         st.session_state.provenance_store = CustomerProvenance()
     return st.session_state.provenance_store
 
@@ -581,7 +581,7 @@ def _build_export_package(logger, user):
 
 def load_engine(data_dir):
     try:
-        from src.kyc_engine import KYCComplianceEngine
+        from kyc_engine.engine import KYCComplianceEngine
         engine = KYCComplianceEngine(data_clean_dir=data_dir)
         return engine, engine.customers
     except Exception as e:
@@ -735,7 +735,7 @@ def process_file(file_obj, filename, dataset_type):
                 details={"filename": filename, "detected": dataset_type})
         # Harmonize to canonical schema BEFORE clean_dataframe.
         # HarmonizationRejected propagates; generic errors log and fall back.
-        from src.schema_harmonizer import SchemaHarmonizer, HarmonizationRejected
+        SchemaHarmonizer = __import__("src.schema_harmonizer", fromlist=["SchemaHarmonizer"]).SchemaHarmonizer
         harmonizer = SchemaHarmonizer()
         if dataset_type in harmonizer.SUPPORTED_TARGETS:
             df_before_cols = list(df.columns)
@@ -755,7 +755,7 @@ def process_file(file_obj, filename, dataset_type):
                         "nice_coverage": harmonize_meta["nice_coverage"],
                     },
                 )
-            except HarmonizationRejected as rej:
+            except Exception as rej:
                 log(
                     "SCHEMA_HARMONIZE_REJECTED",
                     details={
@@ -857,7 +857,7 @@ def render_login():
             user = authenticate(username, password)
             if user:
                 sys.path.insert(0, str(Path.cwd() / "src"))
-                from audit_logger import AuditLogger
+                from kyc_audit.logger import AuditLogger
                 logger = AuditLogger(user)
                 st.session_state.authenticated = True
                 st.session_state.current_user = user
