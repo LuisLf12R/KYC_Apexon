@@ -1,0 +1,242 @@
+schema_version: '1.0'
+generated_at: '2026-04-20T18:49:00.422511'
+states:
+  FATF-REC:
+    landing:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  WOLFSBERG-PWM:
+    pdf:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  WOLFSBERG-AML:
+    pdf:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  FINCEN-CDD:
+    ecfr:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  FINCEN-CIP:
+    ecfr:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  NYDFS-504:
+    regulation:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  OFAC-SDN:
+    txt:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  OFAC-CONS:
+    txt:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  FCA-JMLSG:
+    landing:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+    part1-pdf:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+    part2-pdf:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  FCA-MLR2017:
+    legislation:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  OFSI-CONS:
+    csv:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  EU-6AMLD:
+    eur-lex:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  EBA-GL-ML:
+    landing:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+    pdf:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  BAFIN-GWG:
+    legislation:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  ACPR-ESSOC:
+    landing:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  EU-CONS-SANCTIONS:
+    xml:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  FINMA-AMLO:
+    landing:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+    pdf:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  MAS-626:
+    landing:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  MAS-PSN01:
+    landing:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  SINGPASS-MYINFO-API:
+    api:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  HKMA-SA-2:
+    landing:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+    pdf:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  SFC-AML:
+    landing:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  AUSTRAC-RULES:
+    legislation:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  AU-DVS-API:
+    api:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  FINTRAC-PCMLTFA:
+    legislation:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+    id-methods:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  CBUAE-AML:
+    landing:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  UAE-ICP-API:
+    api:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  RBI-KYC:
+    rbi:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null
+  UIDAI-AADHAAR-API:
+    api:
+      last_fetched_at: null
+      last_hash: null
+      last_status: null
+      last_changed_at: null
+      error_message: null

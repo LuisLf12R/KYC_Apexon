@@ -1,0 +1,456 @@
+---
+# KYC Apexon — Regulatory Source Registry
+# Static catalogue of sources the fetcher monitors.
+# Edit to add/remove sources. fetch_state.yaml tracks live fetch state.
+#
+# fetch_method (per URL):
+#   http_head     — HEAD request; hash change detection on ETag/Content-Length
+#   http_get      — GET request; hash of response body
+#   playwright    — JS-rendered page; hash of rendered DOM text
+#   rss           — RSS/Atom feed; parse entries for new items
+#   api_status    — Government API / digital-ID endpoint; health-check only,
+#                   no hash extraction, no LLM extraction in Phase 5
+#
+# parse_mode (per source):
+#   llm           — Phase 5 extractor reads content and produces overlay JSON
+#   direct        — Sanctions lists; bypass LLM, parsed by dedicated parser
+#   none          — api_status sources; no content to parse
+#
+# active: false   — Registered but not fetched (placeholder jurisdictions or
+#                   sources pending scope confirmation)
+
+schema_version: "1.0"
+
+sources:
+
+  # ── SUPRANATIONAL ──────────────────────────────────────────────────────────
+
+  - id: FATF-REC
+    jurisdiction: SUPRANATIONAL
+    regulator: FATF
+    document_name: "FATF Recommendations (2012, updated)"
+    urls:
+      - label: landing
+        url: "https://www.fatf-gafi.org/en/topics/fatf-recommendations.html"
+        fetch_method: http_get
+    parse_mode: llm
+    relevant_sections: "Rec 10 — CDD; Rec 12/22 — PEPs; Rec 15 — new technologies; Rec 24/25 — UBO"
+    active: true
+    notes: "Landing page links to versioned PDF. Track PDF link changes via rendered DOM."
+
+  - id: WOLFSBERG-PWM
+    jurisdiction: SUPRANATIONAL
+    regulator: Wolfsberg Group
+    document_name: "Wolfsberg Private Banking Principles (2012)"
+    urls:
+      - label: pdf
+        url: "https://www.wolfsberg-principles.com/sites/default/files/wb/pdfs/wolfsberg-standards/Wolfsberg-Private-Banking-Principles-2012.pdf"
+        fetch_method: http_head
+    parse_mode: llm
+    relevant_sections: "Section 2 — Client acceptance; Section 3 — CDD; Section 6 — EDD for PEPs"
+    active: true
+    notes: "Static PDF. HEAD sufficient for hash change detection."
+
+  - id: WOLFSBERG-AML
+    jurisdiction: SUPRANATIONAL
+    regulator: Wolfsberg Group
+    document_name: "Wolfsberg AML Principles for Correspondent Banking (2014)"
+    urls:
+      - label: pdf
+        url: "https://www.wolfsberg-principles.com/sites/default/files/wb/pdfs/wolfsberg-standards/Wolfsberg-Correspondent-Banking-Principles-2014.pdf"
+        fetch_method: http_head
+    parse_mode: llm
+    relevant_sections: "Section 4 — CDD; Section 5 — EDD"
+    active: true
+    notes: "Supplementary to PWM principles for cross-border accounts."
+
+  # ── USA ───────────────────────────────────────────────────────────────────
+
+  - id: FINCEN-CDD
+    jurisdiction: USA
+    regulator: FinCEN
+    document_name: "FinCEN CDD Rule (31 CFR 1010.230)"
+    urls:
+      - label: ecfr
+        url: "https://www.ecfr.gov/current/title-31/subtitle-B/chapter-X/part-1010/subpart-B/section-1010.230"
+        fetch_method: http_get
+    parse_mode: llm
+    relevant_sections: "Beneficial ownership 25% threshold; legal entity customers; certification requirement"
+    active: true
+    notes: "eCFR updates in place for amendments. Content hash catches regulatory text changes."
+
+  - id: FINCEN-CIP
+    jurisdiction: USA
+    regulator: FinCEN / OCC
+    document_name: "Customer Identification Program (31 CFR 1020.220)"
+    urls:
+      - label: ecfr
+        url: "https://www.ecfr.gov/current/title-31/subtitle-B/chapter-X/part-1020/subpart-B/section-1020.220"
+        fetch_method: http_get
+    parse_mode: llm
+    relevant_sections: "Identity verification; documentary vs non-documentary methods; TIN timing exceptions"
+    active: true
+    notes: "Feb 2026 FinCEN exceptive relief on BO re-verification at each new account opening — monitor for codification."
+
+  - id: NYDFS-504
+    jurisdiction: USA
+    regulator: NYDFS
+    document_name: "NYDFS Part 504 — Transaction Monitoring and Filtering"
+    urls:
+      - label: regulation
+        url: "https://www.dfs.ny.gov/industry_guidance/banking/aml_transaction_monitoring"
+        fetch_method: playwright
+    parse_mode: llm
+    relevant_sections: "Annual certification requirements; model validation; threshold tuning; executive liability"
+    active: true
+    notes: "JS-rendered. Applies to any institution with a NY branch. Personal liability for certifying officers."
+
+  - id: OFAC-SDN
+    jurisdiction: USA
+    regulator: OFAC
+    document_name: "OFAC Specially Designated Nationals List (SDN)"
+    urls:
+      - label: txt
+        url: "https://www.treasury.gov/ofac/downloads/sdnlist.txt"
+        fetch_method: http_head
+    parse_mode: direct
+    relevant_sections: "Full list — parsed directly, not extracted by LLM"
+    active: true
+    notes: "HEAD only. Hash change triggers direct sanctions parser. Do NOT route through LLM."
+
+  - id: OFAC-CONS
+    jurisdiction: USA
+    regulator: OFAC
+    document_name: "OFAC Consolidated Sanctions List"
+    urls:
+      - label: txt
+        url: "https://www.treasury.gov/ofac/downloads/consolidated/cons_prim.txt"
+        fetch_method: http_head
+    parse_mode: direct
+    relevant_sections: "Full list — parsed directly"
+    active: true
+    notes: "HEAD only. Same direct-parser path as SDN."
+
+  # ── GBR ───────────────────────────────────────────────────────────────────
+
+  - id: FCA-JMLSG
+    jurisdiction: GBR
+    regulator: FCA / JMLSG
+    document_name: "JMLSG Guidance — Parts I and II"
+    urls:
+      - label: landing
+        url: "https://www.jmlsg.org.uk/guidance/current-guidance/"
+        fetch_method: playwright
+      - label: part1-pdf
+        url: "https://www.jmlsg.org.uk/wp-content/uploads/2021/10/JMLSG-Part-I-Guidance-2020.pdf"
+        fetch_method: http_head
+      - label: part2-pdf
+        url: "https://www.jmlsg.org.uk/wp-content/uploads/2021/10/JMLSG-Part-II-Guidance-2020.pdf"
+        fetch_method: http_head
+    parse_mode: llm
+    relevant_sections: "Ch 5 — CDD; Ch 6 — EDD; doc expiry 60d (vs baseline 90d); PEP treatment; digital DVS"
+    active: true
+    notes: "Landing page Playwright to detect new PDF links. Part I + Part II PDFs tracked separately."
+
+  - id: FCA-MLR2017
+    jurisdiction: GBR
+    regulator: FCA
+    document_name: "Money Laundering Regulations 2017 (as amended)"
+    urls:
+      - label: legislation
+        url: "https://www.legislation.gov.uk/uksi/2017/692/contents"
+        fetch_method: http_get
+    parse_mode: llm
+    relevant_sections: "Reg 28 — CDD; Reg 33 — EDD; Reg 35 — PEPs"
+    active: true
+    notes: "legislation.gov.uk amends in place. Content hash detects changes."
+
+  - id: OFSI-CONS
+    jurisdiction: GBR
+    regulator: OFSI
+    document_name: "OFSI Consolidated List of Financial Sanctions Targets"
+    urls:
+      - label: csv
+        url: "https://assets.publishing.service.gov.uk/government/uploads/system/uploads/attachment_data/file/consolidated_list_of_targets.csv"
+        fetch_method: http_head
+    parse_mode: direct
+    relevant_sections: "Full list — parsed directly"
+    active: true
+    notes: "HEAD only. CSV format. Direct parser path."
+
+  # ── EU ────────────────────────────────────────────────────────────────────
+
+  - id: EU-6AMLD
+    jurisdiction: EU
+    regulator: European Parliament / Council
+    document_name: "6th Anti-Money Laundering Directive (EU) 2018/1673"
+    urls:
+      - label: eur-lex
+        url: "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32018L1673"
+        fetch_method: http_get
+    parse_mode: llm
+    relevant_sections: "Predicate offences; rescreening 180d (vs baseline 365d); EDD; sanctions"
+    active: true
+    notes: "EUR-Lex stable URL. Note: AMLA Regulation 2026 will supersede — add AMLA-REG entry when finalised."
+
+  - id: EBA-GL-ML
+    jurisdiction: EU
+    regulator: EBA
+    document_name: "EBA Guidelines on AML/CFT (EBA/GL/2021/02)"
+    urls:
+      - label: landing
+        url: "https://www.eba.europa.eu/regulation-and-policy/anti-money-laundering-and-e-money/guidelines-on-aml-cft"
+        fetch_method: playwright
+      - label: pdf
+        url: "https://www.eba.europa.eu/sites/default/files/document_library/Publications/Guidelines/2021/EBA-GL-2021-02/1023091/EBA%20GL%202021%2002%20Guidelines%20on%20MLCFT%20in%20AML%20risk%20based%20supervision.pdf"
+        fetch_method: http_head
+    parse_mode: llm
+    relevant_sections: "Title III — CDD; Title IV — EDD; rescreening frequency; BaFin/ACPR/CSSF national competent authority expectations"
+    active: true
+    notes: "Landing Playwright to detect new PDF version link. PDF tracked by HEAD."
+
+  - id: BAFIN-GWG
+    jurisdiction: EU
+    regulator: BaFin
+    document_name: "Geldwäschegesetz (GwG) — German AML Act"
+    urls:
+      - label: legislation
+        url: "https://www.gesetze-im-internet.de/gwg_2017/index.html"
+        fetch_method: http_get
+    parse_mode: llm
+    relevant_sections: "§10 — CDD; §15 — EDD; Meldebescheinigung as primary PoA for natural persons"
+    active: true
+    notes: "German statutory text. Address verification via Personalausweis or Meldebescheinigung — no utility bills as primary."
+
+  - id: ACPR-ESSOC
+    jurisdiction: EU
+    regulator: ACPR
+    document_name: "ESSOC Law — French PoA Justif'Adresse Framework"
+    urls:
+      - label: landing
+        url: "https://www.tresor.economie.gouv.fr/services-aux-entreprises/lutte-contre-le-blanchiment-et-le-financement-du-terrorisme"
+        fetch_method: playwright
+    parse_mode: llm
+    relevant_sections: "Justificatif de domicile 3-6 month validity; Justif'Adresse API for automated PoA cross-reference"
+    active: true
+    notes: "JS-rendered. Justif'Adresse API eliminates physical PoA upload when address matches EDF/utility DB."
+
+  - id: EU-CONS-SANCTIONS
+    jurisdiction: EU
+    regulator: European Commission
+    document_name: "EU Consolidated Sanctions List"
+    urls:
+      - label: xml
+        url: "https://webgate.ec.europa.eu/fsd/fsf/public/files/xmlFullSanctionsList_1_1/content?token=dG9rZW4tMjAxNw"
+        fetch_method: http_head
+    parse_mode: direct
+    relevant_sections: "Full list — parsed directly"
+    active: true
+    notes: "HEAD only. XML format. Token in URL is static. Direct parser path."
+
+  # ── CHE ───────────────────────────────────────────────────────────────────
+
+  - id: FINMA-AMLO
+    jurisdiction: CHE
+    regulator: FINMA
+    document_name: "FINMA Anti-Money Laundering Ordinance (AMLO-FINMA)"
+    urls:
+      - label: landing
+        url: "https://www.finma.ch/en/regulation/rules-and-guidelines/legislation-and-ordinances/anti-money-laundering/"
+        fetch_method: playwright
+      - label: pdf
+        url: "https://www.finma.ch/~/media/finma/dokumente/dokumentencenter/myfinma/4dokumentation/finma-rs/2016/rs-2016-07.pdf"
+        fetch_method: http_head
+    parse_mode: llm
+    relevant_sections: "Art 12-18 — CDD; rescreening 180d; velocity window 60d (vs baseline 90d)"
+    active: true
+    notes: "Landing Playwright to detect PDF version changes. PDF HEAD for hash."
+
+  # ── SGP ───────────────────────────────────────────────────────────────────
+
+  - id: MAS-626
+    jurisdiction: SGP
+    regulator: MAS
+    document_name: "MAS Notice 626 — Prevention of Money Laundering"
+    urls:
+      - label: landing
+        url: "https://www.mas.gov.sg/regulation/notices/notice-626"
+        fetch_method: playwright
+    parse_mode: llm
+    relevant_sections: "Para 6 — CDD; Para 9 — EDD; Para 11 — PEPs; velocity window 30d; no minimum STR threshold"
+    active: true
+    notes: "JS-rendered. PDF versioned by date in filename — detect new PDF link from landing."
+
+  - id: MAS-PSN01
+    jurisdiction: SGP
+    regulator: MAS
+    document_name: "MAS Practice Note PSN01 — Private Banking CDD"
+    urls:
+      - label: landing
+        url: "https://www.mas.gov.sg/regulation/practice-notes/psn01"
+        fetch_method: playwright
+    parse_mode: llm
+    relevant_sections: "Section 3 — velocity window 30d; Section 5 — SoW documentation; non-document verification via MyInfo"
+    active: true
+    notes: "Primary source for SGP 30-day velocity override in v2.0."
+
+  - id: SINGPASS-MYINFO-API
+    jurisdiction: SGP
+    regulator: GovTech Singapore / ICA
+    document_name: "MyInfo API (SingPass Digital Identity)"
+    urls:
+      - label: api
+        url: "https://api.singpass.gov.sg/library/myinfo/developers"
+        fetch_method: api_status
+    parse_mode: none
+    relevant_sections: "Government-verified name, address, DOB — eliminates physical PoA and photo requirements under MAS 626"
+    active: true
+    notes: "Health-check only. No text extraction. Verifies API is live. Runtime integration, not regulatory text."
+
+  # ── HKG ───────────────────────────────────────────────────────────────────
+
+  - id: HKMA-SA-2
+    jurisdiction: HKG
+    regulator: HKMA
+    document_name: "HKMA Supervisory Policy Manual SA-2 — AML/CFT"
+    urls:
+      - label: landing
+        url: "https://www.hkma.gov.hk/eng/regulatory-resources/regulatory-guides/supervisory-policy-manual/AML-CFT/"
+        fetch_method: playwright
+      - label: pdf
+        url: "https://www.hkma.gov.hk/media/eng/doc/key-information/guidelines-and-circular/2024/20240913e1.pdf"
+        fetch_method: http_head
+    parse_mode: llm
+    relevant_sections: "Ch 4 — CDD; Ch 5 — EDD; UBO threshold 10% (vs baseline 25%); current residential address only (permanent no longer required)"
+    active: true
+    notes: "Primary source for HKG 10% UBO threshold. Recent update removed requirement to verify permanent address."
+
+  - id: SFC-AML
+    jurisdiction: HKG
+    regulator: SFC
+    document_name: "SFC AML/CFT Guideline"
+    urls:
+      - label: landing
+        url: "https://www.sfc.hk/en/Rules-and-Standards/Codes-and-Guidelines/Guidelines/AML-CFT-Guideline"
+        fetch_method: playwright
+    parse_mode: llm
+    relevant_sections: "Ch 4 — UBO 10% threshold; remote overseas onboarding: liveness + e-signature + HKD 10k initial transfer"
+    active: true
+    notes: "Corroborating source for 10% UBO threshold alongside HKMA SA-2."
+
+  # ── AUS ───────────────────────────────────────────────────────────────────
+
+  - id: AUSTRAC-RULES
+    jurisdiction: AUS
+    regulator: AUSTRAC
+    document_name: "AML/CTF Rules Instrument 2007 (as amended)"
+    urls:
+      - label: legislation
+        url: "https://www.legislation.gov.au/Series/F2007L01000"
+        fetch_method: http_get
+    parse_mode: llm
+    relevant_sections: "Ch 4 — CDD; Ch 7 — ongoing CDD; Part 9.6 — PEPs; passport expired < 2 years still valid (unique AUS tolerance)"
+    active: true
+    notes: "AUS params match baseline in v2.0. Monitor for Tranche 2 reform amendments. DVS API tracked separately."
+
+  - id: AU-DVS-API
+    jurisdiction: AUS
+    regulator: Australian Attorney-General's Department
+    document_name: "Document Verification Service (DVS)"
+    urls:
+      - label: api
+        url: "https://www.idmatch.gov.au/document-verification-service"
+        fetch_method: api_status
+    parse_mode: none
+    relevant_sections: "Instantaneous verification of identity document data against issuing government agency records"
+    active: true
+    notes: "Health-check only. No text extraction. Runtime integration — verifies identity docs against government source."
+
+  # ── CAN ───────────────────────────────────────────────────────────────────
+
+  - id: FINTRAC-PCMLTFA
+    jurisdiction: CAN
+    regulator: FINTRAC
+    document_name: "Proceeds of Crime (Money Laundering) and Terrorist Financing Act (PCMLTFA)"
+    urls:
+      - label: legislation
+        url: "https://laws-lois.justice.gc.ca/eng/acts/P-24.501/index.html"
+        fetch_method: http_get
+      - label: id-methods
+        url: "https://www.fintrac-canafe.gc.ca/guidance-directives/client-clientele/methods/1-eng"
+        fetch_method: http_get
+    parse_mode: llm
+    relevant_sections: "Credit File Method (3yr file, 2 tradelines); Dual-Process Method (2 independent sources); foreign PEP lifetime = infinite (never decays); material discrepancy reporting within 30d"
+    active: true
+    notes: "No ruleset overlay yet — Phase 5 extractor will produce CAN overlay. Federal BO registry operational end-2025."
+
+  # ── UAE ───────────────────────────────────────────────────────────────────
+
+  - id: CBUAE-AML
+    jurisdiction: UAE
+    regulator: CBUAE
+    document_name: "CBUAE AML/CFT Standards for Licensed Financial Institutions"
+    urls:
+      - label: landing
+        url: "https://www.centralbank.ae/en/regulation/aml-cft"
+        fetch_method: playwright
+    parse_mode: llm
+    relevant_sections: "Art 8 — PoA; dual-address requirement (local UAE + home country for expats); shadow listed persons; goAML reporting within 5 days"
+    active: true
+    notes: "No ruleset overlay yet — Phase 5 extractor will produce UAE overlay. Cabinet Decision No. 74/2020 and 2025 updates in scope."
+
+  - id: UAE-ICP-API
+    jurisdiction: UAE
+    regulator: ICP (Federal Authority for Identity, Citizenship, Customs & Port Security)
+    document_name: "UAE ICP Emirates ID Validation Gateway"
+    urls:
+      - label: api
+        url: "https://icp.gov.ae/en/services/identity-verification"
+        fetch_method: api_status
+    parse_mode: none
+    relevant_sections: "Emirates ID validation; CBUAE mandates use of ICP gateway or UAE Pass for all e-KYC"
+    active: true
+    notes: "Health-check only. No text extraction. CBUAE requires institutions to retain digital verification record of each API call."
+
+  # ── IND ───────────────────────────────────────────────────────────────────
+
+  - id: RBI-KYC
+    jurisdiction: IND
+    regulator: RBI
+    document_name: "RBI Master Direction on KYC (2016, updated)"
+    urls:
+      - label: rbi
+        url: "https://www.rbi.org.in/Scripts/BS_ViewMasDirections.aspx?id=11566"
+        fetch_method: http_get
+    parse_mode: llm
+    relevant_sections: "OVDs as combined ID + PoA; Aadhaar e-KYC; V-CIP; SBO threshold 10% (vs FATF 25%); inoperative account at 2yr; DEA Fund transfer at 10yr"
+    active: true
+    notes: "No ruleset overlay yet — Phase 5 extractor will produce IND overlay. 10% SBO threshold is stricter than FATF baseline."
+
+  - id: UIDAI-AADHAAR-API
+    jurisdiction: IND
+    regulator: UIDAI
+    document_name: "Aadhaar e-KYC API"
+    urls:
+      - label: api
+        url: "https://uidai.gov.in/en/ecosystem/authentication-devices-documents/developer-section.html"
+        fetch_method: api_status
+    parse_mode: none
+    relevant_sections: "Biometric/OTP e-KYC; transmits verified name, address, DOB from UIDAI directly to institution; acts as unimpeachable PoA"
+    active: true
+    notes: "Health-check only. Non-bank entities restricted to offline Aadhaar verification. Bank entities may use OTP e-KYC."
+
+  # ── CHN (PLACEHOLDER) ─────────────────────────────────────────────────────
+
+  - id: PBOC-AML
+    jurisdiction: CHN
+    regulator: PBOC
+    document_name: "PBOC AML Regulations (2021)"
+    urls:
+      - label: pboc
+        url: "http://www.pbc.gov.cn/en/3688110/3688172/4157443/index.html"
+        fetch_method: http_get
+    parse_mode: llm
+    relevant_sections: "TBD — deferred post-v1"
+    active: false
+    notes: "Placeholder. active=false — fetcher skips. Enable when China coverage is scoped."
