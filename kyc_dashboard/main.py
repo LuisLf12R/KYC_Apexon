@@ -167,7 +167,7 @@ def _ensure_runtime_action_types():
     """Allow app-level workflow actions without editing audit_logger.py."""
     try:
         sys.path.insert(0, str(Path.cwd() / "src"))
-        from audit_logger import ACTION_TYPES
+        from kyc_audit.logger import ACTION_TYPES
         ACTION_TYPES.setdefault("CASE_CLOSED", "Manager/Admin closed a customer case")
     except Exception:
         pass
@@ -857,7 +857,7 @@ def render_login():
             user = authenticate(username, password)
             if user:
                 sys.path.insert(0, str(Path.cwd() / "src"))
-                from audit_logger import AuditLogger
+                from kyc_audit.logger import AuditLogger
                 logger = AuditLogger(user)
                 st.session_state.authenticated = True
                 st.session_state.current_user = user
