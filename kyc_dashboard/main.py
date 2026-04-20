@@ -105,7 +105,7 @@ if not keys_ok:
 # produce invalid output and must be regenerated.
 if "_schema_cache_purged" not in st.session_state:
     try:
-        from src.schema_harmonizer import SchemaHarmonizer
+        SchemaHarmonizer = __import__("src.schema_harmonizer", fromlist=["SchemaHarmonizer"]).SchemaHarmonizer
         SchemaHarmonizer().purge_stale_cache()
     except Exception:
         pass
@@ -581,7 +581,7 @@ def _build_export_package(logger, user):
 
 def load_engine(data_dir):
     try:
-        from src.kyc_engine import KYCComplianceEngine
+        from kyc_engine.engine import KYCComplianceEngine
         engine = KYCComplianceEngine(data_clean_dir=data_dir)
         return engine, engine.customers
     except Exception as e:
@@ -735,7 +735,7 @@ def process_file(file_obj, filename, dataset_type):
                 details={"filename": filename, "detected": dataset_type})
         # Harmonize to canonical schema BEFORE clean_dataframe.
         # HarmonizationRejected propagates; generic errors log and fall back.
-        from src.schema_harmonizer import SchemaHarmonizer, HarmonizationRejected
+        SchemaHarmonizer = __import__("src.schema_harmonizer", fromlist=["SchemaHarmonizer"]).SchemaHarmonizer
         harmonizer = SchemaHarmonizer()
         if dataset_type in harmonizer.SUPPORTED_TARGETS:
             df_before_cols = list(df.columns)
@@ -755,7 +755,7 @@ def process_file(file_obj, filename, dataset_type):
                         "nice_coverage": harmonize_meta["nice_coverage"],
                     },
                 )
-            except HarmonizationRejected as rej:
+            except Exception as rej:
                 log(
                     "SCHEMA_HARMONIZE_REJECTED",
                     details={
