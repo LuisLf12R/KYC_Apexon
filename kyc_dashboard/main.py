@@ -176,7 +176,7 @@ def _ensure_runtime_action_types():
 def _get_provenance_store():
     if st.session_state.provenance_store is None:
         sys.path.insert(0, str(Path.cwd() / "src"))
-        from data_provenance import CustomerProvenance
+        from kyc_audit.provenance import CustomerProvenance
         st.session_state.provenance_store = CustomerProvenance()
     return st.session_state.provenance_store
 
