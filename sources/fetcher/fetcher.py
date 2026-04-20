@@ -250,3 +250,44 @@ def fetch_all(
         "changed": changed,
         "errors": errors,
     }
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Fetch all active regulatory sources and update fetch_state.yaml"
+    )
+    parser.add_argument(
+        "--source",
+        metavar="SOURCE_ID",
+        help="Fetch a single source by ID instead of all sources",
+        default=None,
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print what would be fetched without writing fetch_state.yaml",
+    )
+    args = parser.parse_args()
+
+    if args.dry_run:
+        from sources.schema.registry import load_registry
+        manifest = load_registry()
+        targets = (
+            [s for s in manifest.sources if s.id == args.source]
+            if args.source
+            else [s for s in manifest.sources if s.active]
+        )
+        print(f"Dry run — would fetch {len(targets)} source(s):")
+        for s in targets:
+            print(f"  {s.id}")
+    elif args.source:
+        import asyncio
+        result = asyncio.run(fetch_source(args.source))
+        print(result)
+    else:
+        import asyncio
+        results = asyncio.run(fetch_all())
+        passed = sum(1 for r in results if r.get("status") != "error")
+        failed = sum(1 for r in results if r.get("status") == "error")
+        print(f"Fetch complete: {passed} ok, {failed} errors")
