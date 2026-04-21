@@ -33,6 +33,7 @@ class ChangelogEntry(BaseModel):
     date: date
     change: str
     author: Optional[str] = None
+    reviewed_by: Optional[str] = None   # non-null enforced by merger at merge time
 
 
 class RulesetManifest(BaseModel):
