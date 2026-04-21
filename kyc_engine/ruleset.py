@@ -149,3 +149,99 @@ def reset_ruleset_cache() -> None:
     """For use in tests only — clears the cached manifest."""
     global _active_manifest
     _active_manifest = None
+
+_INSTITUTION_DIR = Path(__file__).parent.parent / "rules" / "institutions"
+
+
+def load_institution_overlay(
+    institution_id: str,
+    institution_dir: Path = None,
+) -> "rules.schema.institution.InstitutionOverlay":
+    """
+    Load and validate an institution overlay from
+    rules/institutions/<INSTITUTION_ID>.json.
+
+    Raises FileNotFoundError if the file is missing.
+    Raises ValueError (Pydantic ValidationError) if schema is invalid.
+    """
+    from rules.schema.institution import InstitutionOverlay
+
+    base = institution_dir if institution_dir is not None else _INSTITUTION_DIR
+    path = base / f"{institution_id}.json"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Institution overlay not found: {path}. "
+            "Create rules/institutions/{institution_id}.json to define this institution."
+        )
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    return InstitutionOverlay.model_validate(raw)
+
+
+def get_institution_params(
+    jurisdiction_code: str,
+    institution_id: Optional[str] = None,
+    institution_dir: Path = None,
+) -> dict:
+    """
+    Return merged dimension parameters for a jurisdiction + institution combination.
+
+    Merge chain:
+        baseline → jurisdiction_overlay → institution_overlay → returned dict
+
+    If institution_id is None or the overlay is inactive (active=False),
+    returns the jurisdiction-merged params unchanged.
+
+    If the institution overlay file is missing, logs a warning and falls
+    back to jurisdiction params — does not raise, to avoid breaking
+    evaluations when an institution file is misconfigured.
+
+    Args:
+        jurisdiction_code : ISO/regional code matched against manifest.
+        institution_id    : Identifier matching a file in rules/institutions/.
+                            None → skip institution overlay.
+        institution_dir   : Override for testing.
+
+    Returns:
+        dict with same structure as manifest.dimension_parameters,
+        with jurisdiction and institution overrides applied.
+    """
+    import copy
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    # Step 1 — jurisdiction-merged params (baseline + jurisdiction overlay)
+    merged = get_jurisdiction_params(jurisdiction_code)
+
+    if not institution_id:
+        return merged
+
+    # Step 2 — load institution overlay
+    try:
+        overlay = load_institution_overlay(institution_id, institution_dir=institution_dir)
+    except FileNotFoundError as exc:
+        logger.warning("Institution overlay missing, falling back to jurisdiction params: %s", exc)
+        return merged
+
+    # Step 3 — skip if inactive
+    if not overlay.active:
+        logger.info(
+            "Institution overlay %r is inactive — using jurisdiction params only.",
+            institution_id,
+        )
+        return merged
+
+    # Step 4 — apply institution dimension_overrides (same deep merge as jurisdiction)
+    if not overlay.dimension_overrides:
+        return merged
+
+    merged = copy.deepcopy(merged)
+    for dimension_key, override_fields in overlay.dimension_overrides.items():
+        if dimension_key not in merged:
+            merged[dimension_key] = override_fields
+        elif isinstance(merged[dimension_key], dict) and isinstance(override_fields, dict):
+            merged[dimension_key] = {**merged[dimension_key], **override_fields}
+        else:
+            merged[dimension_key] = override_fields
+
+    return merged

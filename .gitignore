@@ -87,3 +87,4 @@ debug_*.log
 .pytest_cache/
 .coverage
 htmlcov/
+rules/staging/*.json
