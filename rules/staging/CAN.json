@@ -1,0 +1,30 @@
+{
+  "jurisdiction_code": "CAN",
+  "regulators": [
+    "FINTRAC"
+  ],
+  "dimension_overrides": {
+    "beneficial_ownership": {
+      "ownership_threshold_pct": 25.0
+    },
+    "transactions": {
+      "edd_trigger_threshold_usd": 10000.0,
+      "velocity_window_days": 90
+    },
+    "crs_fatca": {
+      "fatca_applicable_jurisdictions": [
+        "CAN"
+      ],
+      "crs_participating_jurisdictions": [
+        "CAN"
+      ],
+      "w8_w9_required_entity_types": [
+        "corporation",
+        "trust",
+        "partnership"
+      ]
+    }
+  },
+  "additional_hard_reject_rules": [],
+  "additional_review_rules": []
+}

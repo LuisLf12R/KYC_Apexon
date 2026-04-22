@@ -1,0 +1,67 @@
+name: Weekly Source Monitoring
+
+on:
+  schedule:
+    # Every Monday at 06:00 UTC
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+jobs:
+  monitoring-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install pyyaml pydantic httpx pandas
+
+      - name: Run monitoring check
+        run: |
+          python -c "
+          import json
+          from pathlib import Path
+          import pandas as pd
+          from sources.monitoring.monitoring import MonitoringService
+
+          svc = MonitoringService()
+
+          snapshot_path = Path('monitoring_snapshot.json')
+          previous = None
+          if snapshot_path.exists():
+              previous = json.loads(snapshot_path.read_text())
+
+          if previous is None:
+              snap = svc.snapshot()
+              snapshot_path.write_text(json.dumps(snap, indent=2))
+              print('First run — snapshot saved. No comparison available.')
+          else:
+              empty_df = pd.DataFrame(columns=['customer_id', 'jurisdiction'])
+              report = svc.check(previous, empty_df)
+
+              print(f'Changed sources: {len(report.changed_sources)}')
+              print(f'Affected jurisdictions: {report.affected_jurisdictions}')
+              print(f'Skipped sources: {len(report.skipped_sources)}')
+
+              for sc in report.changed_sources:
+                  print(f'  - {sc.source_id}: {sc.change_type}')
+
+              snap = svc.snapshot()
+              snapshot_path.write_text(json.dumps(snap, indent=2))
+              print('Snapshot updated.')
+          "
+
+      - name: Commit updated snapshot
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add monitoring_snapshot.json
+          git diff --cached --quiet || git commit -m "chore: update monitoring snapshot [skip ci]"
+          # Note: push requires permissions configured on the repo
