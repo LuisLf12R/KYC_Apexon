@@ -87,6 +87,8 @@ class CustomerDecision(BaseModel):
     proof_of_address_score: float = Field(ge=0.0, le=100.0)
     beneficial_ownership_score: float = Field(ge=0.0, le=100.0)
     data_quality_score: float = Field(ge=0.0, le=100.0)
+    source_of_wealth_score: float = Field(default=0.0, ge=0.0, le=100.0)
+    crs_fatca_score: float = Field(default=0.0, ge=0.0, le=100.0)
 
     # Per-dimension detail dicts — stored as raw dicts to avoid
     # coupling models to dimension internals; callers can sub-validate.
@@ -96,6 +98,8 @@ class CustomerDecision(BaseModel):
     proof_of_address_details: Dict[str, Any] = Field(default_factory=dict)
     beneficial_ownership_details: Dict[str, Any] = Field(default_factory=dict)
     data_quality_details: Dict[str, Any] = Field(default_factory=dict)
+    source_of_wealth_details: Dict[str, Any] = Field(default_factory=dict)
+    crs_fatca_details: Dict[str, Any] = Field(default_factory=dict)
 
     # Raw dimension results (full evaluate output per dimension)
     dimension_results: Dict[str, Any] = Field(default_factory=dict)

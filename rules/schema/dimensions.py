@@ -114,6 +114,52 @@ class DataQualityParameters(BaseModel):
     )
 
 
+class CRSFATCAParameters(BaseModel):
+    """Parameters for the CRS/FATCA reporting-obligation dimension."""
+    fatca_applicable_jurisdictions: List[str] = Field(
+        ...,
+        description="Jurisdiction codes where FATCA applies (i.e. where the "
+                    "institution has FFI agreements or operates). "
+                    "Customers booked in these jurisdictions require FATCA status.",
+        min_length=1,
+    )
+    crs_participating_jurisdictions: List[str] = Field(
+        ...,
+        description="Jurisdiction codes that have adopted the OECD Common Reporting "
+                    "Standard. Customers booked here require CRS self-certification.",
+        min_length=1,
+    )
+    w8_w9_required_entity_types: List[str] = Field(
+        ...,
+        description="Entity type strings for which a W-8 or W-9 form is required. "
+                    "Example: ['INDIVIDUAL', 'LEGAL_ENTITY']",
+        min_length=1,
+    )
+
+
+class SoWParameters(BaseModel):
+    """Parameters for the source_of_wealth dimension."""
+    accepted_sow_categories: List[str] = Field(
+        ...,
+        description="Recognized source-of-wealth category strings. Declarations "
+                    "not in this list are flagged for analyst review. "
+                    "Example: ['employment_income', 'inheritance', 'investment_returns']",
+        min_length=1,
+    )
+    min_evidence_docs: int = Field(
+        ...,
+        description="Minimum number of supporting SoW evidence documents required "
+                    "for a non-review disposition.",
+        ge=1,
+    )
+    max_evidence_age_days: int = Field(
+        ...,
+        description="Maximum age in days of SoW evidence documents before they are "
+                    "treated as stale. Default baseline: 365.",
+        ge=1,
+    )
+
+
 class DimensionParameters(BaseModel):
     """
     Top-level container for all per-dimension rule parameters.
@@ -126,6 +172,29 @@ class DimensionParameters(BaseModel):
     transactions: TransactionParameters
     documents: DocumentParameters
     data_quality: DataQualityParameters
+    crs_fatca: CRSFATCAParameters = CRSFATCAParameters(
+        fatca_applicable_jurisdictions=["USA"],
+        crs_participating_jurisdictions=[
+            "GBR", "EU", "CHE", "SGP", "HKG", "AUS", "CAN", "UAE", "IND",
+        ],
+        w8_w9_required_entity_types=["INDIVIDUAL", "LEGAL_ENTITY"],
+    )
+    source_of_wealth: SoWParameters = SoWParameters(
+        accepted_sow_categories=[
+            "employment_income",
+            "self_employment",
+            "business_proceeds",
+            "investment_returns",
+            "property_sale",
+            "inheritance",
+            "gift",
+            "pension",
+            "trust_distribution",
+            "other_documented",
+        ],
+        min_evidence_docs=1,
+        max_evidence_age_days=365,
+    )
 
 class JurisdictionOverlay(BaseModel):
     """

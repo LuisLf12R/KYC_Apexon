@@ -27,7 +27,7 @@ class TestRulesetLoads:
     def test_correct_rule_counts(self):
         manifest = RulesetManifest.model_validate(load_v11())
         assert len(manifest.hard_reject_rules) == 4
-        assert len(manifest.review_rules) == 6
+        assert len(manifest.review_rules) == 8
 
     def test_no_duplicate_rule_ids(self):
         manifest = RulesetManifest.model_validate(load_v11())

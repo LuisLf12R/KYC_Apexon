@@ -104,19 +104,30 @@ class BeneficialOwnershipDimension:
             if customer.get('entity_type') != 'LEGAL_ENTITY':
                 return self._not_applicable(customer_id, 'Individual customer - UBO not applicable')
             
-            # Get UBO records for this customer
-            if isinstance(ubo_list, list):
+            # Get UBO records for this customer — always normalize to list[dict]
+            if isinstance(ubo_list, pd.DataFrame):
+                if not ubo_list.empty and 'customer_id' in ubo_list.columns:
+                    ubo_records = ubo_list[ubo_list['customer_id'] == customer_id].to_dict('records')
+                else:
+                    ubo_records = []
+            elif isinstance(ubo_list, list):
                 ubo_records = [u for u in ubo_list if u.get('customer_id') == customer_id]
             else:
-                ubo_records = ubo_list[ubo_list['customer_id'] == customer_id] if isinstance(ubo_list, pd.DataFrame) else []
+                ubo_records = []
             
             # Perform evaluations
             findings = []
             passed = True
             compliance_status = 'COMPLIANT_UBOS_IDENTIFIED'
+            completeness_status = 'MISSING'
+            screening_status = 'N/A'
             
             # [1] Check if entity has UBO information
-            if not ubo_records:
+            ubo_is_empty = (
+                (isinstance(ubo_records, list) and len(ubo_records) == 0)
+                or (isinstance(ubo_records, pd.DataFrame) and ubo_records.empty)
+            )
+            if ubo_is_empty:
                 findings.append('[FAIL] No beneficial owner information found')
                 passed = False
                 compliance_status = 'NON_COMPLIANT_UBO_MISSING'
@@ -145,17 +156,30 @@ class BeneficialOwnershipDimension:
                     findings.append(f'[INFO] Total UBOs: {len(ubos)}')
                 
                 # [3] Check ownership thresholds
+                # [3] Check ownership thresholds — respect max_chain_depth
                 if completeness_status != 'SMO_FALLBACK' and completeness_status != 'MISSING':
                     threshold = self._get_ownership_threshold(customer.get('jurisdiction', 'default'))
-                    total_ownership = sum([float(u.get('ownership_percent', 0)) for u in ubos])
-                    
-                    if total_ownership < threshold:
+                    included_ubos, excluded_count, effective_total = self._resolve_effective_ownership(ubos)
+
+                    if excluded_count > 0:
                         findings.append(
-                            f'[WARN] Identified ownership: {total_ownership}% (threshold: {threshold}%)'
+                            f'[INFO] {excluded_count} UBO record(s) excluded: '
+                            f'chain depth exceeds max_chain_depth={self.params.max_chain_depth}'
+                        )
+
+                    if effective_total < threshold:
+                        findings.append(
+                            f'[WARN] Effective ownership: {effective_total:.1f}% '
+                            f'(threshold: {threshold}%)'
                         )
                         if completeness_status == 'COMPLETE':
                             passed = False
                             compliance_status = 'NON_COMPLIANT_UBO_INCOMPLETE'
+                    else:
+                        findings.append(
+                            f'[PASS] Effective ownership: {effective_total:.1f}% '
+                            f'>= threshold {threshold}%'
+                        )
                 
                 # [4] Check UBO verification recency
                 for ubo in ubos:
@@ -220,6 +244,7 @@ class BeneficialOwnershipDimension:
                 'dimension': 'BeneficialOwnership',
                 'passed': passed,
                 'status': 'Compliant' if passed else 'Non-Compliant',
+                'score': self._compute_ubo_score(compliance_status),
                 'evaluation_details': {
                     'entity_type': customer.get('entity_type'),
                     'jurisdiction': customer.get('jurisdiction'),
@@ -335,12 +360,85 @@ class BeneficialOwnershipDimension:
         return flags
     
     def _get_ownership_threshold(self, jurisdiction: str) -> float:
-        """Return ownership threshold for jurisdiction in percent."""
-        return self.JURISDICTIONAL_THRESHOLDS.get(jurisdiction, self.params.ownership_threshold_pct)
+        """Return ownership threshold for jurisdiction in percent.
+
+        Priority: ruleset params (jurisdiction or institution overlay) >
+        hardcoded JURISDICTIONAL_THRESHOLDS fallback.
+        The params value is set by get_jurisdiction_params() /
+        get_institution_params() before dimension construction, so it
+        already encodes the correct jurisdiction-specific threshold.
+        """
+        return float(self.params.ownership_threshold_pct)
     
     def _get_ubo_refresh_cycle(self, risk_rating: str) -> int:
         """Return UBO refresh cycle for risk rating in days."""
         return self.UBO_REFRESH_CYCLES.get(risk_rating, self.UBO_REFRESH_CYCLES['MEDIUM'])
+
+    def _resolve_effective_ownership(
+        self, ubos: List[Dict]
+    ) -> tuple:
+        """
+        Resolve effective ownership percentages respecting max_chain_depth.
+
+        Each UBO record may carry an optional 'chain_depth' integer field
+        (0 = direct, 1 = one intermediate entity, etc.).
+        Records with chain_depth > max_chain_depth are excluded.
+
+        For indirect records that carry a 'parent_ownership_pct' column
+        the effective ownership is:
+            ownership_percent * parent_ownership_pct / 100
+        Otherwise the stated ownership_percent is used as-is.
+
+        Returns:
+            (included: List[Dict], excluded_count: int, effective_total: float)
+        """
+        max_depth = int(self.params.max_chain_depth)
+        included = []
+        excluded_count = 0
+
+        for ubo in ubos:
+            depth = ubo.get("chain_depth")
+            if depth is None:
+                depth = 0  # treat absent as direct
+            try:
+                depth = int(depth)
+            except (TypeError, ValueError):
+                depth = 0
+
+            if depth > max_depth:
+                excluded_count += 1
+                continue
+            included.append(ubo)
+
+        # Compute effective ownership for included records
+        effective_total = 0.0
+        for ubo in included:
+            raw_pct = float(ubo.get("ownership_percent", 0) or 0)
+            parent_pct = ubo.get("parent_ownership_pct")
+            if parent_pct is not None:
+                try:
+                    effective_pct = raw_pct * float(parent_pct) / 100.0
+                except (TypeError, ValueError):
+                    effective_pct = raw_pct
+            else:
+                effective_pct = raw_pct
+            effective_total += effective_pct
+
+        return included, excluded_count, effective_total
+
+    _COMPLIANCE_SCORES: Dict[str, int] = {
+        "COMPLIANT_UBOS_IDENTIFIED": 90,
+        "COMPLIANT_SMO_FALLBACK": 70,
+        "NON_COMPLIANT_UBO_UNSCREENED": 50,
+        "NON_COMPLIANT_UBO_STALE": 45,
+        "NON_COMPLIANT_UBO_INCOMPLETE": 40,
+        "NON_COMPLIANT_UBO_HIGH_RISK": 20,
+        "NON_COMPLIANT_UBO_MISSING": 10,
+    }
+
+    def _compute_ubo_score(self, compliance_status: str) -> int:
+        """Map compliance_status to a 0-100 integer score."""
+        return self._COMPLIANCE_SCORES.get(compliance_status, 30)
     
     def _no_customer_error(self, customer_id: str) -> Dict:
         """Return error result for missing customer."""
@@ -349,6 +447,7 @@ class BeneficialOwnershipDimension:
             'dimension': 'BeneficialOwnership',
             'passed': False,
             'status': 'Error',
+            'score': 0,
             'findings': [f'Customer {customer_id} not found in dataset'],
             'evaluation_details': {},
             'remediation_required': True,
@@ -362,6 +461,7 @@ class BeneficialOwnershipDimension:
             'dimension': 'BeneficialOwnership',
             'passed': True,  # Not applicable = pass
             'status': 'N/A',
+            'score': 90,
             'findings': [f'[INFO] {reason}'],
             'evaluation_details': {'applicability': 'Not applicable'},
             'remediation_required': False,
@@ -375,6 +475,7 @@ class BeneficialOwnershipDimension:
             'dimension': 'BeneficialOwnership',
             'passed': False,
             'status': 'Error',
+            'score': 0,
             'findings': [f'Evaluation error: {error_msg}'],
             'evaluation_details': {},
             'remediation_required': True,

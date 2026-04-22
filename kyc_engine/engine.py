@@ -9,6 +9,9 @@ from typing import Any, Dict, List
 
 import pandas as pd
 
+from kyc_engine.models import CustomerDecision
+from kyc_engine.dimensions.crs_fatca import CRSFATCADimension
+from kyc_engine.dimensions.source_of_wealth import SourceOfWealthDimension
 from kyc_engine.dimensions.account_activity import AccountActivityDimension
 from kyc_engine.dimensions.aml_screening import AMLScreeningDimension
 from kyc_engine.dimensions.beneficial_ownership import BeneficialOwnershipDimension
@@ -17,6 +20,7 @@ from kyc_engine.dimensions.identity import IdentityVerificationDimension
 from kyc_engine.dimensions.proof_of_address import ProofOfAddressDimension
 from kyc_engine.ruleset import (
     get_active_ruleset_version,
+    get_institution_params,
     get_jurisdiction_params,
     load_ruleset,
 )
@@ -27,9 +31,11 @@ class KYCComplianceEngine:
         "aml_screening": 0.25,
         "identity_verification": 0.20,
         "account_activity": 0.15,
-        "proof_of_address": 0.15,
+        "proof_of_address": 0.10,
         "beneficial_ownership": 0.15,
-        "data_quality": 0.10,
+        "data_quality": 0.05,
+        "source_of_wealth": 0.08,
+        "crs_fatca": 0.02,
     }
 
     DISPOSITION_ORDER = {"REJECT": 0, "REVIEW": 1, "PASS_WITH_NOTES": 2, "PASS": 3}
@@ -65,25 +71,19 @@ class KYCComplianceEngine:
             return pd.DataFrame()
 
     def _load_all_data(self, customer_id: str) -> dict:
-        screening_df = self._load_df("screenings_clean.csv")
-        identity_df = self._load_df("id_verifications_clean.csv")
-        beneficial_df = self._load_df("beneficial_ownership_clean.csv")
-        transactions_df = self._load_df("transactions_clean.csv")
-        address_df = self._load_df("documents_clean.csv")
-        customer_df = self._load_df("customers_clean.csv")
-
+        # P7-A/D: use pre-loaded instance attributes — no per-call disk reads.
+        # All keys are aliases over the same DataFrames loaded at __init__ time.
         return {
-            "screening": screening_df,
-            "identity": identity_df,
-            "beneficial_ownership": beneficial_df,
-            "transactions": transactions_df,
-            "address": address_df,
-            "customer": customer_df,
+            "screening": self.screenings,
+            "identity": self.id_verifications,
+            "beneficial_ownership": self.beneficial_owners,
+            "transactions": self.transactions,
+            "address": self.documents,
+            "customer": self.customers,
             "screenings": self.screenings,
             "id_verifications": self.id_verifications,
             "ubo": self.ubo,
-            "transactions_df": transactions_df,
-            "transactions": self.transactions,
+            "transactions_df": self.transactions,
             "documents": self.documents,
             "customers": self.customers,
         }
@@ -178,7 +178,7 @@ class KYCComplianceEngine:
             "ruleset_version": self.ruleset_version,
         }
 
-    def evaluate_customer(self, customer_id: str) -> dict:
+    def evaluate_customer(self, customer_id: str, institution_id: str = None) -> dict:
         data = self._load_all_data(customer_id)
 
         customer_row = (
@@ -196,7 +196,10 @@ class KYCComplianceEngine:
                 jurisdiction = str(cust_row.iloc[0]["jurisdiction"]).strip()
 
         jurisdiction_code = jurisdiction if jurisdiction else "UNKNOWN"
-        merged_params = get_jurisdiction_params(jurisdiction_code)
+        if institution_id is not None:
+            merged_params = get_institution_params(jurisdiction_code, institution_id)
+        else:
+            merged_params = get_jurisdiction_params(jurisdiction_code)
 
         screening_cfg = merged_params.get("screening", {})
         aml_params = self._manifest.dimension_parameters.screening.__class__(
@@ -237,12 +240,36 @@ class KYCComplianceEngine:
             poor_quality_threshold=dq_cfg.get("poor_quality_threshold", 0.2),
         )
 
+        sow_cfg = merged_params.get("source_of_wealth", {})
+        sow_params = self._manifest.dimension_parameters.source_of_wealth.__class__(
+            accepted_sow_categories=sow_cfg.get(
+                "accepted_sow_categories", ["employment_income", "inheritance"]
+            ),
+            min_evidence_docs=sow_cfg.get("min_evidence_docs", 1),
+            max_evidence_age_days=sow_cfg.get("max_evidence_age_days", 365),
+        )
+        crs_cfg = merged_params.get("crs_fatca", {})
+        crs_params = self._manifest.dimension_parameters.crs_fatca.__class__(
+            fatca_applicable_jurisdictions=crs_cfg.get(
+                "fatca_applicable_jurisdictions", ["USA"]
+            ),
+            crs_participating_jurisdictions=crs_cfg.get(
+                "crs_participating_jurisdictions",
+                ["GBR", "EU", "CHE", "SGP", "HKG", "AUS", "CAN", "UAE", "IND"],
+            ),
+            w8_w9_required_entity_types=crs_cfg.get(
+                "w8_w9_required_entity_types", ["INDIVIDUAL", "LEGAL_ENTITY"]
+            ),
+        )
+
         identity_result = IdentityVerificationDimension(identity_params).evaluate(customer_id, data)
         screening_result = AMLScreeningDimension(aml_params).evaluate(customer_id, data)
         ubo_result = BeneficialOwnershipDimension(ubo_params).evaluate(customer_id, data)
         txn_result = AccountActivityDimension(tx_params).evaluate(customer_id, data)
         doc_result = ProofOfAddressDimension(doc_params).evaluate(customer_id, data)
         dq_result = DataQualityDimension(dq_params).evaluate(customer_id, data)
+        sow_result = SourceOfWealthDimension(sow_params).evaluate(customer_id, data)
+        crs_result = CRSFATCADimension(crs_params).evaluate(customer_id, data)
 
         dimension_results = {
             "identity": identity_result,
@@ -251,34 +278,9 @@ class KYCComplianceEngine:
             "transactions": txn_result,
             "documents": doc_result,
             "data_quality": dq_result,
+            "source_of_wealth": sow_result,
+            "crs_fatca": crs_result,
         }
-
-        screening_row = self.screenings[self.screenings["customer_id"] == customer_id] if "customer_id" in self.screenings.columns else pd.DataFrame()
-        # TODO P3: residual inline AML scoring — replace with
-        # _extract_score(aml_result) after AMLScreeningDimension
-        # score field is verified in regression suite.
-        if screening_row.empty:
-            aml_status = "no_screening_data"
-            aml_score = 30.0
-            aml_finding = "No AML screening record on file — mandatory before onboarding"
-            aml_hit_status = ""
-        else:
-            s = screening_row.iloc[0]
-            screening_result_value = str(s.get("screening_result", "")).upper()
-            hit_status = str(s.get("hit_status", "")).upper()
-            aml_hit_status = hit_status
-            if screening_result_value == "MATCH" and hit_status == "CONFIRMED":
-                aml_status = "confirmed_match"
-                aml_score = 0.0
-                aml_finding = "CONFIRMED sanctions match — customer appears on restricted list"
-            elif screening_result_value == "MATCH":
-                aml_status = "match_requires_review"
-                aml_score = 50.0
-                aml_finding = "Sanctions match requires analyst investigation — not yet resolved"
-            else:
-                aml_status = "no_match"
-                aml_score = 100.0
-                aml_finding = "No match on sanctions lists — screening current"
 
         def _extract_score(
             result: dict,
@@ -292,6 +294,12 @@ class KYCComplianceEngine:
             if "score" in result and result["score"] is not None:
                 return int(result["score"])
             return fallback_pass if result.get("passed") else fallback_fail
+
+        # P7-A: AML score and status are now sourced from AMLScreeningDimension
+        aml_score = float(_extract_score(screening_result))
+        aml_status = screening_result.get("aml_status", "no_screening_data")
+        aml_hit_status = screening_result.get("aml_hit_status", "")
+        aml_finding = "; ".join(screening_result.get("findings", [])[:2])
 
         id_score = _extract_score(identity_result)
         act_score = _extract_score(txn_result)
@@ -321,6 +329,16 @@ class KYCComplianceEngine:
             "quality_rating": "Good" if dq_result.get("passed") else "Poor",
             "finding": "; ".join(dq_result.get("findings", [])[:2]),
         }
+        sow_score = float(_extract_score(sow_result))
+        sow_details = {
+            "status": sow_result.get("sow_status", "sow_not_declared"),
+            "finding": "; ".join(sow_result.get("findings", [])[:2]),
+        }
+        crs_score = float(_extract_score(crs_result))
+        crs_details = {
+            "status": crs_result.get("crs_fatca_status", "not_applicable"),
+            "finding": "; ".join(crs_result.get("findings", [])[:2]),
+        }
 
         overall_score = round(
             aml_score * self.DIMENSION_WEIGHTS["aml_screening"]
@@ -328,7 +346,9 @@ class KYCComplianceEngine:
             + act_score * self.DIMENSION_WEIGHTS["account_activity"]
             + poa_score * self.DIMENSION_WEIGHTS["proof_of_address"]
             + ubo_score * self.DIMENSION_WEIGHTS["beneficial_ownership"]
-            + dq_score * self.DIMENSION_WEIGHTS["data_quality"],
+            + dq_score * self.DIMENSION_WEIGHTS["data_quality"]
+            + sow_score * self.DIMENSION_WEIGHTS["source_of_wealth"]
+            + crs_score * self.DIMENSION_WEIGHTS["crs_fatca"],
             1,
         )
 
@@ -348,18 +368,32 @@ class KYCComplianceEngine:
             "beneficial_ownership_details": ubo_details,
             "data_quality_score": round(dq_score, 1),
             "data_quality_details": dq_details,
+            "source_of_wealth_score": round(sow_score, 1),
+            "source_of_wealth_details": sow_details,
+            "crs_fatca_score": round(crs_score, 1),
+            "crs_fatca_details": crs_details,
             "evaluation_date": datetime.now().isoformat(),
             "dimension_results": dimension_results,
         }
 
         disposition_info = self.determine_disposition(result)
-        if screening_row.empty:
+        if aml_status == "no_screening_data":
             disposition_info["disposition"] = "REVIEW"
             disposition_info["triggered_reject_rules"] = []
             disposition_info["rationale"] = "No screening record available; escalated to manual review."
         result.update(disposition_info)
         result["overall_status"] = disposition_info["disposition"]
-        return result
+        # P7-C: validate through CustomerDecision — surfaces field drift at
+        # evaluation time rather than silently downstream.
+        try:
+            validated = CustomerDecision.model_validate(result)
+            return validated.model_dump(mode="json")
+        except Exception as exc:  # pragma: no cover — schema drift is a bug
+            import logging
+            logging.getLogger(__name__).error(
+                "CustomerDecision validation failed for %s: %s", customer_id, exc
+            )
+            return result
 
     def evaluate_batch(self, customer_ids: List[str]) -> pd.DataFrame:
         results = []

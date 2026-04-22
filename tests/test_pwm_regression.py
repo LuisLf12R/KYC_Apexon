@@ -229,11 +229,12 @@ def _write_minimal_csv_fixtures(tmp_path, customer_id: str, today_str: str, conf
     screenings = pd.DataFrame([{
         "customer_id": customer_id,
         "screening_date": today_str,
-        "screening_result": "MATCH" if confirmed_match else "NO_MATCH",
-        "hit_status": "CONFIRMED" if confirmed_match else "FALSE_POSITIVE",
+        "screening_result": "EXACT_MATCH" if confirmed_match else "NO_HIT",
         "resolution_status": "RESOLVED_BLOCKED" if confirmed_match else "FALSE_POSITIVE",
+        "resolution_date": today_str,
         "list_reference": "OFAC",
-        "match_name": "Test User",
+        "match_name": "Test User" if confirmed_match else None,
+        "match_score": 0.99 if confirmed_match else None,
     }])
     idv = pd.DataFrame([{
         "customer_id": customer_id,
