@@ -7,6 +7,7 @@ from .dimensions import (
     TransactionParameters,
     DocumentParameters,
     DataQualityParameters,
+    SoWParameters,
 )
 from .ruleset import RulesetManifest, ChangelogEntry, ScoreThresholds
 from .rule_base import HardRejectRule, ReviewRule
@@ -21,6 +22,7 @@ __all__ = [
     "TransactionParameters",
     "DocumentParameters",
     "DataQualityParameters",
+    "SoWParameters",
     "RulesetManifest",
     "ChangelogEntry",
     "ScoreThresholds",

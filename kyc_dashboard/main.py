@@ -47,7 +47,7 @@ from kyc_dashboard.state import (
     _force_logout,
     can_unmask,
 )
-from kyc_dashboard.tabs import individual, batch, data_management, document_ocr, system_info, approval_queue, cases, audit_trail
+from kyc_dashboard.tabs import individual, batch, data_management, document_ocr, system_info, approval_queue, cases, audit_trail, impact_analysis
 
 # ── API keys ──────────────────────────────────────────────────────────────────
 
@@ -976,9 +976,10 @@ def render_main():
 
     st.divider()
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
         "Individual Evaluation", "Batch Results", "Data Management",
-        "Document OCR & AI", "System Info", "Approval Queue", "Cases", "Audit Trail",
+        "Document OCR & AI", "System Info", "Approval Queue", "Cases",
+        "Audit Trail", "Impact Analysis",
     ])
 
     # ════════════════════════════════════════════════════════
@@ -1007,3 +1008,6 @@ def render_main():
 
     with tab8:
         audit_trail.render(user, role, logger)
+
+    with tab9:
+        impact_analysis.render(user, role, logger)

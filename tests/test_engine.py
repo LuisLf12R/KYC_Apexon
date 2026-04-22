@@ -18,20 +18,28 @@ def test_engine_imports_without_streamlit():
 
 def test_confirmed_sanctions_match_is_reject():
     engine = make_engine()
-    # Override screening data inline
     import pandas as pd
     from datetime import datetime
+    # Use AMLScreeningDimension column schema:
+    # screening_result must be a hit-type string; resolution_status drives outcome.
     engine.screenings = pd.DataFrame([{
         "customer_id": "T001",
         "screening_date": datetime.now().isoformat(),
-        "screening_result": "MATCH",
-        "hit_status": "CONFIRMED",
-        "match_name": "Test Name",
+        "screening_result": "EXACT_MATCH",
+        "resolution_status": "RESOLVED_BLOCKED",
+        "resolution_date": datetime.now().isoformat(),
         "list_reference": "OFAC-SDN",
+        "match_name": "Test Name",
+        "match_score": 0.99,
     }])
-    engine.customers = pd.DataFrame([{"customer_id": "T001"}])
+    engine.customers = pd.DataFrame([{
+        "customer_id": "T001",
+        "risk_rating": "HIGH",
+        "jurisdiction": "USA",
+    }])
     engine.id_verifications = pd.DataFrame()
     engine.transactions = pd.DataFrame()
+    engine.documents = pd.DataFrame()
     engine.beneficial_owners = pd.DataFrame()
 
     result = engine.evaluate_customer("T001")

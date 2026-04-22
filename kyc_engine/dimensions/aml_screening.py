@@ -93,6 +93,8 @@ class AMLScreeningDimension:
                     ],
                     'remediation_required': True,
                     'next_review_date': self.evaluation_date.date().isoformat(),
+                    'aml_status': 'no_screening_data',
+                    'aml_hit_status': '',
                 }
 
             customers_df = data['customers']
@@ -142,12 +144,23 @@ class AMLScreeningDimension:
             findings = self._compile_findings(
                 screening_evaluation, rescreening_evaluation, hit_evaluation, risk_rating
             )
+
+            score = self._compute_score(screening_evaluation, rescreening_evaluation, hit_evaluation)
+            aml_status = self._compute_aml_status(screening_evaluation, hit_evaluation)
+            aml_hit_status = (
+                hit_evaluation["resolution_status"]
+                if hit_evaluation and hit_evaluation.get("resolution_status")
+                else ""
+            )
             
             return {
                 'customer_id': customer_id,
                 'dimension': 'AML Screening',
                 'passed': overall_passed,
                 'status': 'Compliant' if overall_passed else 'Non-Compliant',
+                'score': score,
+                'aml_status': aml_status,
+                'aml_hit_status': aml_hit_status,
                 
                 'evaluation_details': {
                     'risk_rating': risk_rating,
@@ -368,6 +381,41 @@ class AMLScreeningDimension:
                     )
         
         return findings
+
+    def _compute_score(
+        self,
+        screening_eval: Dict,
+        rescreening_eval: Dict,
+        hit_eval,
+    ) -> int:
+        """Map compliance outcome to a 0-100 integer score."""
+        if rescreening_eval["overdue"]:
+            return 30
+        if screening_eval["screening_status"] == "NO_HIT":
+            return 100
+        if hit_eval is None:
+            return 50
+        cs = hit_eval["compliance_status"]
+        if cs == "NON_COMPLIANT_BLOCKED_RELATIONSHIP":
+            return 0
+        if cs == "NON_COMPLIANT_PENDING_REVIEW":
+            return 50
+        if cs in ("COMPLIANT_FALSE_POSITIVE", "COMPLIANT_APPROVED_HIT"):
+            return 80
+        return 60  # resolved but unknown status
+
+    def _compute_aml_status(self, screening_eval: Dict, hit_eval) -> str:
+        """Return a canonical aml_status string for the engine."""
+        if screening_eval["screening_status"] == "NO_HIT":
+            return "no_match"
+        if hit_eval is None:
+            return "match_requires_review"
+        cs = hit_eval["compliance_status"]
+        if cs == "NON_COMPLIANT_BLOCKED_RELATIONSHIP":
+            return "confirmed_match"
+        if cs == "NON_COMPLIANT_PENDING_REVIEW":
+            return "match_requires_review"
+        return "no_match"  # false positive or approved — resolved clean
     
     def _missing_screenings_result(self, customer_id: str, risk_rating: str, jurisdiction: str) -> Dict[str, Any]:
         """Generate result for customer with no screening records."""
@@ -386,6 +434,9 @@ class AMLScreeningDimension:
             'findings': ['✗ No AML screening records found for customer'],
             'remediation_required': True,
             'next_review_date': self.evaluation_date.date().isoformat(),
+            'score': 0,
+            'aml_status': 'no_screening_data',
+            'aml_hit_status': '',
         }
     
     def _error_result(self, customer_id: str, error_msg: str) -> Dict[str, Any]:
@@ -397,6 +448,9 @@ class AMLScreeningDimension:
             'status': 'Error',
             'findings': [f"Error: {error_msg}"],
             'remediation_required': True,
+            'score': 0,
+            'aml_status': 'no_screening_data',
+            'aml_hit_status': '',
         }
 
 
