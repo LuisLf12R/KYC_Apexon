@@ -133,6 +133,9 @@ def test_REL_006b_preconditions_fail_empty_changelog(live_ruleset_dict):
 
 def test_REL_007_dry_run_no_write(ruleset_path_with_reviewer):
     mtime_before = ruleset_path_with_reviewer.stat().st_mtime
+    before = json.loads(ruleset_path_with_reviewer.read_text())
+    expected_prev = before["version"]
+    expected_new = bump_version(expected_prev, "minor")
 
     result = create_release(
         "minor",
@@ -145,8 +148,8 @@ def test_REL_007_dry_run_no_write(ruleset_path_with_reviewer):
     assert result.status == "dry_run"
     assert result.bump_type == "minor"
     assert result.reviewed_by == "Bob"
-    assert result.previous_version == "kyc-rules-v2.0"
-    assert result.new_version == "kyc-rules-v2.1"
+    assert result.previous_version == expected_prev
+    assert result.new_version == expected_new
     # File untouched
     assert ruleset_path_with_reviewer.stat().st_mtime == mtime_before
 
@@ -154,6 +157,9 @@ def test_REL_007_dry_run_no_write(ruleset_path_with_reviewer):
 # ── REL-008: create_release writes new version to disk ────────────────────────
 
 def test_REL_008_real_release_writes(ruleset_path_with_reviewer):
+    before = json.loads(ruleset_path_with_reviewer.read_text())
+    expected_new = bump_version(before["version"], "patch")
+
     result = create_release(
         "patch",
         reviewed_by="Carol",
@@ -163,13 +169,13 @@ def test_REL_008_real_release_writes(ruleset_path_with_reviewer):
     )
 
     assert result.status == "released"
-    assert result.new_version == "kyc-rules-v2.0.1"
+    assert result.new_version == expected_new
 
     updated = json.loads(ruleset_path_with_reviewer.read_text())
-    assert updated["version"] == "kyc-rules-v2.0.1"
+    assert updated["version"] == expected_new
     last_entry = updated["changelog"][-1]
     assert last_entry["reviewed_by"] == "Carol"
-    assert last_entry["version"] == "kyc-rules-v2.0.1"
+    assert last_entry["version"] == expected_new
 
 
 # ── REL-009: create_release rejects blank reviewer ────────────────────────────

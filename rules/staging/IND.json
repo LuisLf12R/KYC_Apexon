@@ -1,0 +1,29 @@
+{
+  "jurisdiction_code": "IND",
+  "regulators": [
+    "RBI"
+  ],
+  "dimension_overrides": {
+    "beneficial_ownership": {
+      "ownership_threshold_pct": 25.0
+    },
+    "identity": {
+      "doc_expiry_warning_days": 90
+    },
+    "crs_fatca": {
+      "fatca_applicable_jurisdictions": [
+        "IND"
+      ],
+      "crs_participating_jurisdictions": [
+        "IND"
+      ],
+      "w8_w9_required_entity_types": [
+        "corporation",
+        "trust",
+        "partnership"
+      ]
+    }
+  },
+  "additional_hard_reject_rules": [],
+  "additional_review_rules": []
+}

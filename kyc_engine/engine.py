@@ -395,11 +395,11 @@ class KYCComplianceEngine:
             )
             return result
 
-    def evaluate_batch(self, customer_ids: List[str]) -> pd.DataFrame:
+    def evaluate_batch(self, customer_ids: List[str], institution_id: str = None) -> pd.DataFrame:
         results = []
         for cid in customer_ids:
             try:
-                results.append(self.evaluate_customer(cid))
+                results.append(self.evaluate_customer(cid, institution_id=institution_id))
             except Exception:
                 pass
 
