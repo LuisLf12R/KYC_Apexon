@@ -4,6 +4,7 @@ KYC Compliance Engine — 6 dimensions + disposition layer.
 """
 
 from datetime import datetime
+import os
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -63,6 +64,8 @@ class KYCComplianceEngine:
             "documents": ProofOfAddressDimension(p.documents),
             "data_quality": DataQualityDimension(p.data_quality),
         }
+
+        self.institution_id = os.environ.get("KYC_INSTITUTION_ID")
 
     def _load_df(self, filename: str) -> pd.DataFrame:
         try:
@@ -179,6 +182,8 @@ class KYCComplianceEngine:
         }
 
     def evaluate_customer(self, customer_id: str, institution_id: str = None) -> dict:
+        institution_id = institution_id or self.institution_id
+
         data = self._load_all_data(customer_id)
 
         customer_row = (
@@ -396,6 +401,7 @@ class KYCComplianceEngine:
             return result
 
     def evaluate_batch(self, customer_ids: List[str], institution_id: str = None) -> pd.DataFrame:
+        institution_id = institution_id or self.institution_id
         results = []
         for cid in customer_ids:
             try:

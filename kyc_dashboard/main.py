@@ -19,7 +19,8 @@ from datetime import datetime, timezone
 import plotly.graph_objects as go
 from kyc_engine.dataframe_arrow_compat import ensure_arrow_compatible
 from kyc_dashboard.components import (
-safe_render_tab,
+    safe_render_tab,
+    render_institution_banner,
     disposition_badge,
     show_disposition,
     mask,
@@ -976,6 +977,8 @@ def render_main():
         st.info(f"Prompts loaded: {len(PROMPTS)}")
 
     st.divider()
+
+    render_institution_banner()
 
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
         "Individual Evaluation", "Batch Results", "Data Management",
