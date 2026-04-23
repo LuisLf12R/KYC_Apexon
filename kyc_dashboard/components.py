@@ -70,14 +70,11 @@ def safe_render_tab(render_fn, user, role, logger, tab_name="Tab"):
         )
         with st.expander("Error details", expanded=False):
             st.code(traceback.format_exc())
-<<<<<<< codex/print-contents-of-specified-files
-
-
 import os
+
 
 def get_configured_institution():
     """Return KYC_INSTITUTION_ID env var or None.
-
     When set, this is the production institution for this deployment.
     Dashboard uses it as the default; call-site override still possible.
     """
@@ -92,5 +89,3 @@ def render_institution_banner():
     if inst:
         st.info(f"🏢 Configured institution: **{inst}** (via KYC_INSTITUTION_ID)")
     return inst
-=======
->>>>>>> Jupyter_Branch
