@@ -70,6 +70,7 @@ def safe_render_tab(render_fn, user, role, logger, tab_name="Tab"):
         )
         with st.expander("Error details", expanded=False):
             st.code(traceback.format_exc())
+<<<<<<< codex/print-contents-of-specified-files
 
 
 import os
@@ -91,3 +92,5 @@ def render_institution_banner():
     if inst:
         st.info(f"🏢 Configured institution: **{inst}** (via KYC_INSTITUTION_ID)")
     return inst
+=======
+>>>>>>> Jupyter_Branch
