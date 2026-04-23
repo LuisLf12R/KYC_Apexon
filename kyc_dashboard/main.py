@@ -691,9 +691,10 @@ def llm_structure(raw_text, dataset_type, filename):
     cfg = get_prompt("kyc-structuring-v1.0")
     system = cfg.get("system", "Extract KYC records and return a JSON array.")
     tmpl = cfg.get("user_template", "{ocr_text}")
-    user = tmpl.format(dataset_type=dataset_type,
-                       schema_hint=KYC_SCHEMAS_HINT.get(dataset_type, ""),
-                       filename=filename, ocr_text=raw_text[:6000])
+    user = tmpl.replace("{dataset_type}", dataset_type)\
+               .replace("{schema_hint}", KYC_SCHEMAS_HINT.get(dataset_type, ""))\
+               .replace("{filename}", filename)\
+               .replace("{ocr_text}", raw_text[:6000])
     mcfg = cfg.get("model_settings", {})
     client = ac.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     resp = client.messages.create(
@@ -722,7 +723,7 @@ def autodetect(sample, filename):
         model=mcfg.get("model", "claude-opus-4-20250514"),
         max_tokens=mcfg.get("max_tokens", 50),
         system=system,
-        messages=[{"role": "user", "content": tmpl.format(filename=filename, sample=sample[:1500])}]
+        messages=[{"role": "user", "content": tmpl.replace("{filename}", filename).replace("{sample}", sample[:1500])}]
     )
     detected = resp.content[0].text.strip().lower().replace(" ", "_")
     return detected if detected in DATASET_OPTIONS else "customers"
