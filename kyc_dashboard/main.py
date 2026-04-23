@@ -803,37 +803,42 @@ def _extract_json_from_response(raw: str) -> dict:
     """
     Robustly extract a JSON object from an LLM response string.
     Handles: leading/trailing whitespace, markdown code fences,
-    partial responses starting mid-object, and extra text before/after.
+    preamble text before/after JSON, and partial responses.
     """
+    import re
+
     if not raw:
         raise ValueError("Empty response from LLM")
 
     text = raw.strip()
 
-    # Strip markdown code fences
-    if text.startswith("```"):
-        lines = text.split("\n")
-        if lines and lines[0].strip().startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        text = "\n".join(lines).strip()
+    # Strip markdown code fences (```json ... ``` or ``` ... ```)
+    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s*```$", "", text)
+    text = text.strip()
 
-    # If it doesn't start with {, try to find the first { in the text
-    if not text.startswith("{"):
-        start = text.find("{")
-        if start != -1:
-            text = text[start:]
-        else:
-            # Try wrapping loose key-value content in braces
-            text = "{" + text.strip().rstrip(",") + "}"
+    # Try direct parse first
+    try:
+        result = json.loads(text)
+        if isinstance(result, dict):
+            return result
+    except json.JSONDecodeError:
+        pass
 
-    # Find the last } to trim any trailing content
-    end = text.rfind("}")
-    if end != -1:
-        text = text[:end + 1]
+    # Extract the outermost { ... } block
+    match = re.search(r"\{[\s\S]*\}", text)
+    if match:
+        try:
+            result = json.loads(match.group(0))
+            if isinstance(result, dict):
+                return result
+        except json.JSONDecodeError:
+            pass
 
-    return json.loads(text)
+    raise ValueError(
+        f"Could not extract JSON object from LLM response "
+        f"(length={len(raw)}, starts_with={raw[:80]!r})"
+    )
 
 
 # ╔══════════════════════════════════════════════════════════════════════════════
