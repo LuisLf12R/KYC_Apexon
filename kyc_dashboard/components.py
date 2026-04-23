@@ -52,3 +52,42 @@ def st_dataframe_safe(data, **kwargs):
     if isinstance(data, pd.DataFrame):
         data = ensure_arrow_compatible(data)
     st.dataframe(data, **kwargs)
+
+def safe_render_tab(render_fn, user, role, logger, tab_name="Tab"):
+    """
+    Wrap a tab render function with error handling.
+    Catches any exception, logs it, and shows a user-friendly error banner
+    instead of crashing the entire dashboard.
+    """
+    import streamlit as st
+    import traceback
+    try:
+        render_fn(user, role, logger)
+    except Exception as exc:
+        st.error(
+            f"An error occurred in the **{tab_name}** tab. "
+            f"Please try again or contact support."
+        )
+        with st.expander("Error details", expanded=False):
+            st.code(traceback.format_exc())
+
+
+import os
+
+def get_configured_institution():
+    """Return KYC_INSTITUTION_ID env var or None.
+
+    When set, this is the production institution for this deployment.
+    Dashboard uses it as the default; call-site override still possible.
+    """
+    val = os.environ.get("KYC_INSTITUTION_ID", "").strip()
+    return val if val else None
+
+
+def render_institution_banner():
+    """Show a Streamlit info banner when running in configured mode."""
+    import streamlit as st
+    inst = get_configured_institution()
+    if inst:
+        st.info(f"🏢 Configured institution: **{inst}** (via KYC_INSTITUTION_ID)")
+    return inst
