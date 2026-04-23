@@ -52,3 +52,21 @@ def st_dataframe_safe(data, **kwargs):
     if isinstance(data, pd.DataFrame):
         data = ensure_arrow_compatible(data)
     st.dataframe(data, **kwargs)
+
+def safe_render_tab(render_fn, user, role, logger, tab_name="Tab"):
+    """
+    Wrap a tab render function with error handling.
+    Catches any exception, logs it, and shows a user-friendly error banner
+    instead of crashing the entire dashboard.
+    """
+    import streamlit as st
+    import traceback
+    try:
+        render_fn(user, role, logger)
+    except Exception as exc:
+        st.error(
+            f"An error occurred in the **{tab_name}** tab. "
+            f"Please try again or contact support."
+        )
+        with st.expander("Error details", expanded=False):
+            st.code(traceback.format_exc())

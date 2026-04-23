@@ -7,3 +7,4 @@ from sources.monitoring.monitoring import (
 )
 
 __all__ = ["MonitoringService", "MonitoringReport", "SourceChange"]
+from sources.monitoring.ubo_monitoring import UBOMonitoringService, UBOMonitoringReport, UBOChange
