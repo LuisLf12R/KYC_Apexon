@@ -100,3 +100,73 @@ def render(user, role, logger):
             st.write(report.skipped_sources)
         else:
             st.write(["None"])
+
+    # ── UBO Change Detection ───────────────────────────────────────────────
+    st.divider()
+    st.subheader("UBO Change Detection")
+    st.caption(
+        "Compare current beneficial-ownership records against a snapshot "
+        "to identify customers whose UBO structure has changed."
+    )
+
+    from sources.monitoring.ubo_monitoring import UBOMonitoringService
+
+    if "ubo_snapshot" not in st.session_state:
+        st.session_state.ubo_snapshot = None
+    if "ubo_report" not in st.session_state:
+        st.session_state.ubo_report = None
+
+    ubo_df = st.session_state.get("beneficial_owners_df")
+    if ubo_df is None:
+        engine = st.session_state.get("engine")
+        if engine is not None and hasattr(engine, "beneficial_owners"):
+            ubo_df = engine.beneficial_owners
+
+    ubo_svc = UBOMonitoringService()
+
+    uc1, uc2 = st.columns(2)
+    with uc1:
+        if st.button("Take UBO Snapshot", type="secondary", use_container_width=True):
+            if ubo_df is not None and not ubo_df.empty:
+                st.session_state.ubo_snapshot = ubo_svc.snapshot(ubo_df)
+                st.success("UBO snapshot captured.")
+            else:
+                st.warning("No UBO data available to snapshot.")
+
+    with uc2:
+        ubo_run_disabled = st.session_state.ubo_snapshot is None
+        if st.button(
+            "Run UBO Check",
+            type="primary",
+            use_container_width=True,
+            disabled=ubo_run_disabled,
+        ):
+            ubo_report = ubo_svc.check(st.session_state.ubo_snapshot, ubo_df)
+            st.session_state.ubo_report = ubo_report
+            st.success("UBO monitoring check complete.")
+
+    if st.session_state.ubo_snapshot is None:
+        st.info("No UBO snapshot yet. Click **Take UBO Snapshot** to initialize.")
+
+    ubo_report = st.session_state.ubo_report
+    if ubo_report is not None:
+        um1, um2 = st.columns(2)
+        um1.metric("UBO Changes", ubo_report.change_count)
+        um2.metric("Affected Customers", ubo_report.customer_count)
+
+        if ubo_report.changes:
+            ubo_rows = [
+                {
+                    "customer_id": c.customer_id,
+                    "owner_name": c.owner_name,
+                    "change_type": c.change_type,
+                    "previous": c.previous_value or "",
+                    "current": c.current_value or "",
+                }
+                for c in ubo_report.changes
+            ]
+            st.dataframe(
+                pd.DataFrame(ubo_rows), use_container_width=True, hide_index=True
+            )
+        else:
+            st.info("No UBO changes detected.")

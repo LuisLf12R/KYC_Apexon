@@ -67,7 +67,7 @@ class KYCComplianceEngine:
     def _load_df(self, filename: str) -> pd.DataFrame:
         try:
             return pd.read_csv(self.data_clean_dir / filename)
-        except FileNotFoundError:
+        except (FileNotFoundError, pd.errors.EmptyDataError):
             return pd.DataFrame()
 
     def _load_all_data(self, customer_id: str) -> dict:

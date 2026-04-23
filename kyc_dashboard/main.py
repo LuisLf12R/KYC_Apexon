@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 import plotly.graph_objects as go
 from kyc_engine.dataframe_arrow_compat import ensure_arrow_compatible
 from kyc_dashboard.components import (
+safe_render_tab,
     disposition_badge,
     show_disposition,
     mask,
