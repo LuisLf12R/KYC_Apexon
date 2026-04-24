@@ -10,10 +10,7 @@ def render(user, role, logger):
     import kyc_dashboard.main as a
 
     ns = dict(a.__dict__)
-    ns.update({'user': user, 'role': role, 'logger': logger})
-    ns["_get_available_institutions"] = _get_available_institutions
-<<<<<<< codex/add-pdfplumber-to-requirements.txt
-    ns["get_configured_institution"] = get_configured_institution
-=======
->>>>>>> Jupyter_Branch
-    exec(TAB_CODE, ns, ns)
+   ns.update({'user': user, 'role': role, 'logger': logger})
+        ns["_get_available_institutions"] = _get_available_institutions
+        ns["get_configured_institution"] = get_configured_institution
+        exec(TAB_CODE, ns, ns)
