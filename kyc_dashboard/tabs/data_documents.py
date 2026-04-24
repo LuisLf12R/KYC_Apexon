@@ -17,6 +17,26 @@ import pandas as pd
 import streamlit as st
 
 
+def _clear_batch_queue():
+    """Clear Data & Documents uploader/session queue state."""
+    for key in list(st.session_state.keys()):
+        if (
+            key.startswith("doc_type_hint_")
+            or key.startswith("customer_hint_")
+            or key.startswith("analyze_doc_")
+            or key.startswith("sensitivity_override_")
+            or key.startswith("ocr_correction_")
+            or key.startswith("confirm_link_")
+            or key.startswith("pick_other_")
+            or key.startswith("manual_select_")
+            or key.startswith("multi_select_")
+            or key.startswith("confirm_multi_")
+            or key.startswith("no_match_select_")
+            or key.startswith("manual_link_")
+        ):
+            del st.session_state[key]
+
+
 def _fuzzy_match_customer(
     extracted_name: Optional[str],
     extracted_dob: Optional[str],
@@ -198,6 +218,10 @@ def _render_structured_section(files):
     _seed_structured_provenance()
     st.session_state.latest_discrepancy_report = _collect_discrepancy_report()
     st.success("Engine loaded — " + str(len(customers)) + " customers ready.")
+    st.success("Data loaded successfully. You can now run evaluations in the Individual or Batch tabs.")
+    if not st.session_state.get("data_loaded_flag"):
+        st.session_state["data_loaded_flag"] = True
+        st.rerun()
 
 
 def _render_document_section(files):
@@ -218,15 +242,19 @@ def _render_document_section(files):
 
     st.subheader("Document Analysis")
 
-    for i, uploaded_file in enumerate(files):
-        with st.expander("📄 " + uploaded_file.name, expanded=True):
-            fbytes = uploaded_file.read()
+    tab_labels = [f.name for f in files]
+    doc_tabs = st.tabs(tab_labels)
+
+    for i, (tab, uploaded_file) in enumerate(zip(doc_tabs, files)):
+        with tab:
+            fbytes = uploaded_file.getvalue()
             if not fbytes:
                 st.warning("Could not read file bytes for " + uploaded_file.name)
                 continue
 
             try:
-                text = run_ocr(fbytes, uploaded_file.name)
+                with st.spinner("📝 Extracting text from document..."):
+                    text = run_ocr(fbytes, uploaded_file.name)
             except Exception as exc:
                 st.error("OCR failed for " + uploaded_file.name + ": " + str(exc))
                 continue
@@ -236,15 +264,33 @@ def _render_document_section(files):
 
             sensitivity_flags = detect_sensitivity(text)
             if sensitivity_flags:
-                st.markdown("**Sensitivity:**")
-                st.json(sensitivity_summary(sensitivity_flags))
+                summary = sensitivity_summary(sensitivity_flags)
+                if isinstance(summary, dict):
+                    categories = summary.get("categories", []) or []
+                    cat_str = ", ".join(str(c) for c in categories) if categories else "Unknown"
+                    st.markdown("**Sensitivity:** " + cat_str + " detected")
+                    messages = [str(f.get("message", "")).strip() for f in summary.get("flags", []) if isinstance(f, dict)]
+                    if messages:
+                        st.caption(messages[0])
+                else:
+                    st.markdown("**Sensitivity:** " + str(summary))
                 if should_block(sensitivity_flags):
+                    st.error(
+                        "This document contains SAMPLE or SPECIMEN markers, which typically means "
+                        "it is not an original document and should not be used for compliance verification."
+                    )
+                    st.markdown(
+                        "If you believe this is a legitimate document incorrectly flagged, "
+                        "you can override the block by providing a justification below. "
+                        "This will be logged in the audit trail."
+                    )
                     override_reason = st.text_input(
-                        "Override reason (required to proceed with blocked document):",
+                        "Justification to proceed despite SAMPLE flag:",
                         key="sensitivity_override_" + str(i),
+                        placeholder="e.g., 'Verified with issuer — watermark is from scanning process'",
                     )
                     if not override_reason:
-                        st.error("This document is blocked due to SAMPLE/SPECIMEN markers. Enter a reason to override, or skip this document.")
+                        st.warning("Provide justification to continue analysis for this blocked document.")
                         continue
                     st.info("Override accepted: " + override_reason)
                 elif requires_review(sensitivity_flags):
@@ -273,12 +319,13 @@ def _render_document_section(files):
             touch()
             log("LLM_CALL", details={"filename": uploaded_file.name, "doc_type": doc_type_hint})
             try:
-                document_type, extracted_fields, confidences, analysis = _extract_document_fields(
-                    text,
-                    uploaded_file.name,
-                    doc_type_hint,
-                    customer_hint,
-                )
+                with st.spinner("🔍 AI Agent analyzing document — extracting fields and assessing confidence..."):
+                    document_type, extracted_fields, confidences, analysis = _extract_document_fields(
+                        text,
+                        uploaded_file.name,
+                        doc_type_hint,
+                        customer_hint,
+                    )
             except Exception as exc:
                 st.error("AI analysis failed: " + str(exc))
                 continue
@@ -342,6 +389,31 @@ def _render_document_section(files):
                     confidences[field_key] = 1.0
                 except Exception:
                     pass
+
+            with st.expander("Preview Original Document", expanded=False):
+                filename_lower = uploaded_file.name.lower()
+                if filename_lower.endswith((".png", ".jpg", ".jpeg", ".tiff")):
+                    st.image(fbytes, caption=uploaded_file.name, use_container_width=True)
+                elif filename_lower.endswith(".pdf"):
+                    st.download_button(
+                        "Download PDF to view",
+                        data=fbytes,
+                        file_name=uploaded_file.name,
+                        mime="application/pdf",
+                        key="preview_download_" + str(i),
+                    )
+                    st.caption("PDF preview: extracted text shown above in the fields table.")
+                elif filename_lower.endswith(".docx"):
+                    st.caption("Word document preview not available. Use the extracted fields above or download to verify.")
+                    st.download_button(
+                        "Download .docx to view",
+                        data=fbytes,
+                        file_name=uploaded_file.name,
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        key="preview_download_docx_" + str(i),
+                    )
+                else:
+                    st.caption("Preview not available for this file type.")
 
             customers_df = st.session_state.get("customers", st.session_state.get("customers_df", None))
             if customers_df is None or getattr(customers_df, "empty", True):
@@ -556,12 +628,25 @@ def render(user=None, role=None, logger=None):
     st.header("Data & Documents")
     st.caption("Upload structured data files (CSV, Excel, JSON) or documents (PDF, images, Word) for analysis and customer linking.")
 
-    uploaded_files = st.file_uploader(
-        "Upload Files",
-        type=["csv", "xlsx", "xls", "json", "jsonl", "pdf", "png", "jpg", "jpeg", "tiff", "docx"],
-        accept_multiple_files=True,
-        key="data_documents_uploader",
-    )
+    if "uploader_key_counter" not in st.session_state:
+        st.session_state["uploader_key_counter"] = 0
+    uploader_key = "data_documents_uploader_" + str(st.session_state["uploader_key_counter"])
+
+    col_upload, col_clear = st.columns([6, 1])
+    with col_upload:
+        uploaded_files = st.file_uploader(
+            "Upload Files",
+            type=["csv", "xlsx", "xls", "json", "jsonl", "pdf", "png", "jpg", "jpeg", "tiff", "docx"],
+            accept_multiple_files=True,
+            key=uploader_key,
+        )
+    with col_clear:
+        st.markdown("")
+        st.markdown("")
+        if st.button("🗑️ Clear All", key="clear_all_uploads"):
+            st.session_state["uploader_key_counter"] += 1
+            _clear_batch_queue()
+            st.rerun()
 
     if not uploaded_files:
         st.info("Upload files to get started. You can mix structured data files and documents in a single upload.")

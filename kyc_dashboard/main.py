@@ -143,21 +143,25 @@ def get_prompt(pid):
 
 @st.cache_data
 def load_users():
-    try:
-        p = Path.cwd() / "users.json"
-        if p.exists():
-            with open(p) as f:
-                data = json.load(f)
-            return {u["username"]: u for u in data.get("users", []) if u.get("active", True)}
-    except Exception:
-        pass
-    return {
+    default_users = {
         "admin":    {"user_id": "fb_admin",   "username": "admin",    "password": "admin123",   "role": "Admin",   "full_name": "Administrator"},
         "manager":  {"user_id": "fb_mgr",     "username": "manager",  "password": "mgr123",     "role": "Manager", "full_name": "Compliance Manager"},
         "analyst1": {"user_id": "fb_a1",      "username": "analyst1", "password": "analyst123", "role": "Analyst", "full_name": "KYC Analyst One"},
         "analyst2": {"user_id": "fb_a2",      "username": "analyst2", "password": "analyst456", "role": "Analyst", "full_name": "KYC Analyst Two"},
         "viewer":   {"user_id": "fb_viewer",  "username": "viewer",   "password": "viewer123",  "role": "Viewer",  "full_name": "Read Only Reviewer"},
     }
+    try:
+        p = Path.cwd() / "users.json"
+        if p.exists():
+            with open(p) as f:
+                data = json.load(f)
+            users = {u["username"]: u for u in data.get("users", []) if u.get("active", True)}
+            if "admin" not in users:
+                users["admin"] = default_users["admin"]
+            return users
+    except Exception:
+        pass
+    return default_users
 
 def authenticate(username, password):
     users = load_users()
@@ -924,9 +928,9 @@ def render_login():
                 st.session_state.audit_logger = logger
                 st.session_state.last_activity = datetime.now(timezone.utc)
                 st.session_state.timeout_warning_logged = False
-                st.session_state.pii_masked = True
+                st.session_state.pii_masked = user.get("role") != "Admin"
                 logger.log("LOGIN", details={"username": user["username"],
-                                              "role": user["role"], "pii_masked_on_login": True})
+                                              "role": user["role"], "pii_masked_on_login": st.session_state.pii_masked})
                 _try_autoload_engine()
                 st.rerun()
             else:
