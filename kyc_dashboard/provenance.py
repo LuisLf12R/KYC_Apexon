@@ -27,6 +27,11 @@ class ProvenanceRecord:
     confidence: Optional[float] = None
     timestamp: str = field(default_factory=lambda: datetime.datetime.utcnow().isoformat())
 
+    @property
+    def source(self) -> str:
+        """Compatibility alias for legacy provenance consumers."""
+        return self.source_type
+
 
 @dataclass
 class Discrepancy:
@@ -77,6 +82,84 @@ class ProvenanceStore:
 
     def clear(self) -> None:
         self._records.clear()
+
+    # ── Legacy compatibility helpers (used by main.py tab code) ────────────
+    def set_field(
+        self,
+        customer_id: str,
+        field_name: str,
+        value: Any,
+        *,
+        source: str = "User-Provided",
+        source_file: str = "",
+        confidence: Optional[float] = None,
+    ) -> ProvenanceRecord:
+        rec = ProvenanceRecord(
+            customer_id=str(customer_id),
+            field_name=str(field_name),
+            value=value,
+            source_type=source,
+            source_file=source_file,
+            confidence=_normalize_confidence(confidence),
+        )
+        self.add_record(rec)
+        return rec
+
+    def get_field_history(self, customer_id: str, field_name: str) -> List[ProvenanceRecord]:
+        return self.get_records(str(customer_id), str(field_name))
+
+    def get_customer_ids(self) -> List[str]:
+        return self.get_all_customers()
+
+    def get_all_fields(self, customer_id: str) -> Dict[str, ProvenanceRecord]:
+        latest_by_field: Dict[str, ProvenanceRecord] = {}
+        for rec in self.get_records(str(customer_id)):
+            prev = latest_by_field.get(rec.field_name)
+            if prev is None or str(rec.timestamp) >= str(prev.timestamp):
+                latest_by_field[rec.field_name] = rec
+        return latest_by_field
+
+    def detect_discrepancies(self, customer_id: str) -> List[Dict[str, Any]]:
+        by_field: Dict[str, List[ProvenanceRecord]] = {}
+        for rec in self.get_records(str(customer_id)):
+            by_field.setdefault(rec.field_name, []).append(rec)
+
+        discrepancies: List[Dict[str, Any]] = []
+        for field_name, recs in by_field.items():
+            values_by_source: Dict[str, Dict[str, Any]] = {}
+            unique_values = set()
+            for rec in recs:
+                src = rec.source_type or "Unknown"
+                values_by_source[src] = {
+                    "value": rec.value,
+                    "source_file": rec.source_file,
+                    "confidence": rec.confidence,
+                    "timestamp": rec.timestamp,
+                }
+                unique_values.add(str(rec.value).strip().lower() if rec.value is not None else "")
+            if len(unique_values) > 1 and len(values_by_source) > 1:
+                discrepancies.append(
+                    {
+                        "field_name": field_name,
+                        "values_by_source": values_by_source,
+                    }
+                )
+        return discrepancies
+
+    def get_customer_history_rows(self, customer_id: str) -> List[Dict[str, Any]]:
+        rows: List[Dict[str, Any]] = []
+        for rec in sorted(self.get_records(str(customer_id)), key=lambda r: str(r.timestamp)):
+            rows.append(
+                {
+                    "Timestamp": rec.timestamp,
+                    "Field": rec.field_name,
+                    "Value": rec.value,
+                    "Source": rec.source_type,
+                    "Source File": rec.source_file,
+                    "Confidence": rec.confidence,
+                }
+            )
+        return rows
 
 
 def _normalize_confidence(value: Optional[float]) -> Optional[float]:
@@ -220,6 +303,7 @@ def get_provenance_store() -> ProvenanceStore:
     """Get or create the ProvenanceStore in Streamlit session state."""
     import streamlit as st
 
-    if "provenance_store" not in st.session_state:
+    existing = st.session_state.get("provenance_store", None)
+    if existing is None or not isinstance(existing, ProvenanceStore):
         st.session_state["provenance_store"] = ProvenanceStore()
     return st.session_state["provenance_store"]
