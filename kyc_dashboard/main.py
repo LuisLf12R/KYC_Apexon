@@ -181,11 +181,9 @@ def _ensure_runtime_action_types():
 
 
 def _get_provenance_store():
-    if st.session_state.provenance_store is None:
-        sys.path.insert(0, str(Path.cwd() / "src"))
-        from kyc_audit.provenance import CustomerProvenance
-        st.session_state.provenance_store = CustomerProvenance()
-    return st.session_state.provenance_store
+    from kyc_dashboard.provenance import get_provenance_store
+
+    return get_provenance_store()
 
 def _seed_structured_provenance():
     """Seed user-provided structured fields into provenance once."""
