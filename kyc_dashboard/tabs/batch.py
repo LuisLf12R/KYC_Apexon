@@ -8,9 +8,8 @@ TAB_CODE = 'touch()\nif not st.session_state.engines_initialized:\n    st.warnin
 
 def render(user, role, logger):
     import kyc_dashboard.main as a
-
     ns = dict(a.__dict__)
-   ns.update({'user': user, 'role': role, 'logger': logger})
-        ns["_get_available_institutions"] = _get_available_institutions
-        ns["get_configured_institution"] = get_configured_institution
-        exec(TAB_CODE, ns, ns)
+    ns.update({'user': user, 'role': role, 'logger': logger})
+    ns["_get_available_institutions"] = _get_available_institutions
+    ns["get_configured_institution"] = get_configured_institution
+    exec(TAB_CODE, ns, ns)
