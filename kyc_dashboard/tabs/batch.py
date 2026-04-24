@@ -11,4 +11,5 @@ def render(user, role, logger):
 
     ns = dict(a.__dict__)
     ns.update({'user': user, 'role': role, 'logger': logger})
+    ns["_get_available_institutions"] = _get_available_institutions
     exec(TAB_CODE, ns, ns)
