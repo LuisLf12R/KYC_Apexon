@@ -107,6 +107,7 @@ if not keys_ok:
 # produce invalid output and must be regenerated.
 if "_schema_cache_purged" not in st.session_state:
     try:
+        sys.path.insert(0, str(Path.cwd() / "src"))
         SchemaHarmonizer = __import__("src.schema_harmonizer", fromlist=["SchemaHarmonizer"]).SchemaHarmonizer
         SchemaHarmonizer().purge_stale_cache()
     except Exception:
@@ -738,9 +739,16 @@ def process_file(file_obj, filename, dataset_type):
                 details={"filename": filename, "detected": dataset_type})
         # Harmonize to canonical schema BEFORE clean_dataframe.
         # HarmonizationRejected propagates; generic errors log and fall back.
-        SchemaHarmonizer = __import__("src.schema_harmonizer", fromlist=["SchemaHarmonizer"]).SchemaHarmonizer
-        harmonizer = SchemaHarmonizer()
-        if dataset_type in harmonizer.SUPPORTED_TARGETS:
+        try:
+            sys.path.insert(0, str(Path.cwd() / "src"))
+            SchemaHarmonizer = __import__("src.schema_harmonizer", fromlist=["SchemaHarmonizer"]).SchemaHarmonizer
+        except (ImportError, ModuleNotFoundError):
+            SchemaHarmonizer = None
+        if SchemaHarmonizer is not None:
+            harmonizer = SchemaHarmonizer()
+        else:
+            harmonizer = None
+        if harmonizer is not None and dataset_type in harmonizer.SUPPORTED_TARGETS:
             df_before_cols = list(df.columns)
             try:
                 df, harmonize_meta = harmonizer.normalize(df, dataset_type)
