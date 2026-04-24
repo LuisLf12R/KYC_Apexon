@@ -188,7 +188,7 @@ def render(user, role, logger):
         return colours.get(str(val).upper(), "")
 
     st.dataframe(
-        flip_df.style.applymap(
+        flip_df.style.map(
             _colour_disposition,
             subset=["Current Disposition", "New Disposition"],
         ),
