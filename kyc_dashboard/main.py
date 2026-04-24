@@ -49,7 +49,7 @@ from kyc_dashboard.state import (
     _force_logout,
     can_unmask,
 )
-from kyc_dashboard.tabs import individual, batch, data_management, document_ocr, system_info, approval_queue, cases, audit_trail, impact_analysis, monitoring
+from kyc_dashboard.tabs import individual, batch, data_documents, system_info, approval_queue, cases, audit_trail, impact_analysis, monitoring
 
 # ── API keys ──────────────────────────────────────────────────────────────────
 
@@ -682,6 +682,23 @@ def run_ocr(file_bytes, filename):
     """
     from google.cloud import vision as gv
 
+    if filename.lower().endswith(".docx"):
+        try:
+            import docx
+        except ImportError:
+            st.error("Install python-docx: pip install python-docx")
+            return None
+        try:
+            doc = docx.Document(io.BytesIO(file_bytes))
+            text = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
+            if not text.strip():
+                st.warning("No text found in .docx file.")
+                return None
+            return text
+        except Exception as e:
+            st.error("Failed to read .docx file: " + str(e))
+            return None
+
     if Path(filename).suffix.lower() == ".pdf":
         # --- PDF path: text extraction only, no Vision API ---
         try:
@@ -1009,7 +1026,7 @@ def render_main():
             n = len(st.session_state.customers_df)
             st.success(f"Engine Ready — {n:,} customers loaded")
         else:
-            st.warning("No data — use Data Management")
+            st.warning("No data — use Data & Documents")
     with s2:
         st.info(f"Ruleset: {RULESET_VERSION}")
     with s3:
@@ -1021,9 +1038,9 @@ def render_main():
 
     render_institution_banner()
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
-        "Individual Evaluation", "Batch Results", "Data Management",
-        "Document OCR & AI", "System Info", "Approval Queue", "Cases",
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+        "Individual Evaluation", "Batch Results", "Data & Documents",
+        "System Info", "Approval Queue", "Cases",
         "Audit Trail", "Impact Analysis", "Source Monitoring",
     ])
 
@@ -1037,25 +1054,22 @@ def render_main():
         batch.render(user, role, logger)
 
     with tab3:
-        data_management.render(user, role, logger)
+        data_documents.render(user, role, logger)
 
     with tab4:
-        document_ocr.render(user, role, logger)
-
-    with tab5:
         system_info.render(user, role, logger)
 
-    with tab6:
+    with tab5:
         approval_queue.render(user, role, logger)
 
-    with tab7:
+    with tab6:
         cases.render(user, role, logger)
 
-    with tab8:
+    with tab7:
         audit_trail.render(user, role, logger)
 
-    with tab9:
+    with tab8:
         impact_analysis.render(user, role, logger)
 
-    with tab10:
+    with tab9:
         monitoring.render(user, role, logger)

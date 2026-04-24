@@ -4,6 +4,7 @@ pyarrow>=14.0.0
 plotly>=5.14.0
 anthropic>=0.7.0
 google-cloud-vision>=3.4.0
+python-docx
 python-dotenv>=1.0.0
 openpyxl>=3.1.0
 flask>=2.3.0
