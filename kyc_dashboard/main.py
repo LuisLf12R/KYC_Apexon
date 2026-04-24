@@ -741,12 +741,9 @@ def process_file(file_obj, filename, dataset_type):
         # HarmonizationRejected propagates; generic errors log and fall back.
         try:
             sys.path.insert(0, str(Path.cwd() / "src"))
-            SchemaHarmonizer = __import__("src.schema_harmonizer", fromlist=["SchemaHarmonizer"]).SchemaHarmonizer
-        except (ImportError, ModuleNotFoundError):
-            SchemaHarmonizer = None
-        if SchemaHarmonizer is not None:
-            harmonizer = SchemaHarmonizer()
-        else:
+            _SH = __import__("src.schema_harmonizer", fromlist=["SchemaHarmonizer"]).SchemaHarmonizer
+            harmonizer = _SH()
+        except Exception:
             harmonizer = None
         if harmonizer is not None and dataset_type in harmonizer.SUPPORTED_TARGETS:
             df_before_cols = list(df.columns)
@@ -767,26 +764,26 @@ def process_file(file_obj, filename, dataset_type):
                     },
                 )
             except Exception as rej:
-                log(
-                    "SCHEMA_HARMONIZE_REJECTED",
-                    details={
-                        "filename": filename,
-                        "target_type": dataset_type,
-                        "report": rej.report,
-                    },
-                )
-                # Re-raise so caller can render a dedicated rejection UI
-                raise
-            except Exception as e:
-                log(
-                    "SCHEMA_HARMONIZE_FAILED",
-                    details={
-                        "filename": filename,
-                        "target_type": dataset_type,
-                        "error": str(e),
-                    },
-                )
-                # Generic failure: continue with raw DataFrame
+                if hasattr(rej, "report"):
+                    log(
+                        "SCHEMA_HARMONIZE_REJECTED",
+                        details={
+                            "filename": filename,
+                            "target_type": dataset_type,
+                            "report": rej.report,
+                        },
+                    )
+                    raise
+                else:
+                    log(
+                        "SCHEMA_HARMONIZE_FAILED",
+                        details={
+                            "filename": filename,
+                            "target_type": dataset_type,
+                            "error": str(rej),
+                        },
+                    )
+
 
         df = clean_dataframe(df, dataset_type)
         return df, "direct", dataset_type, f"Loaded {len(df)} rows"
