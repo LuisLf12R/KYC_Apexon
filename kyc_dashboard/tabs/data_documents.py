@@ -444,6 +444,7 @@ def _render_document_section(files):
                         mime="application/pdf",
                         key="preview_download_" + str(i),
                     )
+                    st.caption("PDF preview: extracted text shown above in the fields table.")
                 elif filename_lower.endswith(".docx"):
                     st.caption("Word document preview not available. Use the extracted fields above or download to verify.")
                     st.download_button(
