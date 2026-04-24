@@ -10,6 +10,7 @@ Uses proper render() function (architectural decision #14 — no TAB_CODE exec).
 """
 
 import datetime
+import base64
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -34,6 +35,13 @@ def _clear_batch_queue():
             or key.startswith("no_match_select_")
             or key.startswith("manual_link_")
         ):
+            del st.session_state[key]
+
+
+def _clear_document_analysis_cache():
+    """Clear OCR/sensitivity/extraction caches for uploaded documents."""
+    for key in list(st.session_state.keys()):
+        if key.startswith("doc_extraction_") or key.startswith("doc_ocr_") or key.startswith("doc_sensitivity_"):
             del st.session_state[key]
 
 
@@ -247,22 +255,37 @@ def _render_document_section(files):
 
     for i, (tab, uploaded_file) in enumerate(zip(doc_tabs, files)):
         with tab:
-            fbytes = uploaded_file.getvalue()
+            uploaded_file.seek(0)
+            fbytes = uploaded_file.read()
             if not fbytes:
                 st.warning("Could not read file bytes for " + uploaded_file.name)
                 continue
 
-            try:
-                with st.spinner("📝 Extracting text from document..."):
-                    text = run_ocr(fbytes, uploaded_file.name)
-            except Exception as exc:
-                st.error("OCR failed for " + uploaded_file.name + ": " + str(exc))
-                continue
+            file_cache_key = uploaded_file.name
+            ocr_cache_key = "doc_ocr_" + file_cache_key
+            sens_cache_key = "doc_sensitivity_" + file_cache_key
+            extraction_cache_key = "doc_extraction_" + file_cache_key
+
+            if ocr_cache_key in st.session_state:
+                text = st.session_state[ocr_cache_key]
+            else:
+                try:
+                    with st.spinner("📝 Extracting text from document..."):
+                        text = run_ocr(fbytes, uploaded_file.name)
+                    st.session_state[ocr_cache_key] = text
+                except Exception as exc:
+                    st.error("OCR failed for " + uploaded_file.name + ": " + str(exc))
+                    continue
             if text is None or not text.strip():
                 st.warning("Could not extract text from " + uploaded_file.name)
                 continue
 
-            sensitivity_flags = detect_sensitivity(text)
+            if sens_cache_key in st.session_state:
+                sensitivity_flags = st.session_state[sens_cache_key]
+            else:
+                sensitivity_flags = detect_sensitivity(text)
+                st.session_state[sens_cache_key] = sensitivity_flags
+
             if sensitivity_flags:
                 summary = sensitivity_summary(sensitivity_flags)
                 if isinstance(summary, dict):
@@ -313,21 +336,34 @@ def _render_document_section(files):
             )
             customer_hint = st.text_input("Customer ID Hint (optional)", key="customer_hint_" + str(i))
 
-            if not st.button("Analyze " + uploaded_file.name, key="analyze_doc_" + str(i)):
-                continue
-
-            touch()
-            log("LLM_CALL", details={"filename": uploaded_file.name, "doc_type": doc_type_hint})
-            try:
-                with st.spinner("🔍 AI Agent analyzing document — extracting fields and assessing confidence..."):
-                    document_type, extracted_fields, confidences, analysis = _extract_document_fields(
-                        text,
-                        uploaded_file.name,
-                        doc_type_hint,
-                        customer_hint,
-                    )
-            except Exception as exc:
-                st.error("AI analysis failed: " + str(exc))
+            analyze_clicked = st.button("Analyze " + uploaded_file.name, key="analyze_doc_" + str(i))
+            if extraction_cache_key in st.session_state:
+                cached = st.session_state[extraction_cache_key]
+                document_type = cached["document_type"]
+                extracted_fields = dict(cached["extracted_fields"])
+                confidences = dict(cached["confidences"])
+                analysis = dict(cached["analysis"])
+            elif analyze_clicked:
+                touch()
+                log("LLM_CALL", details={"filename": uploaded_file.name, "doc_type": doc_type_hint})
+                try:
+                    with st.spinner("🔍 AI Agent analyzing document — extracting fields and assessing confidence..."):
+                        document_type, extracted_fields, confidences, analysis = _extract_document_fields(
+                            text,
+                            uploaded_file.name,
+                            doc_type_hint,
+                            customer_hint,
+                        )
+                    st.session_state[extraction_cache_key] = {
+                        "document_type": document_type,
+                        "extracted_fields": dict(extracted_fields),
+                        "confidences": dict(confidences),
+                        "analysis": dict(analysis),
+                    }
+                except Exception as exc:
+                    st.error("AI analysis failed: " + str(exc))
+                    continue
+            else:
                 continue
 
             conf = float(analysis.get("overall_confidence", 0) or 0)
@@ -395,8 +431,14 @@ def _render_document_section(files):
                 if filename_lower.endswith((".png", ".jpg", ".jpeg", ".tiff")):
                     st.image(fbytes, caption=uploaded_file.name, use_container_width=True)
                 elif filename_lower.endswith(".pdf"):
+                    b64 = base64.b64encode(fbytes).decode("utf-8")
+                    pdf_display = (
+                        '<iframe src="data:application/pdf;base64,' + b64 + '" '
+                        'width="100%" height="600" type="application/pdf"></iframe>'
+                    )
+                    st.markdown(pdf_display, unsafe_allow_html=True)
                     st.download_button(
-                        "Download PDF to view",
+                        "Download PDF",
                         data=fbytes,
                         file_name=uploaded_file.name,
                         mime="application/pdf",
@@ -646,11 +688,17 @@ def render(user=None, role=None, logger=None):
         if st.button("🗑️ Clear All", key="clear_all_uploads"):
             st.session_state["uploader_key_counter"] += 1
             _clear_batch_queue()
+            _clear_document_analysis_cache()
             st.rerun()
 
     if not uploaded_files:
         st.info("Upload files to get started. You can mix structured data files and documents in a single upload.")
         return
+
+    upload_key = "batch_processed_" + "_".join(sorted(f.name for f in uploaded_files))
+    if st.session_state.get("last_upload_key") != upload_key:
+        _clear_document_analysis_cache()
+        st.session_state["last_upload_key"] = upload_key
 
     structured_files = []
     document_files = []
