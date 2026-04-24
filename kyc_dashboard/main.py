@@ -107,6 +107,7 @@ if not keys_ok:
 # produce invalid output and must be regenerated.
 if "_schema_cache_purged" not in st.session_state:
     try:
+        sys.path.insert(0, str(Path.cwd() / "src"))
         SchemaHarmonizer = __import__("src.schema_harmonizer", fromlist=["SchemaHarmonizer"]).SchemaHarmonizer
         SchemaHarmonizer().purge_stale_cache()
     except Exception:
@@ -691,9 +692,10 @@ def llm_structure(raw_text, dataset_type, filename):
     cfg = get_prompt("kyc-structuring-v1.0")
     system = cfg.get("system", "Extract KYC records and return a JSON array.")
     tmpl = cfg.get("user_template", "{ocr_text}")
-    user = tmpl.format(dataset_type=dataset_type,
-                       schema_hint=KYC_SCHEMAS_HINT.get(dataset_type, ""),
-                       filename=filename, ocr_text=raw_text[:6000])
+    user = tmpl.replace("{dataset_type}", dataset_type)\
+               .replace("{schema_hint}", KYC_SCHEMAS_HINT.get(dataset_type, ""))\
+               .replace("{filename}", filename)\
+               .replace("{ocr_text}", raw_text[:6000])
     mcfg = cfg.get("model_settings", {})
     client = ac.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     resp = client.messages.create(
@@ -722,7 +724,7 @@ def autodetect(sample, filename):
         model=mcfg.get("model", "claude-opus-4-20250514"),
         max_tokens=mcfg.get("max_tokens", 50),
         system=system,
-        messages=[{"role": "user", "content": tmpl.format(filename=filename, sample=sample[:1500])}]
+        messages=[{"role": "user", "content": tmpl.replace("{filename}", filename).replace("{sample}", sample[:1500])}]
     )
     detected = resp.content[0].text.strip().lower().replace(" ", "_")
     return detected if detected in DATASET_OPTIONS else "customers"
@@ -737,9 +739,13 @@ def process_file(file_obj, filename, dataset_type):
                 details={"filename": filename, "detected": dataset_type})
         # Harmonize to canonical schema BEFORE clean_dataframe.
         # HarmonizationRejected propagates; generic errors log and fall back.
-        SchemaHarmonizer = __import__("src.schema_harmonizer", fromlist=["SchemaHarmonizer"]).SchemaHarmonizer
-        harmonizer = SchemaHarmonizer()
-        if dataset_type in harmonizer.SUPPORTED_TARGETS:
+        try:
+            sys.path.insert(0, str(Path.cwd() / "src"))
+            _SH = __import__("src.schema_harmonizer", fromlist=["SchemaHarmonizer"]).SchemaHarmonizer
+            harmonizer = _SH()
+        except Exception:
+            harmonizer = None
+        if harmonizer is not None and dataset_type in harmonizer.SUPPORTED_TARGETS:
             df_before_cols = list(df.columns)
             try:
                 df, harmonize_meta = harmonizer.normalize(df, dataset_type)
@@ -758,26 +764,26 @@ def process_file(file_obj, filename, dataset_type):
                     },
                 )
             except Exception as rej:
-                log(
-                    "SCHEMA_HARMONIZE_REJECTED",
-                    details={
-                        "filename": filename,
-                        "target_type": dataset_type,
-                        "report": rej.report,
-                    },
-                )
-                # Re-raise so caller can render a dedicated rejection UI
-                raise
-            except Exception as e:
-                log(
-                    "SCHEMA_HARMONIZE_FAILED",
-                    details={
-                        "filename": filename,
-                        "target_type": dataset_type,
-                        "error": str(e),
-                    },
-                )
-                # Generic failure: continue with raw DataFrame
+                if hasattr(rej, "report"):
+                    log(
+                        "SCHEMA_HARMONIZE_REJECTED",
+                        details={
+                            "filename": filename,
+                            "target_type": dataset_type,
+                            "report": rej.report,
+                        },
+                    )
+                    raise
+                else:
+                    log(
+                        "SCHEMA_HARMONIZE_FAILED",
+                        details={
+                            "filename": filename,
+                            "target_type": dataset_type,
+                            "error": str(rej),
+                        },
+                    )
+
 
         df = clean_dataframe(df, dataset_type)
         return df, "direct", dataset_type, f"Loaded {len(df)} rows"
