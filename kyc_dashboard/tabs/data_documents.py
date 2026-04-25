@@ -444,7 +444,6 @@ def _render_document_section(files):
                         mime="application/pdf",
                         key="preview_download_" + str(i),
                     )
-                    st.caption("PDF preview: extracted text shown above in the fields table.")
                 elif filename_lower.endswith(".docx"):
                     st.caption("Word document preview not available. Use the extracted fields above or download to verify.")
                     st.download_button(
@@ -607,6 +606,22 @@ def _render_remediation_preview(selected_customer_id: str):
             "documents": "documents_clean.csv",
             "beneficial_ownership": "beneficial_ownership_clean.csv",
         }
+        numeric_columns = [
+            "overall_score",
+            "aml_screening_score",
+            "identity_verification_score",
+            "account_activity_score",
+            "proof_of_address_score",
+            "beneficial_ownership_score",
+            "data_quality_score",
+            "source_of_wealth_score",
+            "crs_fatca_score",
+            "transaction_amount",
+            "amount",
+            "txn_count",
+            "total_volume",
+            "ownership_percentage",
+        ]
 
         temp_dir = tempfile.mkdtemp(prefix="kyc_preview_")
         for df_key, filename in filename_map.items():
@@ -614,14 +629,25 @@ def _render_remediation_preview(selected_customer_id: str):
             if df_val is None and df_key == "customers":
                 df_val = st.session_state.get("customers_df")
             if isinstance(df_val, pd.DataFrame):
-                df_val.to_csv(os.path.join(temp_dir, filename), index=False)
+                df_copy = df_val.copy()
+                for col in numeric_columns:
+                    if col in df_copy.columns:
+                        df_copy[col] = pd.to_numeric(df_copy[col], errors="coerce").fillna(0.0)
+                df_copy.to_csv(os.path.join(temp_dir, filename), index=False)
 
         eval_key = "last_evaluation_" + selected_customer_id
         before_result = _result_to_dict(st.session_state.get(eval_key))
 
         preview_engine = KYCComplianceEngine(data_clean_dir=temp_dir)
-        after_raw = preview_engine.evaluate_customer(selected_customer_id)
-        after_result = _result_to_dict(after_raw)
+        try:
+            after_raw = preview_engine.evaluate_customer(selected_customer_id)
+            after_result = _result_to_dict(after_raw)
+        except TypeError as exc:
+            st.warning(
+                "Remediation preview encountered a type error during re-evaluation. "
+                "This usually means a numeric field was stored as text. Error: " + str(exc)
+            )
+            return
 
         if not after_result:
             st.warning("Could not evaluate customer " + selected_customer_id + " — engine may not have enough data.")
