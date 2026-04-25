@@ -10,11 +10,39 @@ Uses proper render() function (architectural decision #14 — no TAB_CODE exec).
 """
 
 import datetime
+import base64
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 import streamlit as st
+
+
+def _clear_batch_queue():
+    """Clear Data & Documents uploader/session queue state."""
+    for key in list(st.session_state.keys()):
+        if (
+            key.startswith("doc_type_hint_")
+            or key.startswith("customer_hint_")
+            or key.startswith("analyze_doc_")
+            or key.startswith("sensitivity_override_")
+            or key.startswith("ocr_correction_")
+            or key.startswith("confirm_link_")
+            or key.startswith("pick_other_")
+            or key.startswith("manual_select_")
+            or key.startswith("multi_select_")
+            or key.startswith("confirm_multi_")
+            or key.startswith("no_match_select_")
+            or key.startswith("manual_link_")
+        ):
+            del st.session_state[key]
+
+
+def _clear_document_analysis_cache():
+    """Clear OCR/sensitivity/extraction caches for uploaded documents."""
+    for key in list(st.session_state.keys()):
+        if key.startswith("doc_extraction_") or key.startswith("doc_ocr_") or key.startswith("doc_sensitivity_"):
+            del st.session_state[key]
 
 
 def _fuzzy_match_customer(
@@ -198,6 +226,10 @@ def _render_structured_section(files):
     _seed_structured_provenance()
     st.session_state.latest_discrepancy_report = _collect_discrepancy_report()
     st.success("Engine loaded — " + str(len(customers)) + " customers ready.")
+    st.success("Data loaded successfully. You can now run evaluations in the Individual or Batch tabs.")
+    if not st.session_state.get("data_loaded_flag"):
+        st.session_state["data_loaded_flag"] = True
+        st.rerun()
 
 
 def _render_document_section(files):
@@ -218,33 +250,70 @@ def _render_document_section(files):
 
     st.subheader("Document Analysis")
 
-    for i, uploaded_file in enumerate(files):
-        with st.expander("📄 " + uploaded_file.name, expanded=True):
+    tab_labels = [f.name for f in files]
+    doc_tabs = st.tabs(tab_labels)
+
+    for i, (tab, uploaded_file) in enumerate(zip(doc_tabs, files)):
+        with tab:
+            uploaded_file.seek(0)
             fbytes = uploaded_file.read()
             if not fbytes:
                 st.warning("Could not read file bytes for " + uploaded_file.name)
                 continue
 
-            try:
-                text = run_ocr(fbytes, uploaded_file.name)
-            except Exception as exc:
-                st.error("OCR failed for " + uploaded_file.name + ": " + str(exc))
-                continue
+            file_cache_key = uploaded_file.name
+            ocr_cache_key = "doc_ocr_" + file_cache_key
+            sens_cache_key = "doc_sensitivity_" + file_cache_key
+            extraction_cache_key = "doc_extraction_" + file_cache_key
+
+            if ocr_cache_key in st.session_state:
+                text = st.session_state[ocr_cache_key]
+            else:
+                try:
+                    with st.spinner("📝 Extracting text from document..."):
+                        text = run_ocr(fbytes, uploaded_file.name)
+                    st.session_state[ocr_cache_key] = text
+                except Exception as exc:
+                    st.error("OCR failed for " + uploaded_file.name + ": " + str(exc))
+                    continue
             if text is None or not text.strip():
                 st.warning("Could not extract text from " + uploaded_file.name)
                 continue
 
-            sensitivity_flags = detect_sensitivity(text)
+            if sens_cache_key in st.session_state:
+                sensitivity_flags = st.session_state[sens_cache_key]
+            else:
+                sensitivity_flags = detect_sensitivity(text)
+                st.session_state[sens_cache_key] = sensitivity_flags
+
             if sensitivity_flags:
-                st.markdown("**Sensitivity:**")
-                st.json(sensitivity_summary(sensitivity_flags))
+                summary = sensitivity_summary(sensitivity_flags)
+                if isinstance(summary, dict):
+                    categories = summary.get("categories", []) or []
+                    cat_str = ", ".join(str(c) for c in categories) if categories else "Unknown"
+                    st.markdown("**Sensitivity:** " + cat_str + " detected")
+                    messages = [str(f.get("message", "")).strip() for f in summary.get("flags", []) if isinstance(f, dict)]
+                    if messages:
+                        st.caption(messages[0])
+                else:
+                    st.markdown("**Sensitivity:** " + str(summary))
                 if should_block(sensitivity_flags):
+                    st.error(
+                        "This document contains SAMPLE or SPECIMEN markers, which typically means "
+                        "it is not an original document and should not be used for compliance verification."
+                    )
+                    st.markdown(
+                        "If you believe this is a legitimate document incorrectly flagged, "
+                        "you can override the block by providing a justification below. "
+                        "This will be logged in the audit trail."
+                    )
                     override_reason = st.text_input(
-                        "Override reason (required to proceed with blocked document):",
+                        "Justification to proceed despite SAMPLE flag:",
                         key="sensitivity_override_" + str(i),
+                        placeholder="e.g., 'Verified with issuer — watermark is from scanning process'",
                     )
                     if not override_reason:
-                        st.error("This document is blocked due to SAMPLE/SPECIMEN markers. Enter a reason to override, or skip this document.")
+                        st.warning("Provide justification to continue analysis for this blocked document.")
                         continue
                     st.info("Override accepted: " + override_reason)
                 elif requires_review(sensitivity_flags):
@@ -267,20 +336,34 @@ def _render_document_section(files):
             )
             customer_hint = st.text_input("Customer ID Hint (optional)", key="customer_hint_" + str(i))
 
-            if not st.button("Analyze " + uploaded_file.name, key="analyze_doc_" + str(i)):
-                continue
-
-            touch()
-            log("LLM_CALL", details={"filename": uploaded_file.name, "doc_type": doc_type_hint})
-            try:
-                document_type, extracted_fields, confidences, analysis = _extract_document_fields(
-                    text,
-                    uploaded_file.name,
-                    doc_type_hint,
-                    customer_hint,
-                )
-            except Exception as exc:
-                st.error("AI analysis failed: " + str(exc))
+            analyze_clicked = st.button("Analyze " + uploaded_file.name, key="analyze_doc_" + str(i))
+            if extraction_cache_key in st.session_state:
+                cached = st.session_state[extraction_cache_key]
+                document_type = cached["document_type"]
+                extracted_fields = dict(cached["extracted_fields"])
+                confidences = dict(cached["confidences"])
+                analysis = dict(cached["analysis"])
+            elif analyze_clicked:
+                touch()
+                log("LLM_CALL", details={"filename": uploaded_file.name, "doc_type": doc_type_hint})
+                try:
+                    with st.spinner("🔍 AI Agent analyzing document — extracting fields and assessing confidence..."):
+                        document_type, extracted_fields, confidences, analysis = _extract_document_fields(
+                            text,
+                            uploaded_file.name,
+                            doc_type_hint,
+                            customer_hint,
+                        )
+                    st.session_state[extraction_cache_key] = {
+                        "document_type": document_type,
+                        "extracted_fields": dict(extracted_fields),
+                        "confidences": dict(confidences),
+                        "analysis": dict(analysis),
+                    }
+                except Exception as exc:
+                    st.error("AI analysis failed: " + str(exc))
+                    continue
+            else:
                 continue
 
             conf = float(analysis.get("overall_confidence", 0) or 0)
@@ -342,6 +425,36 @@ def _render_document_section(files):
                     confidences[field_key] = 1.0
                 except Exception:
                     pass
+
+            with st.expander("Preview Original Document", expanded=False):
+                filename_lower = uploaded_file.name.lower()
+                if filename_lower.endswith((".png", ".jpg", ".jpeg", ".tiff")):
+                    st.image(fbytes, caption=uploaded_file.name, use_container_width=True)
+                elif filename_lower.endswith(".pdf"):
+                    b64 = base64.b64encode(fbytes).decode("utf-8")
+                    pdf_display = (
+                        '<iframe src="data:application/pdf;base64,' + b64 + '" '
+                        'width="100%" height="600" type="application/pdf"></iframe>'
+                    )
+                    st.markdown(pdf_display, unsafe_allow_html=True)
+                    st.download_button(
+                        "Download PDF",
+                        data=fbytes,
+                        file_name=uploaded_file.name,
+                        mime="application/pdf",
+                        key="preview_download_" + str(i),
+                    )
+                elif filename_lower.endswith(".docx"):
+                    st.caption("Word document preview not available. Use the extracted fields above or download to verify.")
+                    st.download_button(
+                        "Download .docx to view",
+                        data=fbytes,
+                        file_name=uploaded_file.name,
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        key="preview_download_docx_" + str(i),
+                    )
+                else:
+                    st.caption("Preview not available for this file type.")
 
             customers_df = st.session_state.get("customers", st.session_state.get("customers_df", None))
             if customers_df is None or getattr(customers_df, "empty", True):
@@ -493,6 +606,22 @@ def _render_remediation_preview(selected_customer_id: str):
             "documents": "documents_clean.csv",
             "beneficial_ownership": "beneficial_ownership_clean.csv",
         }
+        numeric_columns = [
+            "overall_score",
+            "aml_screening_score",
+            "identity_verification_score",
+            "account_activity_score",
+            "proof_of_address_score",
+            "beneficial_ownership_score",
+            "data_quality_score",
+            "source_of_wealth_score",
+            "crs_fatca_score",
+            "transaction_amount",
+            "amount",
+            "txn_count",
+            "total_volume",
+            "ownership_percentage",
+        ]
 
         temp_dir = tempfile.mkdtemp(prefix="kyc_preview_")
         for df_key, filename in filename_map.items():
@@ -500,14 +629,25 @@ def _render_remediation_preview(selected_customer_id: str):
             if df_val is None and df_key == "customers":
                 df_val = st.session_state.get("customers_df")
             if isinstance(df_val, pd.DataFrame):
-                df_val.to_csv(os.path.join(temp_dir, filename), index=False)
+                df_copy = df_val.copy()
+                for col in numeric_columns:
+                    if col in df_copy.columns:
+                        df_copy[col] = pd.to_numeric(df_copy[col], errors="coerce").fillna(0.0)
+                df_copy.to_csv(os.path.join(temp_dir, filename), index=False)
 
         eval_key = "last_evaluation_" + selected_customer_id
         before_result = _result_to_dict(st.session_state.get(eval_key))
 
         preview_engine = KYCComplianceEngine(data_clean_dir=temp_dir)
-        after_raw = preview_engine.evaluate_customer(selected_customer_id)
-        after_result = _result_to_dict(after_raw)
+        try:
+            after_raw = preview_engine.evaluate_customer(selected_customer_id)
+            after_result = _result_to_dict(after_raw)
+        except TypeError as exc:
+            st.warning(
+                "Remediation preview encountered a type error during re-evaluation. "
+                "This usually means a numeric field was stored as text. Error: " + str(exc)
+            )
+            return
 
         if not after_result:
             st.warning("Could not evaluate customer " + selected_customer_id + " — engine may not have enough data.")
@@ -556,16 +696,35 @@ def render(user=None, role=None, logger=None):
     st.header("Data & Documents")
     st.caption("Upload structured data files (CSV, Excel, JSON) or documents (PDF, images, Word) for analysis and customer linking.")
 
-    uploaded_files = st.file_uploader(
-        "Upload Files",
-        type=["csv", "xlsx", "xls", "json", "jsonl", "pdf", "png", "jpg", "jpeg", "tiff", "docx"],
-        accept_multiple_files=True,
-        key="data_documents_uploader",
-    )
+    if "uploader_key_counter" not in st.session_state:
+        st.session_state["uploader_key_counter"] = 0
+    uploader_key = "data_documents_uploader_" + str(st.session_state["uploader_key_counter"])
+
+    col_upload, col_clear = st.columns([6, 1])
+    with col_upload:
+        uploaded_files = st.file_uploader(
+            "Upload Files",
+            type=["csv", "xlsx", "xls", "json", "jsonl", "pdf", "png", "jpg", "jpeg", "tiff", "docx"],
+            accept_multiple_files=True,
+            key=uploader_key,
+        )
+    with col_clear:
+        st.markdown("")
+        st.markdown("")
+        if st.button("🗑️ Clear All", key="clear_all_uploads"):
+            st.session_state["uploader_key_counter"] += 1
+            _clear_batch_queue()
+            _clear_document_analysis_cache()
+            st.rerun()
 
     if not uploaded_files:
         st.info("Upload files to get started. You can mix structured data files and documents in a single upload.")
         return
+
+    upload_key = "batch_processed_" + "_".join(sorted(f.name for f in uploaded_files))
+    if st.session_state.get("last_upload_key") != upload_key:
+        _clear_document_analysis_cache()
+        st.session_state["last_upload_key"] = upload_key
 
     structured_files = []
     document_files = []
