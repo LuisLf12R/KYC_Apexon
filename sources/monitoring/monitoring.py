@@ -214,12 +214,12 @@ class MonitoringService:
     def _fetch_state_as_dict(self) -> Dict:
         """Flatten fetch_state into {source_id: {content_hash, last_fetched_at}}."""
         result = {}
-        for source_id, url_states in self._fetch_state.sources.items():
+        for source_id, url_states in self._fetch_state.states.items():
             # url_states is a dict of url → UrlState
             latest_hash = None
             latest_ts = None
             for url_state in url_states.values():
-                h = getattr(url_state, "content_hash", None)
+                h = getattr(url_state, "last_hash", None)
                 ts = getattr(url_state, "last_fetched_at", None)
                 if ts and (latest_ts is None or str(ts) > str(latest_ts)):
                     latest_ts = str(ts) if ts else None
