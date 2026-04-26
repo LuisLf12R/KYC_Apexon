@@ -249,7 +249,13 @@ def _upsert_customer_row(df: pd.DataFrame, customer_id: str, values: Dict[str, A
         idx = match_idx[0]
         for col, val in values.items():
             if val is not None and str(val).strip() != "":
-                out.at[idx, col] = val
+                    # BF-27: CSV round-trip can leave columns as float64 when they
+                    # originally held mixed or string data. If assigning a non-numeric
+                    # value into a numeric column, convert the column to object first.
+                    if col in out.columns:
+                        if out[col].dtype.kind in ("f", "i", "u") and isinstance(val, str):
+                            out[col] = out[col].astype(object)
+                    out.at[idx, col] = val
     else:
         row = {"customer_id": str(customer_id)}
         for col, val in values.items():
