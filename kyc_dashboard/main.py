@@ -100,8 +100,7 @@ def init_api_keys():
 
 keys_ok, keys_msg = init_api_keys()
 if not keys_ok:
-    st.error(f"Configuration Error: {keys_msg}")
-    st.stop()
+    st.warning(f"⚠️ API Configuration: {keys_msg}. AI document analysis and OCR will be unavailable — all other KYC features work normally.")
 
 # One-time cache purge: scripts generated under prior canonical schemas
 # produce invalid output and must be regenerated.

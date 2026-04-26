@@ -66,9 +66,10 @@ _DEFAULTS = {
 
 
 def init_state():
+    import copy
     for k, v in _DEFAULTS.items():
         if k not in st.session_state:
-            st.session_state[k] = v
+            st.session_state[k] = copy.deepcopy(v) if isinstance(v, (dict, set, list)) else v
 
 
 def get_logger():
