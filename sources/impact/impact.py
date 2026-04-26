@@ -186,9 +186,14 @@ def compute_impact(
     baseline_rv = raw.get("review_rules", [])
     score_thresholds = raw.get("score_thresholds", {"pass_minimum": 70, "pass_with_notes_minimum": 50})
 
-    # Overlay additional rules
-    additional_hr = staged_overlay.get("additional_hard_reject_rules", [])
-    additional_rv = staged_overlay.get("additional_review_rules", [])
+    # Overlay additional rules — staged_overlay is a JurisdictionOverlay Pydantic model,
+    # so use attribute access not .get()
+    if hasattr(staged_overlay, "additional_hard_reject_rules"):
+        additional_hr = staged_overlay.additional_hard_reject_rules or []
+        additional_rv = staged_overlay.additional_review_rules or []
+    else:
+        additional_hr = staged_overlay.get("additional_hard_reject_rules", [])
+        additional_rv = staged_overlay.get("additional_review_rules", [])
 
     proposed_hr = baseline_hr + additional_hr
     proposed_rv = baseline_rv + additional_rv

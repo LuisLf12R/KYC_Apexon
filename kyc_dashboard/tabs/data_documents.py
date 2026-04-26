@@ -621,6 +621,9 @@ def _render_remediation_preview(selected_customer_id: str):
             "txn_count",
             "total_volume",
             "ownership_percentage",
+            "ownership_percent",   # actual column name read by BeneficialOwnershipDimension
+            "ownership_pct",
+            "parent_ownership_pct",
         ]
 
         temp_dir = tempfile.mkdtemp(prefix="kyc_preview_")
@@ -638,11 +641,11 @@ def _render_remediation_preview(selected_customer_id: str):
         eval_key = "last_evaluation_" + selected_customer_id
         before_result = _result_to_dict(st.session_state.get(eval_key))
 
-        preview_engine = KYCComplianceEngine(data_clean_dir=temp_dir)
         try:
+            preview_engine = KYCComplianceEngine(data_clean_dir=temp_dir)
             after_raw = preview_engine.evaluate_customer(selected_customer_id)
             after_result = _result_to_dict(after_raw)
-        except TypeError as exc:
+        except (TypeError, ValueError) as exc:
             st.warning(
                 "Remediation preview encountered a type error during re-evaluation. "
                 "This usually means a numeric field was stored as text. Error: " + str(exc)
