@@ -1,0 +1,21 @@
+{
+  "jurisdiction_code": "GBR",
+  "regulators": [
+    "FCA",
+    "JMLSG",
+    "OFSI"
+  ],
+  "dimension_overrides": {
+    "identity": {
+      "doc_expiry_warning_days": 60
+    },
+    "beneficial_ownership": {
+      "ownership_threshold_pct": 25.0
+    },
+    "screening": {
+      "max_screening_age_days": 365
+    }
+  },
+  "additional_hard_reject_rules": [],
+  "additional_review_rules": []
+}

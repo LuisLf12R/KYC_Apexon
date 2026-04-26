@@ -1,0 +1,19 @@
+{
+  "jurisdiction_code": "CHE",
+  "regulators": [
+    "FINMA"
+  ],
+  "dimension_overrides": {
+    "beneficial_ownership": {
+      "ownership_threshold_pct": 25.0
+    },
+    "screening": {
+      "max_screening_age_days": 180
+    },
+    "transactions": {
+      "velocity_window_days": 60
+    }
+  },
+  "additional_hard_reject_rules": [],
+  "additional_review_rules": []
+}

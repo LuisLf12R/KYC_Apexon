@@ -1,0 +1,24 @@
+{
+  "jurisdiction_code": "EU",
+  "regulators": [
+    "EBA",
+    "BaFin",
+    "ACPR",
+    "CSSF",
+    "Bank of Italy",
+    "CNMV"
+  ],
+  "dimension_overrides": {
+    "beneficial_ownership": {
+      "ownership_threshold_pct": 25.0
+    },
+    "screening": {
+      "max_screening_age_days": 180
+    },
+    "transactions": {
+      "velocity_window_days": 90
+    }
+  },
+  "additional_hard_reject_rules": [],
+  "additional_review_rules": []
+}

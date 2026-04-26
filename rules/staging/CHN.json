@@ -1,0 +1,9 @@
+{
+  "jurisdiction_code": "CHN",
+  "regulators": [
+    "PBOC"
+  ],
+  "dimension_overrides": {},
+  "additional_hard_reject_rules": [],
+  "additional_review_rules": []
+}

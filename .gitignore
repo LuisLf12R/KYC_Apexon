@@ -55,6 +55,7 @@ google-vision-sa-checkpoint.json
 /tmp/google-credentials.json
 Credentials/
 *.json
+!rules/**/*.json
 *.pem
 *.key
 base64_key.txt
@@ -87,4 +88,3 @@ debug_*.log
 .pytest_cache/
 .coverage
 htmlcov/
-rules/staging/*.json

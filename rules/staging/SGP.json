@@ -1,0 +1,19 @@
+{
+  "jurisdiction_code": "SGP",
+  "regulators": [
+    "MAS"
+  ],
+  "dimension_overrides": {
+    "beneficial_ownership": {
+      "ownership_threshold_pct": 25.0
+    },
+    "screening": {
+      "max_screening_age_days": 365
+    },
+    "transactions": {
+      "velocity_window_days": 30
+    }
+  },
+  "additional_hard_reject_rules": [],
+  "additional_review_rules": []
+}

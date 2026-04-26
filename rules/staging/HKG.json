@@ -1,0 +1,20 @@
+{
+  "jurisdiction_code": "HKG",
+  "regulators": [
+    "HKMA",
+    "SFC"
+  ],
+  "dimension_overrides": {
+    "beneficial_ownership": {
+      "ownership_threshold_pct": 10.0
+    },
+    "screening": {
+      "max_screening_age_days": 365
+    },
+    "transactions": {
+      "velocity_window_days": 90
+    }
+  },
+  "additional_hard_reject_rules": [],
+  "additional_review_rules": []
+}

@@ -1,0 +1,20 @@
+{
+  "jurisdiction_code": "AUS",
+  "regulators": [
+    "AUSTRAC"
+  ],
+  "dimension_overrides": {
+    "beneficial_ownership": {
+      "ownership_threshold_pct": 25.0
+    },
+    "screening": {
+      "max_screening_age_days": 365
+    },
+    "transactions": {
+      "edd_trigger_threshold_usd": 10000.0,
+      "velocity_window_days": 90
+    }
+  },
+  "additional_hard_reject_rules": [],
+  "additional_review_rules": []
+}
