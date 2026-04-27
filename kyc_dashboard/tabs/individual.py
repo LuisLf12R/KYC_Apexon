@@ -28,8 +28,335 @@ def _get_available_institutions():
     return institutions
 
 
-TAB_CODE = 'touch()\nif not st.session_state.engines_initialized:\n    st.warning("No data loaded. Go to the Data Management tab to upload files.")\nelse:\n    st.markdown("### Search & Evaluate Customer")\n\n    cid_input = st.text_input("Customer ID", placeholder="C00001",\n                               label_visibility="collapsed")\n    institutions = _get_available_institutions()\n    institution_labels = [label for _, label in institutions]\n    configured = get_configured_institution()\n    if configured and configured in [iid for iid, _ in institutions]:\n        default_index = [iid for iid, _ in institutions].index(configured)\n    else:\n        default_index = 0\n    selected_institution_label = st.selectbox("Institution", institution_labels, index=default_index)\n    selected_institution_id = next((iid for iid, label in institutions if label == selected_institution_label), "__none__")\n    eval_btn = st.button("Evaluate Customer", type="primary", use_container_width=True)\n\n    if eval_btn and cid_input:\n        cid = cid_input.strip().upper()\n        touch()\n        with st.spinner(f"Evaluating {cid}..."):\n            try:\n                institution_id = None if selected_institution_id == "__none__" else selected_institution_id\n                result = st.session_state.kyc_engine.evaluate_customer(cid, institution_id=institution_id)\n                disposition = result.get("disposition", "REVIEW")\n                score = result.get("overall_score", 0)\n                rationale = result.get("rationale", "")\n                reject_rules = result.get("triggered_reject_rules", [])\n                review_rules = result.get("triggered_review_rules", [])\n                ruleset_ver = result.get("ruleset_version", "unknown")\n\n                log("CUSTOMER_VIEW", customer_id=cid,\n                    details={"tab": "individual_evaluation",\n                             "ruleset_version": ruleset_ver},\n                    snapshot={k: result.get(k) for k in [\n                        "overall_score", "disposition",\n                        "aml_screening_score", "identity_verification_score",\n                        "account_activity_score", "proof_of_address_score",\n                        "beneficial_ownership_score", "data_quality_score",\n                    ]})\n\n                if disposition in ("REJECT", "REVIEW"):\n                    log("FLAG_RAISED", customer_id=cid,\n                        details={"disposition": disposition, "score": score,\n                                 "triggered_rules": [r["rule_id"] for r in\n                                                     reject_rules + review_rules]})\n\n                history_entry = {\n                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),\n                    "evaluated_by": user["username"],\n                    "overall_score": score,\n                    "disposition": disposition,\n                    "aml_screening_score": result.get("aml_screening_score", 0),\n                    "identity_verification_score": result.get("identity_verification_score", 0),\n                    "account_activity_score": result.get("account_activity_score", 0),\n                    "proof_of_address_score": result.get("proof_of_address_score", 0),\n                    "beneficial_ownership_score": result.get("beneficial_ownership_score", 0),\n                    "data_quality_score": result.get("data_quality_score", 0),\n                }\n                if cid not in st.session_state.customer_history:\n                    st.session_state.customer_history[cid] = []\n                st.session_state.customer_history[cid].append(history_entry)\n\n                m1, m2, m3, m4 = st.columns(4)\n                m1.metric("Overall Score", f"{score}/100")\n                m2.metric("Customer ID", cid)\n                m3.metric("Ruleset", ruleset_ver)\n                m4.metric("Evaluations (session)",\n                          len(st.session_state.customer_history.get(cid, [])))\n\n                st.divider()\n\n                show_disposition(disposition)\n                st.markdown(f"**Rationale:** {rationale}")\n                selected_inst_display = institution_id if institution_id is not None else "None (jurisdiction defaults)"\n                st.markdown(f"**Institution Overlay:** {selected_inst_display}")\n\n                if reject_rules:\n                    st.markdown("**Hard Rejection Rules Triggered:**")\n                    for r in reject_rules:\n                        st.markdown(\n                            f"<div style=\'border-left:4px solid #D55E00;"\n                            f"padding:8px 12px;margin:4px 0;"\n                            f"background:rgba(213,94,0,0.08);border-radius:4px\'>"\n                            f"<strong>{r[\'rule_id\']} — {r[\'name\']}</strong><br>"\n                            f"<span style=\'color:gray;font-size:13px\'>{r[\'description\']}</span><br>"\n                            f"<span style=\'color:gray;font-size:12px\'>Policy: {r[\'policy_reference\']}</span>"\n                            f"</div>",\n                            unsafe_allow_html=True\n                        )\n\n                if review_rules:\n                    st.markdown("**Review Rules Triggered:**")\n                    for r in review_rules:\n                        st.markdown(\n                            f"<div style=\'border-left:4px solid #E69F00;"\n                            f"padding:8px 12px;margin:4px 0;"\n                            f"background:rgba(230,159,0,0.08);border-radius:4px\'>"\n                            f"<strong>{r[\'rule_id\']} — {r[\'name\']}</strong><br>"\n                            f"<span style=\'color:gray;font-size:13px\'>{r[\'description\']}</span><br>"\n                            f"<span style=\'color:gray;font-size:12px\'>Policy: {r[\'policy_reference\']}</span>"\n                            f"</div>",\n                            unsafe_allow_html=True\n                        )\n\n                st.divider()\n\n                dim_map = [\n                    ("aml_screening",         "AML Screening",         25),\n                    ("identity_verification", "Identity Verification", 20),\n                    ("account_activity",      "Account Activity",      15),\n                    ("proof_of_address",      "Proof of Address",      15),\n                    ("beneficial_ownership",  "Beneficial Ownership",  15),\n                    ("data_quality",          "Data Quality",          10),\n                ]\n\n                passing, minor_gaps, failing = [], [], []\n                for dk, label, weight in dim_map:\n                    s = result.get(f"{dk}_score", 0)\n                    finding = result.get(f"{dk}_details", {}).get("finding", "N/A")\n                    entry = {"label": label, "score": s, "weight": weight, "finding": finding}\n                    if s >= 70:\n                        passing.append(entry)\n                    elif s >= 50:\n                        minor_gaps.append(entry)\n                    else:\n                        failing.append(entry)\n\n                problem_dims = failing + minor_gaps\n                if problem_dims:\n                    st.markdown("**Dimension Issues:**")\n                    for e in problem_dims:\n                        color = COLORS["non_compliant"] if e["score"] < 50 else COLORS["minor"]\n                        st.markdown(\n                            f"<div style=\'border-left:4px solid {color};"\n                            f"padding:8px 12px;margin:6px 0;"\n                            f"background:rgba(255,255,255,0.03);border-radius:4px\'>"\n                            f"<strong>{e[\'label\']}</strong> ({e[\'weight\']}% weight) — "\n                            f"Score: <strong>{e[\'score\']}/100</strong><br>"\n                            f"<span style=\'color:gray;font-size:13px\'>{e[\'finding\']}</span>"\n                            f"</div>",\n                            unsafe_allow_html=True\n                        )\n\n                if passing:\n                    with st.expander(f"Passing dimensions ({len(passing)})"):\n                        for e in passing:\n                            st.markdown(f"**{e[\'label\']}** — {e[\'score\']}/100 — {e[\'finding\']}")\n\n                all_dims = {e["label"]: e["score"] for e in\n                            sorted(passing + minor_gaps + failing, key=lambda x: x["score"])}\n                fig = go.Figure(go.Bar(\n                    x=list(all_dims.values()), y=list(all_dims.keys()), orientation="h",\n                    marker_color=[COLORS["compliant"] if s >= 70 else\n                                  COLORS["minor"] if s >= 50 else\n                                  COLORS["non_compliant"] for s in all_dims.values()],\n                    text=list(all_dims.values()), textposition="outside"\n                ))\n                fig.update_layout(xaxis=dict(range=[0, 115], title="Score"),\n                                  height=300, margin=dict(l=10, r=10, t=20, b=10),\n                                  plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")\n                st.plotly_chart(fig, use_container_width=True)\n\n                with st.expander("Field Provenance & Change History", expanded=False):\n                    touch()\n                    prov_rows = _get_provenance_table(cid)\n                    if prov_rows:\n                        st_dataframe_safe(pd.DataFrame(prov_rows), use_container_width=True, hide_index=True)\n                    else:\n                        st.info("No provenance data for this customer yet.")\n\n                    discrepancies = _get_provenance_store().detect_discrepancies(cid)\n                    if discrepancies:\n                        st.warning("Discrepancies detected across data sources:")\n                        for d in discrepancies:\n                            field = d.get("field_name", "")\n                            vals = d.get("values_by_source", {})\n                            user_val = vals.get("User-Provided", {}).get("value")\n                            ocr_val = vals.get("OCR-Extracted", {}).get("value")\n                            ocr_file = vals.get("OCR-Extracted", {}).get("source_file", "")\n                            ocr_conf = _format_conf_pct(vals.get("OCR-Extracted", {}).get("confidence"))\n                            st.markdown(\n                                f"- **{field}**: User-Provided=\'{user_val}\' vs OCR-Extracted=\'{ocr_val}\' "\n                                f"(from {ocr_file or \'N/A\'}, {ocr_conf or \'N/A\'} confidence)"\n                            )\n\n                # Remediation (for Review or Reject)\n                if disposition in ("REJECT", "REVIEW") and role in ("Analyst", "Manager", "Admin"):\n                    st.divider()\n                    st.markdown("**Remediation Actions**")\n                    rc1, rc2 = st.columns(2)\n                    with rc1:\n                        reason = st.selectbox("Reason Code",\n                                              ["— Select —"] + FALSE_POSITIVE_CODES,\n                                              key=f"r_{cid}")\n                    with rc2:\n                        note_text = st.text_input("Note (required)", key=f"n_{cid}")\n                    ec1, ec2 = st.columns(2)\n                    with ec1:\n                        if st.button("Escalate", key=f"esc_{cid}"):\n                            if not note_text.strip():\n                                st.error("Note required to escalate.")\n                            else:\n                                touch()\n                                log("CUSTOMER_ESCALATED", customer_id=cid,\n                                    details={"note": note_text, "score": score,\n                                             "disposition": disposition})\n                                st.success(f"{cid} escalated. Logged.")\n                    with ec2:\n                        if st.button("Propose Clear", key=f"clr_{cid}"):\n                            if reason == "— Select —" or not note_text.strip():\n                                st.error("Reason code and note required.")\n                            else:\n                                touch()\n                                log("CLEAR_PROPOSED", customer_id=cid,\n                                    details={"reason_code": reason, "note": note_text,\n                                             "disposition": disposition,\n                                             "requires_manager_approval": True})\n                                st.success("Clear proposed. Awaiting manager approval.")\n\n                history = st.session_state.customer_history.get(cid, [])\n                if len(history) > 1:\n                    st.divider()\n                    st.markdown("#### Evaluation History — This Session")\n                    st_dataframe_safe(pd.DataFrame(history), use_container_width=True, hide_index=True)\n                    scores = [h["overall_score"] for h in history]\n                    timestamps = [h["timestamp"] for h in history]\n                    fig2 = go.Figure(go.Scatter(\n                        x=timestamps, y=scores, mode="lines+markers",\n                        marker=dict(size=8, color=COLORS["blue"]),\n                        line=dict(color=COLORS["blue"]),\n                    ))\n                    fig2.update_layout(title=f"Score Trend — {cid}",\n                                       yaxis=dict(range=[0, 110]),\n                                       height=220,\n                                       margin=dict(l=10, r=10, t=40, b=10),\n                                       plot_bgcolor="rgba(0,0,0,0)",\n                                       paper_bgcolor="rgba(0,0,0,0)")\n                    st.plotly_chart(fig2, use_container_width=True)\n\n            except Exception as e:\n                st.error(f"Evaluation error: {e}")\n\n# ════════════════════════════════════════════════════════\n# TAB 2: BATCH RESULTS\n# ════════════════════════════════════════════════════════'
+TAB_CODE = """touch()
+if not st.session_state.engines_initialized:
+    st.warning("No data loaded. Go to the Data Management tab to upload files.")
+else:
+    st.markdown("### Search & Evaluate Customer")
 
+    cid_input = st.text_input("Customer ID", placeholder="C00001",
+                               label_visibility="collapsed")
+    institutions = _get_available_institutions()
+    institution_labels = [label for _, label in institutions]
+    configured = get_configured_institution()
+    if configured and configured in [iid for iid, _ in institutions]:
+        default_index = [iid for iid, _ in institutions].index(configured)
+    else:
+        default_index = 0
+    selected_institution_label = st.selectbox("Institution", institution_labels, index=default_index)
+    selected_institution_id = next(
+        (iid for iid, label in institutions if label == selected_institution_label),
+        "__none__"
+    )
+    eval_btn = st.button("Evaluate Customer", type="primary", use_container_width=True)
+
+    if eval_btn and cid_input:
+        cid = cid_input.strip().upper()
+        touch()
+        with st.spinner(f"Evaluating {cid}..."):
+            try:
+                institution_id = None if selected_institution_id == "__none__" else selected_institution_id
+                result = st.session_state.kyc_engine.evaluate_customer(cid, institution_id=institution_id)
+                disposition   = result.get("disposition", "REVIEW")
+                score         = result.get("overall_score", 0)
+                rationale     = result.get("rationale", "")
+                reject_rules  = result.get("triggered_reject_rules", [])
+                review_rules  = result.get("triggered_review_rules", [])
+                ruleset_ver   = result.get("ruleset_version", "unknown")
+
+                log("CUSTOMER_VIEW", customer_id=cid,
+                    details={"tab": "individual_evaluation", "ruleset_version": ruleset_ver},
+                    snapshot={k: result.get(k) for k in [
+                        "overall_score", "disposition",
+                        "aml_screening_score", "identity_verification_score",
+                        "account_activity_score", "proof_of_address_score",
+                        "beneficial_ownership_score", "data_quality_score",
+                    ]})
+
+                if disposition in ("REJECT", "REVIEW"):
+                    log("FLAG_RAISED", customer_id=cid,
+                        details={"disposition": disposition, "score": score,
+                                 "triggered_rules": [r["rule_id"] for r in reject_rules + review_rules]})
+
+                history_entry = {
+                    "timestamp":                  datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "evaluated_by":               user["username"],
+                    "overall_score":              score,
+                    "disposition":                disposition,
+                    "aml_screening_score":        result.get("aml_screening_score", 0),
+                    "identity_verification_score":result.get("identity_verification_score", 0),
+                    "account_activity_score":     result.get("account_activity_score", 0),
+                    "proof_of_address_score":     result.get("proof_of_address_score", 0),
+                    "beneficial_ownership_score": result.get("beneficial_ownership_score", 0),
+                    "data_quality_score":         result.get("data_quality_score", 0),
+                }
+                if cid not in st.session_state.customer_history:
+                    st.session_state.customer_history[cid] = []
+                st.session_state.customer_history[cid].append(history_entry)
+
+                # ── Pre-compute dimension data ─────────────────────────────────
+                dim_map = [
+                    ("aml_screening",         "AML Screening",         25),
+                    ("identity_verification", "Identity Verification", 20),
+                    ("account_activity",      "Account Activity",      15),
+                    ("proof_of_address",      "Proof of Address",      15),
+                    ("beneficial_ownership",  "Beneficial Ownership",  15),
+                    ("data_quality",          "Data Quality",          10),
+                ]
+                passing, minor_gaps, failing = [], [], []
+                for dk, dlabel, dweight in dim_map:
+                    ds = result.get(f"{dk}_score", 0)
+                    dfinding = result.get(f"{dk}_details", {}).get("finding", "N/A")
+                    entry = {"label": dlabel, "score": ds, "weight": dweight, "finding": dfinding}
+                    if ds >= 70:
+                        passing.append(entry)
+                    elif ds >= 50:
+                        minor_gaps.append(entry)
+                    else:
+                        failing.append(entry)
+
+                n_reject_rules  = len(reject_rules)
+                n_review_rules  = len(review_rules)
+                n_failing       = len(failing)
+                n_minor         = len(minor_gaps)
+                total_evals     = len(st.session_state.customer_history.get(cid, []))
+                selected_inst_display = institution_id if institution_id is not None else "None (jurisdiction defaults)"
+
+                # ── Dashboard Header: 3-column layout ──────────────────────────
+                hcol_l, hcol_c, hcol_r = st.columns([2.5, 2, 2.5])
+
+                with hcol_c:
+                    gauge_color = (COLORS["compliant"]     if score >= 70
+                                   else COLORS["minor"]    if score >= 50
+                                   else COLORS["non_compliant"])
+                    gauge_fig = go.Figure(go.Indicator(
+                        mode="gauge+number",
+                        value=score,
+                        number={"suffix": "/100", "font": {"size": 28}},
+                        gauge={
+                            "axis": {"range": [0, 100], "tickwidth": 1, "tickcolor": "gray"},
+                            "bar":  {"color": gauge_color, "thickness": 0.3},
+                            "bgcolor": "rgba(0,0,0,0)",
+                            "steps": [
+                                {"range": [0, 50],   "color": "rgba(213,94,0,0.12)"},
+                                {"range": [50, 70],  "color": "rgba(230,159,0,0.12)"},
+                                {"range": [70, 100], "color": "rgba(0,158,115,0.12)"},
+                            ],
+                            "threshold": {
+                                "line": {"color": gauge_color, "width": 3},
+                                "thickness": 0.75,
+                                "value": score,
+                            },
+                        },
+                        title={"text": "Overall Score", "font": {"size": 14}},
+                    ))
+                    gauge_fig.update_layout(
+                        height=230,
+                        margin=dict(l=20, r=20, t=30, b=10),
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        paper_bgcolor="rgba(0,0,0,0)",
+                    )
+                    st.plotly_chart(gauge_fig, use_container_width=True)
+
+                with hcol_l:
+                    st.markdown("<div style='padding-top:12px'></div>", unsafe_allow_html=True)
+                    show_disposition(disposition)
+                    st.markdown(f"**Customer ID:** `{cid}`")
+                    st.markdown(f"**Institution:** {selected_inst_display}")
+                    st.markdown(f"**Ruleset:** {ruleset_ver}")
+                    st.markdown(f"**Rationale:** {rationale}")
+
+                with hcol_r:
+                    st.markdown("<div style='padding-top:16px'></div>", unsafe_allow_html=True)
+                    rc_reject = COLORS["non_compliant"] if n_reject_rules else "gray"
+                    rc_review = COLORS["minor"]         if n_review_rules else "gray"
+                    rc_fail   = COLORS["non_compliant"] if n_failing      else "gray"
+                    rc_minor  = COLORS["minor"]         if n_minor        else "gray"
+                    st.markdown(
+                        "<div style='background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:16px'>"
+                        "<div style='font-size:11px;color:gray;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px'>Risk Indicators</div>"
+                        f"<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>"
+                        f"<span style='font-size:13px'>Hard Reject Rules</span>"
+                        f"<span style='font-size:18px;font-weight:700;color:{rc_reject}'>{n_reject_rules}</span></div>"
+                        f"<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>"
+                        f"<span style='font-size:13px'>Review Rules Triggered</span>"
+                        f"<span style='font-size:18px;font-weight:700;color:{rc_review}'>{n_review_rules}</span></div>"
+                        f"<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>"
+                        f"<span style='font-size:13px'>Failing Dimensions</span>"
+                        f"<span style='font-size:18px;font-weight:700;color:{rc_fail}'>{n_failing}</span></div>"
+                        f"<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>"
+                        f"<span style='font-size:13px'>Minor Gaps</span>"
+                        f"<span style='font-size:18px;font-weight:700;color:{rc_minor}'>{n_minor}</span></div>"
+                        "<div style='border-top:1px solid rgba(255,255,255,0.08);padding-top:8px;margin-top:4px;"
+                        "display:flex;justify-content:space-between;align-items:center'>"
+                        f"<span style='font-size:13px;color:gray'>Session Evaluations</span>"
+                        f"<span style='font-size:14px;color:gray'>{total_evals}</span></div>"
+                        "</div>",
+                        unsafe_allow_html=True
+                    )
+
+                st.divider()
+
+                # ── Triggered Rules ─────────────────────────────────────────────
+                if reject_rules:
+                    st.markdown("**Hard Rejection Rules Triggered:**")
+                    for r in reject_rules:
+                        st.markdown(
+                            f"<div style='border-left:4px solid {COLORS['non_compliant']};"
+                            "padding:8px 12px;margin:4px 0;"
+                            "background:rgba(213,94,0,0.08);border-radius:4px'>"
+                            f"<strong>{r['rule_id']} — {r['name']}</strong><br>"
+                            f"<span style='color:gray;font-size:13px'>{r['description']}</span><br>"
+                            f"<span style='color:gray;font-size:12px'>Policy: {r['policy_reference']}</span>"
+                            "</div>",
+                            unsafe_allow_html=True
+                        )
+
+                if review_rules:
+                    st.markdown("**Review Rules Triggered:**")
+                    for r in review_rules:
+                        st.markdown(
+                            f"<div style='border-left:4px solid {COLORS['minor']};"
+                            "padding:8px 12px;margin:4px 0;"
+                            "background:rgba(230,159,0,0.08);border-radius:4px'>"
+                            f"<strong>{r['rule_id']} — {r['name']}</strong><br>"
+                            f"<span style='color:gray;font-size:13px'>{r['description']}</span><br>"
+                            f"<span style='color:gray;font-size:12px'>Policy: {r['policy_reference']}</span>"
+                            "</div>",
+                            unsafe_allow_html=True
+                        )
+
+                st.divider()
+
+                # ── Dimension Score Cards (failing first, then minor, then passing) ──
+                st.markdown("#### Dimension Scores")
+                dcols = st.columns(3)
+                dims_display = failing + minor_gaps + passing
+                for i, e in enumerate(dims_display):
+                    sd = e["score"]
+                    if sd >= 70:
+                        bcolor      = COLORS["compliant"]
+                        status_lbl  = "PASS"
+                        bg_card     = "rgba(0,158,115,0.07)"
+                    elif sd >= 50:
+                        bcolor      = COLORS["minor"]
+                        status_lbl  = "REVIEW"
+                        bg_card     = "rgba(230,159,0,0.07)"
+                    else:
+                        bcolor      = COLORS["non_compliant"]
+                        status_lbl  = "FAIL"
+                        bg_card     = "rgba(213,94,0,0.07)"
+                    finding_raw   = e["finding"]
+                    finding_short = finding_raw[:90] + ("..." if len(finding_raw) > 90 else "")
+                    with dcols[i % 3]:
+                        st.markdown(
+                            f"<div style='border:1px solid {bcolor};border-radius:10px;"
+                            f"padding:14px 16px;margin-bottom:12px;background:{bg_card}'>"
+                            "<div style='display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:2px'>"
+                            f"<span style='font-weight:600;font-size:13px'>{e['label']}</span>"
+                            f"<span style='font-size:10px;font-weight:700;color:{bcolor};"
+                            "background:rgba(0,0,0,0.2);padding:2px 7px;border-radius:10px'>"
+                            f"{status_lbl}</span>"
+                            "</div>"
+                            f"<div style='font-size:10px;color:gray;margin-bottom:8px'>Weight: {e['weight']}%</div>"
+                            "<div style='display:flex;align-items:baseline;gap:4px;margin-bottom:8px'>"
+                            f"<span style='font-size:28px;font-weight:700;color:{bcolor};line-height:1'>{sd}</span>"
+                            "<span style='font-size:12px;color:gray'>/100</span>"
+                            "</div>"
+                            "<div style='background:rgba(255,255,255,0.08);border-radius:4px;height:6px;margin-bottom:8px'>"
+                            f"<div style='width:{sd}%;height:100%;background:{bcolor};border-radius:4px'></div>"
+                            "</div>"
+                            "<div style='font-size:11px;color:rgba(255,255,255,0.55);"
+                            "border-top:1px solid rgba(255,255,255,0.06);padding-top:6px'>"
+                            f"{finding_short}</div>"
+                            "</div>",
+                            unsafe_allow_html=True
+                        )
+
+                # ── Provenance ──────────────────────────────────────────────────
+                with st.expander("Field Provenance & Change History", expanded=False):
+                    touch()
+                    prov_rows = _get_provenance_table(cid)
+                    if prov_rows:
+                        st_dataframe_safe(pd.DataFrame(prov_rows), use_container_width=True, hide_index=True)
+                    else:
+                        st.info("No provenance data for this customer yet.")
+
+                    discrepancies = _get_provenance_store().detect_discrepancies(cid)
+                    if discrepancies:
+                        st.warning("Discrepancies detected across data sources:")
+                        for d in discrepancies:
+                            field    = d.get("field_name", "")
+                            vals     = d.get("values_by_source", {})
+                            user_val = vals.get("User-Provided", {}).get("value")
+                            ocr_val  = vals.get("OCR-Extracted", {}).get("value")
+                            ocr_file = vals.get("OCR-Extracted", {}).get("source_file", "")
+                            ocr_conf = _format_conf_pct(vals.get("OCR-Extracted", {}).get("confidence"))
+                            st.markdown(
+                                f"- **{field}**: User-Provided='{user_val}' vs OCR-Extracted='{ocr_val}' "
+                                f"(from {ocr_file or 'N/A'}, {ocr_conf or 'N/A'} confidence)"
+                            )
+
+                # ── Remediation ─────────────────────────────────────────────────
+                if disposition in ("REJECT", "REVIEW") and role in ("Analyst", "Manager", "Admin"):
+                    st.divider()
+                    st.markdown("**Remediation Actions**")
+                    rc1, rc2 = st.columns(2)
+                    with rc1:
+                        reason = st.selectbox("Reason Code",
+                                              ["— Select —"] + FALSE_POSITIVE_CODES,
+                                              key=f"r_{cid}")
+                    with rc2:
+                        note_text = st.text_input("Note (required)", key=f"n_{cid}")
+                    ec1, ec2 = st.columns(2)
+                    with ec1:
+                        if st.button("Escalate", key=f"esc_{cid}"):
+                            if not note_text.strip():
+                                st.error("Note required to escalate.")
+                            else:
+                                touch()
+                                log("CUSTOMER_ESCALATED", customer_id=cid,
+                                    details={"note": note_text, "score": score,
+                                             "disposition": disposition})
+                                st.success(f"{cid} escalated. Logged.")
+                    with ec2:
+                        if st.button("Propose Clear", key=f"clr_{cid}"):
+                            if reason == "— Select —" or not note_text.strip():
+                                st.error("Reason code and note required.")
+                            else:
+                                touch()
+                                log("CLEAR_PROPOSED", customer_id=cid,
+                                    details={"reason_code": reason, "note": note_text,
+                                             "disposition": disposition,
+                                             "requires_manager_approval": True})
+                                st.success("Clear proposed. Awaiting manager approval.")
+
+                # ── Evaluation History Trend ────────────────────────────────────
+                history = st.session_state.customer_history.get(cid, [])
+                if len(history) > 1:
+                    st.divider()
+                    st.markdown("#### Evaluation History — This Session")
+                    st_dataframe_safe(pd.DataFrame(history), use_container_width=True, hide_index=True)
+                    scores_h     = [h["overall_score"] for h in history]
+                    timestamps_h = [h["timestamp"]     for h in history]
+                    fig2 = go.Figure(go.Scatter(
+                        x=timestamps_h, y=scores_h, mode="lines+markers",
+                        marker=dict(size=8, color=COLORS["blue"]),
+                        line=dict(color=COLORS["blue"]),
+                    ))
+                    fig2.update_layout(
+                        title=f"Score Trend — {cid}",
+                        yaxis=dict(range=[0, 110]),
+                        height=220,
+                        margin=dict(l=10, r=10, t=40, b=10),
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        paper_bgcolor="rgba(0,0,0,0)",
+                    )
+                    st.plotly_chart(fig2, use_container_width=True)
+
+            except Exception as e:
+                st.error(f"Evaluation error: {e}")
+"""
 
 
 def render(user, role, logger):
