@@ -49,7 +49,7 @@ from kyc_dashboard.state import (
     _force_logout,
     can_unmask,
 )
-from kyc_dashboard.tabs import dashboard, data_documents, system_info, approval_queue, cases, audit_trail, impact_analysis, monitoring
+from kyc_dashboard.tabs import individual, dashboard, data_documents, system_info, approval_queue, cases, audit_trail, impact_analysis, monitoring
 
 # ── API keys ──────────────────────────────────────────────────────────────────
 
@@ -1039,8 +1039,11 @@ def render_main():
     render_institution_banner()
 
     if role == "Banker":
-        (data_tab,) = st.tabs(["Data & Documents"])
-        with data_tab:
+        banker_tabs = st.tabs(["Individual Evaluation", "Data & Documents"])
+        with banker_tabs[0]:
+            individual.render(user, role, logger)
+            _render_status_strip(logger)
+        with banker_tabs[1]:
             data_documents.render(user, role, logger)
             _render_status_strip(logger)
         return
