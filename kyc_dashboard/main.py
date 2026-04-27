@@ -971,6 +971,21 @@ def _try_autoload_engine():
 # MAIN APP
 # ╚══════════════════════════════════════════════════════════════════════════════
 
+def _render_status_strip(logger):
+    st.divider()
+    s1, s2, s3 = st.columns(3)
+    with s1:
+        if st.session_state.engines_initialized:
+            n = len(st.session_state.customers_df)
+            st.success(f"Engine Ready — {n:,} customers loaded")
+        else:
+            st.warning("No data — use Data & Documents")
+    with s2:
+        st.info(f"Ruleset: {RULESET_VERSION}")
+    with s3:
+        st.info(f"Audit events: {logger.event_count() if logger else 0}")
+
+
 def render_main():
     user = st.session_state.current_user
     role = user["role"]
@@ -1021,29 +1036,13 @@ def render_main():
 
     st.divider()
 
-    # Status strip
-    s1, s2, s3, s4 = st.columns(4)
-    with s1:
-        if st.session_state.engines_initialized:
-            n = len(st.session_state.customers_df)
-            st.success(f"Engine Ready — {n:,} customers loaded")
-        else:
-            st.warning("No data — use Data & Documents")
-    with s2:
-        st.info(f"Ruleset: {RULESET_VERSION}")
-    with s3:
-        st.info(f"Audit events: {logger.event_count() if logger else 0}")
-    with s4:
-        st.info(f"Prompts loaded: {len(PROMPTS)}")
-
-    st.divider()
-
     render_institution_banner()
 
     if role == "Banker":
         (data_tab,) = st.tabs(["Data & Documents"])
         with data_tab:
             data_documents.render(user, role, logger)
+            _render_status_strip(logger)
         return
 
     tabs = [
@@ -1061,3 +1060,4 @@ def render_main():
     for tab_view, (_, render_fn) in zip(tab_views, tabs):
         with tab_view:
             render_fn(user, role, logger)
+            _render_status_strip(logger)
