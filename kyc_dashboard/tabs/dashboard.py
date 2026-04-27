@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 from kyc_dashboard.components import (
@@ -468,38 +469,144 @@ def _render_identity_module(queue_row: Dict[str, Any], result: Dict[str, Any], r
     st_dataframe_safe(pd.DataFrame(identity_rows), use_container_width=True, hide_index=True)
 
 
+_C_PASS  = "#009E73"
+_C_MINOR = "#E69F00"
+_C_FAIL  = "#D55E00"
+
+
+def _score_color(score: float) -> str:
+    if score >= 70:
+        return _C_PASS
+    if score >= 50:
+        return _C_MINOR
+    return _C_FAIL
+
+
 def _render_summary_module(queue_row: Dict[str, Any], result: Dict[str, Any]) -> None:
     rules = _extract_rule_ids(result)
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Decision", queue_row["decision"])
-    c2.metric("Confidence", str(queue_row["confidence_score"]) + "/100", queue_row["confidence_tier"])
-    c3.metric("Flags", queue_row["flag_count"])
+    score = queue_row["confidence_score"]
+    disposition = queue_row.get("disposition", "REVIEW")
+    gauge_color = _score_color(score)
 
-    st.markdown("#### Decision Summary")
-    st.markdown("**Notes**")
-    st.write(queue_row["notes"])
+    gauge_fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=score,
+        number={"suffix": "/100", "font": {"size": 24}},
+        gauge={
+            "axis": {"range": [0, 100], "tickwidth": 1, "tickcolor": "gray"},
+            "bar":  {"color": gauge_color, "thickness": 0.3},
+            "bgcolor": "rgba(0,0,0,0)",
+            "steps": [
+                {"range": [0, 50],   "color": "rgba(213,94,0,0.12)"},
+                {"range": [50, 70],  "color": "rgba(230,159,0,0.12)"},
+                {"range": [70, 100], "color": "rgba(0,158,115,0.12)"},
+            ],
+            "threshold": {
+                "line": {"color": gauge_color, "width": 3},
+                "thickness": 0.75,
+                "value": score,
+            },
+        },
+        title={"text": "Confidence Score", "font": {"size": 13}},
+    ))
+    gauge_fig.update_layout(
+        height=200,
+        margin=dict(l=20, r=20, t=30, b=10),
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+    )
+    st.plotly_chart(gauge_fig, use_container_width=True)
 
+    disp_upper = str(disposition).upper()
+    if disp_upper == "PASS":
+        disp_color, disp_bg = _C_PASS, "rgba(0,158,115,0.15)"
+    elif disp_upper == "PASS_WITH_NOTES":
+        disp_color, disp_bg = _C_MINOR, "rgba(230,159,0,0.15)"
+    elif disp_upper == "REVIEW":
+        disp_color, disp_bg = _C_MINOR, "rgba(230,159,0,0.15)"
+    else:
+        disp_color, disp_bg = _C_FAIL, "rgba(213,94,0,0.15)"
+
+    n_flags = queue_row["flag_count"]
+    flag_color = _C_FAIL if n_flags > 0 else "gray"
+
+    st.markdown(
+        f"<div style='display:flex;gap:10px;margin-bottom:12px'>"
+        f"<div style='flex:1;background:{disp_bg};border:1px solid {disp_color};"
+        f"border-radius:8px;padding:10px;text-align:center'>"
+        f"<div style='font-size:10px;color:gray;margin-bottom:2px'>DECISION</div>"
+        f"<div style='font-size:16px;font-weight:700;color:{disp_color}'>{queue_row['decision']}</div>"
+        f"</div>"
+        f"<div style='flex:1;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);"
+        f"border-radius:8px;padding:10px;text-align:center'>"
+        f"<div style='font-size:10px;color:gray;margin-bottom:2px'>CONFIDENCE</div>"
+        f"<div style='font-size:16px;font-weight:700;color:{gauge_color}'>{queue_row['confidence_tier']}</div>"
+        f"</div>"
+        f"<div style='flex:1;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);"
+        f"border-radius:8px;padding:10px;text-align:center'>"
+        f"<div style='font-size:10px;color:gray;margin-bottom:2px'>FLAGS</div>"
+        f"<div style='font-size:16px;font-weight:700;color:{flag_color}'>{n_flags}</div>"
+        f"</div>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("**Notes:** " + queue_row["notes"])
     if rules:
-        st.markdown("**Triggered Rules**")
-        for rule_id in rules:
-            st.markdown("- " + rule_id)
+        st.markdown("**Triggered Rules:** " + " · ".join(rules))
 
 
 def _render_dimension_module(result: Dict[str, Any]) -> None:
-    rows = []
-    for label, field in [
-        ("AML Screening", "aml_screening_score"),
+    dim_fields = [
+        ("AML Screening",         "aml_screening_score"),
         ("Identity Verification", "identity_verification_score"),
-        ("Account Activity", "account_activity_score"),
-        ("Proof of Address", "proof_of_address_score"),
-        ("Beneficial Ownership", "beneficial_ownership_score"),
-        ("Data Quality", "data_quality_score"),
-        ("Source of Wealth", "source_of_wealth_score"),
-        ("CRS/FATCA", "crs_fatca_score"),
-    ]:
-        rows.append({"Dimension": label, "Score": round(_as_float(result.get(field)), 1)})
+        ("Account Activity",      "account_activity_score"),
+        ("Proof of Address",      "proof_of_address_score"),
+        ("Beneficial Ownership",  "beneficial_ownership_score"),
+        ("Data Quality",          "data_quality_score"),
+        ("Source of Wealth",      "source_of_wealth_score"),
+        ("CRS / FATCA",           "crs_fatca_score"),
+    ]
+    dims = []
+    for label, field in dim_fields:
+        s = round(_as_float(result.get(field)), 1)
+        if s > 0:
+            dims.append((label, s))
+
+    if not dims:
+        st.info("No dimension scores available.")
+        return
+
+    dims_sorted = sorted(dims, key=lambda x: x[1])  # lowest first
     st.markdown("#### Module Signals")
-    st_dataframe_safe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    col_a, col_b = st.columns(2)
+    for i, (label, s) in enumerate(dims_sorted):
+        color = _score_color(s)
+        if s >= 70:
+            status, bg = "PASS",   "rgba(0,158,115,0.07)"
+        elif s >= 50:
+            status, bg = "REVIEW", "rgba(230,159,0,0.07)"
+        else:
+            status, bg = "FAIL",   "rgba(213,94,0,0.07)"
+        card_html = (
+            f"<div style='border:1px solid {color};border-radius:8px;"
+            f"padding:10px 12px;margin-bottom:8px;background:{bg}'>"
+            f"<div style='display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px'>"
+            f"<span style='font-size:11px;font-weight:600'>{label}</span>"
+            f"<span style='font-size:9px;font-weight:700;color:{color};"
+            f"background:rgba(0,0,0,0.2);padding:1px 6px;border-radius:8px'>{status}</span>"
+            f"</div>"
+            f"<div style='display:flex;align-items:baseline;gap:3px;margin-bottom:6px'>"
+            f"<span style='font-size:22px;font-weight:700;color:{color};line-height:1'>{int(s)}</span>"
+            f"<span style='font-size:10px;color:gray'>/100</span>"
+            f"</div>"
+            f"<div style='background:rgba(255,255,255,0.08);border-radius:3px;height:5px'>"
+            f"<div style='width:{int(s)}%;height:100%;background:{color};border-radius:3px'></div>"
+            f"</div>"
+            f"</div>"
+        )
+        with (col_a if i % 2 == 0 else col_b):
+            st.markdown(card_html, unsafe_allow_html=True)
 
 
 def _reload_engine_from_session_data() -> None:

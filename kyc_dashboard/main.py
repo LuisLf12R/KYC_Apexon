@@ -1039,9 +1039,9 @@ def render_main():
     render_institution_banner()
 
     if role == "Banker":
-        banker_tabs = st.tabs(["Individual Evaluation", "Data & Documents"])
+        banker_tabs = st.tabs(["Dashboard", "Data & Documents"])
         with banker_tabs[0]:
-            individual.render(user, role, logger)
+            dashboard.render(user, role, logger)
             _render_status_strip(logger)
         with banker_tabs[1]:
             data_documents.render(user, role, logger)
