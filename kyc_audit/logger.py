@@ -84,6 +84,7 @@ ACTION_TYPES = {
     "AUDIT_EXPORTED":           "Session audit log exported by user",
     "EXPORT_PACKAGE_CREATED":   "Full export package (zip) created",
     "PII_MASK_TOGGLED":         "PII masking toggled on or off",
+    "RULESET_UPDATED":          "Active ruleset updated from the dashboard",
 }
 
 

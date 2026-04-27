@@ -2,7 +2,7 @@ import pandas as pd
 import streamlit as st
 
 from kyc_engine.dataframe_arrow_compat import ensure_arrow_compatible
-from .state import DISPOSITION_CONFIG, can_unmask
+from .state import DISPOSITION_CONFIG, can_unmask, can_view_customer_names
 
 
 def disposition_badge(disposition: str) -> str:
@@ -39,6 +39,12 @@ def mask(value, field_type="default"):
         "address": "[MASKED]", "default": "[MASKED]",
     }
     return masks.get(field_type, masks["default"])
+
+
+def display_customer_name(value, role=None):
+    if not can_view_customer_names(role):
+        return "Restricted"
+    return mask(value, "name")
 
 
 def _format_conf_pct(conf):

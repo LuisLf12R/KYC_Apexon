@@ -54,6 +54,8 @@ _DEFAULTS = {
     "kyc_engine": None, "engines_initialized": False, "customers_df": None,
     "data_dir": None, "batch_results": None, "batch_id": None, "batch_run_at": None,
     "customer_history": {},
+    "dashboard_selected_customer_id": None,
+    "dashboard_last_viewed_customer": None,
     "data_source_label": None,
     "case_sla_amber_days": DEFAULT_SLA_AMBER_DAYS,
     "case_sla_red_days": DEFAULT_SLA_RED_DAYS,
@@ -121,3 +123,11 @@ def _force_logout():
 def can_unmask():
     u = st.session_state.current_user
     return u and u.get("role") in ("Manager", "Admin")
+
+
+def can_view_customer_names(role=None):
+    resolved_role = role
+    if resolved_role is None:
+        user = st.session_state.get("current_user")
+        resolved_role = user.get("role") if user else None
+    return resolved_role != "Banker"

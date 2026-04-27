@@ -16,6 +16,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 import streamlit as st
+from kyc_dashboard.components import display_customer_name
+from kyc_dashboard.state import can_view_customer_names
 
 
 def _clear_batch_queue():
@@ -226,13 +228,20 @@ def _render_structured_section(files):
     _seed_structured_provenance()
     st.session_state.latest_discrepancy_report = _collect_discrepancy_report()
     st.success("Engine loaded — " + str(len(customers)) + " customers ready.")
-    st.success("Data loaded successfully. You can now run evaluations in the Individual or Batch tabs.")
+    st.success("Data loaded successfully. You can now run the review queue from the Dashboard tab.")
     if not st.session_state.get("data_loaded_flag"):
         st.session_state["data_loaded_flag"] = True
         st.rerun()
 
 
-def _render_document_section(files):
+def _format_customer_match_label(customer_id: str, customer_name: str, score: float, role: Optional[str]) -> str:
+    base = customer_id
+    if can_view_customer_names(role):
+        base += " (" + customer_name + ")"
+    return base + " — " + str(int(score * 100)) + "%"
+
+
+def _render_document_section(files, role: Optional[str] = None):
     """Process document files with OCR, sensitivity checks, extraction, and customer linking."""
     from kyc_dashboard.main import LOW_CONFIDENCE_THRESHOLD, log, mask, run_ocr, touch
     from kyc_dashboard.provenance import (
@@ -395,11 +404,15 @@ def _render_document_section(files):
             for key, label, mask_type in field_pairs:
                 val = analysis.get(key)
                 conf_val = float(analysis.get(key + "_confidence", confidences.get(key, 0)) or 0)
+                if key == "customer_name":
+                    display_value = display_customer_name(val, role) if val else "Not found"
+                else:
+                    display_value = mask(val, mask_type) if val else "Not found"
                 extracted_rows.append(
                     {
                         "field_key": key,
                         "Field": label,
-                        "Extracted value": mask(val, mask_type) if val else "Not found",
+                        "Extracted value": display_value,
                         "Confidence": conf_val,
                     }
                 )
@@ -413,6 +426,9 @@ def _render_document_section(files):
                 st.warning("Low-confidence fields detected (<75%). Review and correct before linking.")
                 for low in low_conf_fields:
                     field_key = low["field_key"]
+                    if field_key == "customer_name" and not can_view_customer_names(role):
+                        st.caption("Name correction is restricted for the Banker profile.")
+                        continue
                     corrected_values[field_key] = st.text_input(
                         low["Field"] + " (correction)",
                         value=str(analysis.get(field_key) or ""),
@@ -427,34 +443,37 @@ def _render_document_section(files):
                     pass
 
             with st.expander("Preview Original Document", expanded=False):
-                filename_lower = uploaded_file.name.lower()
-                if filename_lower.endswith((".png", ".jpg", ".jpeg", ".tiff")):
-                    st.image(fbytes, caption=uploaded_file.name, use_container_width=True)
-                elif filename_lower.endswith(".pdf"):
-                    b64 = base64.b64encode(fbytes).decode("utf-8")
-                    pdf_display = (
-                        '<iframe src="data:application/pdf;base64,' + b64 + '" '
-                        'width="100%" height="600" type="application/pdf"></iframe>'
-                    )
-                    st.markdown(pdf_display, unsafe_allow_html=True)
-                    st.download_button(
-                        "Download PDF",
-                        data=fbytes,
-                        file_name=uploaded_file.name,
-                        mime="application/pdf",
-                        key="preview_download_" + str(i),
-                    )
-                elif filename_lower.endswith(".docx"):
-                    st.caption("Word document preview not available. Use the extracted fields above or download to verify.")
-                    st.download_button(
-                        "Download .docx to view",
-                        data=fbytes,
-                        file_name=uploaded_file.name,
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        key="preview_download_docx_" + str(i),
-                    )
+                if not can_view_customer_names(role):
+                    st.info("Original document preview is restricted for the Banker profile.")
                 else:
-                    st.caption("Preview not available for this file type.")
+                    filename_lower = uploaded_file.name.lower()
+                    if filename_lower.endswith((".png", ".jpg", ".jpeg", ".tiff")):
+                        st.image(fbytes, caption=uploaded_file.name, use_container_width=True)
+                    elif filename_lower.endswith(".pdf"):
+                        b64 = base64.b64encode(fbytes).decode("utf-8")
+                        pdf_display = (
+                            '<iframe src="data:application/pdf;base64,' + b64 + '" '
+                            'width="100%" height="600" type="application/pdf"></iframe>'
+                        )
+                        st.markdown(pdf_display, unsafe_allow_html=True)
+                        st.download_button(
+                            "Download PDF",
+                            data=fbytes,
+                            file_name=uploaded_file.name,
+                            mime="application/pdf",
+                            key="preview_download_" + str(i),
+                        )
+                    elif filename_lower.endswith(".docx"):
+                        st.caption("Word document preview not available. Use the extracted fields above or download to verify.")
+                        st.download_button(
+                            "Download .docx to view",
+                            data=fbytes,
+                            file_name=uploaded_file.name,
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            key="preview_download_docx_" + str(i),
+                        )
+                    else:
+                        st.caption("Preview not available for this file type.")
 
             customers_df = st.session_state.get("customers", st.session_state.get("customers_df", None))
             if customers_df is None or getattr(customers_df, "empty", True):
@@ -477,7 +496,7 @@ def _render_document_section(files):
 
             if len(matches) == 1 and matches[0][2] > 0.85:
                 cid, cname, score = matches[0]
-                st.markdown("🔗 **Customer match:** " + cid + " (" + cname + ") — " + str(int(score * 100)) + "%")
+                st.markdown("🔗 **Customer match:** " + _format_customer_match_label(cid, cname, score, role))
                 c1, c2 = st.columns(2)
                 if c1.button("Confirm & Link", key="confirm_link_" + str(i)):
                     selected_customer_id = cid
@@ -489,7 +508,7 @@ def _render_document_section(files):
                     )
             elif len(matches) > 1:
                 st.markdown("🔗 **Multiple customer matches found:**")
-                options = [cid + " (" + cname + ") — " + str(int(score * 100)) + "%" for cid, cname, score in matches]
+                options = [_format_customer_match_label(cid, cname, score, role) for cid, cname, score in matches]
                 choice = st.selectbox("Select customer to link:", options, key="multi_select_" + str(i))
                 if st.button("Confirm & Link", key="confirm_multi_" + str(i)):
                     selected_customer_id = matches[options.index(choice)][0]
@@ -748,4 +767,4 @@ def render(user=None, role=None, logger=None):
         _render_structured_section(structured_files)
 
     if document_files:
-        _render_document_section(document_files)
+        _render_document_section(document_files, role=role)

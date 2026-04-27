@@ -49,7 +49,7 @@ from kyc_dashboard.state import (
     _force_logout,
     can_unmask,
 )
-from kyc_dashboard.tabs import individual, batch, data_documents, system_info, approval_queue, cases, audit_trail, impact_analysis, monitoring
+from kyc_dashboard.tabs import dashboard, data_documents, system_info, approval_queue, cases, audit_trail, impact_analysis, monitoring
 
 # ── API keys ──────────────────────────────────────────────────────────────────
 
@@ -148,6 +148,7 @@ def load_users():
         "analyst1": {"user_id": "fb_a1",      "username": "analyst1", "password": "analyst123", "role": "Analyst", "full_name": "KYC Analyst One"},
         "analyst2": {"user_id": "fb_a2",      "username": "analyst2", "password": "analyst456", "role": "Analyst", "full_name": "KYC Analyst Two"},
         "viewer":   {"user_id": "fb_viewer",  "username": "viewer",   "password": "viewer123",  "role": "Viewer",  "full_name": "Read Only Reviewer"},
+        "banker":   {"user_id": "fb_banker",  "username": "banker",   "password": "banker123",  "role": "Banker",  "full_name": "Bank Operations User"},
     }
     try:
         p = Path.cwd() / "users.json"
@@ -970,6 +971,21 @@ def _try_autoload_engine():
 # MAIN APP
 # ╚══════════════════════════════════════════════════════════════════════════════
 
+def _render_status_strip(logger):
+    st.divider()
+    s1, s2, s3 = st.columns(3)
+    with s1:
+        if st.session_state.engines_initialized:
+            n = len(st.session_state.customers_df)
+            st.success(f"Engine Ready — {n:,} customers loaded")
+        else:
+            st.warning("No data — use Data & Documents")
+    with s2:
+        st.info(f"Ruleset: {RULESET_VERSION}")
+    with s3:
+        st.info(f"Audit events: {logger.event_count() if logger else 0}")
+
+
 def render_main():
     user = st.session_state.current_user
     role = user["role"]
@@ -1020,57 +1036,28 @@ def render_main():
 
     st.divider()
 
-    # Status strip
-    s1, s2, s3, s4 = st.columns(4)
-    with s1:
-        if st.session_state.engines_initialized:
-            n = len(st.session_state.customers_df)
-            st.success(f"Engine Ready — {n:,} customers loaded")
-        else:
-            st.warning("No data — use Data & Documents")
-    with s2:
-        st.info(f"Ruleset: {RULESET_VERSION}")
-    with s3:
-        st.info(f"Audit events: {logger.event_count() if logger else 0}")
-    with s4:
-        st.info(f"Prompts loaded: {len(PROMPTS)}")
-
-    st.divider()
-
     render_institution_banner()
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
-        "Individual Evaluation", "Batch Results", "Data & Documents",
-        "System Info", "Approval Queue", "Cases",
-        "Audit Trail", "Impact Analysis", "Source Monitoring",
-    ])
+    if role == "Banker":
+        (data_tab,) = st.tabs(["Data & Documents"])
+        with data_tab:
+            data_documents.render(user, role, logger)
+            _render_status_strip(logger)
+        return
 
-    # ════════════════════════════════════════════════════════
-    # TAB 1: INDIVIDUAL EVALUATION
-    # ════════════════════════════════════════════════════════
-    with tab1:
-        individual.render(user, role, logger)
-
-    with tab2:
-        batch.render(user, role, logger)
-
-    with tab3:
-        data_documents.render(user, role, logger)
-
-    with tab4:
-        system_info.render(user, role, logger)
-
-    with tab5:
-        approval_queue.render(user, role, logger)
-
-    with tab6:
-        cases.render(user, role, logger)
-
-    with tab7:
-        audit_trail.render(user, role, logger)
-
-    with tab8:
-        impact_analysis.render(user, role, logger)
-
-    with tab9:
-        monitoring.render(user, role, logger)
+    tabs = [
+        ("Dashboard", dashboard.render),
+        ("Data & Documents", data_documents.render),
+        ("System Info", system_info.render),
+        ("Approval Queue", approval_queue.render),
+        ("Cases", cases.render),
+        ("Impact Analysis", impact_analysis.render),
+        ("Source Monitoring", monitoring.render),
+    ]
+    if role != "Admin":
+        tabs.insert(5, ("Audit Trail", audit_trail.render))
+    tab_views = st.tabs([label for label, _ in tabs])
+    for tab_view, (_, render_fn) in zip(tab_views, tabs):
+        with tab_view:
+            render_fn(user, role, logger)
+            _render_status_strip(logger)
