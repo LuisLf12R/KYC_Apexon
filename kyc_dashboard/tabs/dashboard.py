@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as st_components
 
 from kyc_dashboard.components import (
     display_customer_name,
@@ -1060,28 +1061,645 @@ def _render_remediation(queue_row: Dict[str, Any], result: Dict[str, Any], user:
                 st.success("Clear proposed. Awaiting manager approval.")
 
 
+# ── Component data serialisation ──────────────────────────────────────────────
+
+def _map_to_case_json(row: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
+    disposition = row.get("disposition", "REVIEW")
+    score = row["confidence_score"]
+
+    status_map = {
+        "REJECT":         ("Escalated",       "bad"),
+        "REVIEW":         ("Pending review",  "warn"),
+        "PASS_WITH_NOTES":("Dual-approval",   "accent"),
+        "PASS":           ("Cleared",         "ok"),
+    }
+    status_label, _ = status_map.get(disposition, ("Pending review", "warn"))
+
+    sla_map = {
+        "REJECT":          {"tone": "bad",  "label": "Action needed"},
+        "REVIEW":          {"tone": "warn", "label": "Under review"},
+        "PASS_WITH_NOTES": {"tone": "warn", "label": "Pending sign-off"},
+        "PASS":            {"tone": "ok",   "label": "On track"},
+    }
+
+    risk = "low" if score >= 70 else "medium" if score >= 50 else "high"
+
+    dim_fields = [
+        ("identity",     "Identity verification", "identity_verification_score"),
+        ("aml",          "AML / PEP screening",   "aml_screening_score"),
+        ("ubo",          "Beneficial ownership",  "beneficial_ownership_score"),
+        ("sow",          "Source of Wealth",      "source_of_wealth_score"),
+        ("crs",          "CRS / FATCA",           "crs_fatca_score"),
+        ("activity",     "Account activity",      "account_activity_score"),
+        ("data_quality", "Data quality",          "data_quality_score"),
+    ]
+    dimensions = []
+    for key, title, sf in dim_fields:
+        s = int(round(_as_float(result.get(sf, 0))))
+        if s > 0:
+            tone = "ok" if s >= 70 else "warn" if s >= 50 else "bad"
+            dimensions.append({"key": key, "title": title, "score": s,
+                                "tone": tone, "sub": f"Score: {s} / 100"})
+
+    reject_rules, review_rules = [], []
+    for r in result.get("triggered_reject_rules", []) or []:
+        reject_rules.append({
+            "name": _safe_str(r.get("name") or r.get("rule_id", ""))[:60],
+            "desc": _safe_str(r.get("description", ""))[:90],
+        })
+    for r in result.get("triggered_review_rules", []) or []:
+        review_rules.append({
+            "name": _safe_str(r.get("name") or r.get("rule_id", ""))[:60],
+            "desc": _safe_str(r.get("description", ""))[:90],
+        })
+
+    name = row["customer_name_raw"] or row["customer_id"]
+    parts = name.upper().split()
+    ini = (parts[0][0] + parts[-1][0]) if len(parts) >= 2 else name[:2].upper()
+
+    return {
+        "id":           row["customer_id"],
+        "client":       row["customer_name_display"],
+        "ini":          ini,
+        "tier":         row.get("risk_rating", "Standard"),
+        "type":         row.get("entity_type", "Individual"),
+        "jurisdiction": row.get("jurisdiction", "—"),
+        "rm":           "Officer — J. Marlow",
+        "status":       status_label,
+        "risk":         risk,
+        "riskScore":    score,
+        "aum":          "—",
+        "sla":          sla_map.get(disposition, {"tone": "warn", "label": "Under review"}),
+        "flags":        [r["name"] for r in (reject_rules + review_rules)[:3]] or ["No flags"],
+        "dimensions":   dimensions,
+        "rejectRules":  reject_rules,
+        "reviewRules":  review_rules,
+        "rationale":    _safe_str(result.get("rationale", ""))[:200],
+        "notes":        row.get("notes", "")[:120],
+    }
+
+
+def _build_component_data(queue_rows: List[Dict[str, Any]],
+                          batch_results: pd.DataFrame,
+                          batch_id: str,
+                          run_at: str) -> Dict[str, Any]:
+    cases = []
+    for row in queue_rows:
+        result = _result_lookup(batch_results, row["customer_id"])
+        cases.append(_map_to_case_json(row, result))
+
+    total = len(cases)
+    pass_count   = sum(1 for r in queue_rows if r.get("decision") == "PASS")
+    fail_count   = sum(1 for r in queue_rows if r.get("disposition") == "REJECT")
+    review_count = sum(1 for r in queue_rows if r.get("disposition") in ("REJECT", "REVIEW"))
+    avg_score    = round(sum(r["confidence_score"] for r in queue_rows) / max(total, 1), 1)
+    pass_rate    = int(round(pass_count / max(total, 1) * 100))
+
+    return {
+        "cases": cases,
+        "kpis": {
+            "total": total,
+            "passRate": pass_rate,
+            "passCount": pass_count,
+            "failCount": fail_count,
+            "reviewCount": review_count,
+            "avgScore": avg_score,
+        },
+        "batchId": batch_id,
+        "runAt": run_at,
+    }
+
+
+# ── Full HTML component (React + design CSS, runs in iframe) ──────────────────
+
+def _build_dashboard_html(component_data: Dict[str, Any]) -> str:
+    data_json = json.dumps(component_data, default=str, ensure_ascii=False)
+
+    css = r"""
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; font-family: "Helvetica Neue", Helvetica, Arial, ui-sans-serif, system-ui, sans-serif; background: #f6f6f8; -webkit-font-smoothing: antialiased; }
+:root {
+  --bg:#ffffff; --bg-elev:#fbfbfc; --bg-sunken:#f6f6f8; --bg-hover:#f3f3f6; --bg-active:#eeeef3;
+  --line:#ececf0; --line-strong:#d8d8e0;
+  --ink:#0e1014; --ink-2:#2a2d35; --ink-3:#4a4e59; --ink-4:#6a6e79; --ink-5:#8a8e98;
+  --accent:#3b5bdb; --accent-soft:#eef1ff; --accent-ink:#2f4abf;
+  --ok:#2b9a48; --ok-soft:#eafbee;
+  --warn:#c07700; --warn-soft:#fff9e1; --warn-text:#8a5900;
+  --bad:#c22828; --bad-soft:#fff1f0;
+  --info:#1864ab; --info-soft:#e7f5ff;
+  --risk-med:#b07a00;
+  --radius:8px; --radius-sm:6px; --radius-lg:12px;
+  --shadow-sm:0 1px 2px rgba(15,17,22,.05),0 0 0 1px rgba(15,17,22,.03);
+  --shadow-md:0 2px 8px rgba(15,17,22,.09),0 0 0 1px rgba(15,17,22,.04);
+  --d-row:44px; --d-pad:16px; --d-gap:16px; --d-text:14px;
+  --font-mono:"SF Mono",Menlo,Consolas,monospace;
+}
+button { font:inherit; color:inherit; cursor:pointer; border:0; background:none; padding:0; }
+input, textarea, select { font:inherit; color:inherit; }
+.tnum  { font-variant-numeric:tabular-nums; }
+.mono  { font-family:var(--font-mono); font-variant-numeric:tabular-nums; }
+.muted { color:var(--ink-3); }
+.eyebrow { font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-4); font-weight:500; }
+.row-flex { display:flex; align-items:center; gap:10px; }
+.row-flex.gap-sm { gap:6px; }
+.row-flex.between { justify-content:space-between; }
+.col-flex { display:flex; flex-direction:column; gap:var(--d-gap); }
+.divider  { height:1px; background:var(--line); margin:var(--d-gap) 0; }
+.page-h   { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; margin-bottom:20px; }
+.page-title { font-size:22px; font-weight:600; letter-spacing:-.02em; margin:4px 0; color:var(--ink); }
+.page-sub   { color:var(--ink-3); font-size:13.5px; }
+.section-h  { display:flex; align-items:center; justify-content:space-between; margin:6px 0 12px; }
+.section-h h3 { margin:0; font-size:14px; font-weight:600; color:var(--ink); }
+.section-h .meta { color:var(--ink-4); font-size:12px; }
+.card { background:var(--bg); border:1px solid var(--line); border-radius:var(--radius-lg); box-shadow:var(--shadow-sm); overflow:hidden; margin-bottom:14px; }
+.card-pad { padding:var(--d-pad) calc(var(--d-pad) + 4px); }
+.card-h { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid var(--line); }
+.card-h h3 { margin:0; font-size:13.5px; font-weight:600; letter-spacing:-.005em; color:var(--ink); }
+.card-h .meta { color:var(--ink-4); font-size:12px; }
+.kpi-strip { display:grid; grid-template-columns:repeat(4,1fr); gap:var(--d-gap); margin-bottom:var(--d-gap); }
+.kpi { background:var(--bg); border:1px solid var(--line); border-radius:var(--radius-lg); padding:16px 18px 18px; position:relative; overflow:hidden; }
+.kpi-label { font-size:12px; color:var(--ink-3); display:flex; align-items:center; gap:6px; }
+.kpi-value { font-size:28px; font-weight:600; letter-spacing:-.025em; margin-top:6px; font-variant-numeric:tabular-nums; color:var(--ink); }
+.kpi-sub   { font-size:12px; color:var(--ink-4); margin-top:2px; }
+.kpi-delta { display:inline-flex; align-items:center; gap:3px; font-size:11.5px; padding:2px 6px; border-radius:4px; margin-left:8px; vertical-align:3px; font-variant-numeric:tabular-nums; }
+.kpi-delta.up   { color:var(--ok);   background:var(--ok-soft); }
+.kpi-delta.down { color:var(--bad);  background:var(--bad-soft); }
+.badge { display:inline-flex; align-items:center; gap:5px; padding:2px 8px; border-radius:999px; font-size:11.5px; font-weight:500; line-height:1.5; white-space:nowrap; }
+.badge .dot { width:6px; height:6px; border-radius:50%; background:currentColor; flex:0 0 auto; }
+.b-ok     { color:var(--ok);         background:var(--ok-soft); }
+.b-warn   { color:var(--warn-text);  background:var(--warn-soft); }
+.b-bad    { color:var(--bad);        background:var(--bad-soft); }
+.b-info   { color:var(--info);       background:var(--info-soft); }
+.b-mute   { color:var(--ink-3);      background:var(--bg-sunken); }
+.b-accent { color:var(--accent-ink); background:var(--accent-soft); }
+.risk-bar { display:inline-grid; grid-template-columns:repeat(5,4px); gap:2px; vertical-align:middle; margin-right:6px; }
+.risk-bar i { height:10px; border-radius:1px; background:var(--bg-active); display:block; }
+.risk-bar.r-1 i:nth-child(-n+1),.risk-bar.r-2 i:nth-child(-n+2),.risk-bar.r-3 i:nth-child(-n+3),.risk-bar.r-4 i:nth-child(-n+4),.risk-bar.r-5 i:nth-child(-n+5) { background:currentColor; }
+.risk-low    { color:var(--ok); }
+.risk-medium { color:var(--risk-med); }
+.risk-high   { color:var(--bad); }
+.tbl { width:100%; border-collapse:collapse; }
+.tbl thead th { text-align:left; font-weight:500; font-size:11.5px; color:var(--ink-4); text-transform:uppercase; letter-spacing:.06em; padding:10px 14px; border-bottom:1px solid var(--line); background:var(--bg-elev); position:sticky; top:0; z-index:1; }
+.tbl tbody td { padding:0 14px; height:var(--d-row); border-bottom:1px solid var(--line); font-size:var(--d-text); vertical-align:middle; color:var(--ink); }
+.tbl tbody tr:last-child td { border-bottom:0; }
+.tbl tbody tr { cursor:pointer; transition:background .12s; }
+.tbl tbody tr:hover { background:var(--bg-hover); }
+.tbl tbody tr[data-selected="true"] { background:var(--accent-soft); }
+.cell-id { font-family:var(--font-mono); color:var(--ink-3); font-size:12px; }
+.cell-client { display:flex; align-items:center; gap:10px; }
+.cell-client .ini { width:28px; height:28px; border-radius:50%; background:var(--bg-active); color:var(--ink-2); display:grid; place-items:center; font-size:11px; font-weight:600; letter-spacing:0; flex:0 0 auto; }
+.cell-client b { font-weight:500; display:block; line-height:1.2; }
+.cell-client small { color:var(--ink-4); font-size:11.5px; }
+.cell-num { font-variant-numeric:tabular-nums; font-family:var(--font-mono); }
+.sla { display:inline-flex; align-items:center; gap:6px; font-variant-numeric:tabular-nums; font-size:12.5px; }
+.sla.ok   { color:var(--ok); }
+.sla.warn { color:var(--risk-med); }
+.sla.bad  { color:var(--bad); }
+.chips { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.chip { display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 10px; border:1px solid var(--line); border-radius:999px; background:var(--bg); color:var(--ink-2); font-size:12.5px; transition:background .1s,border-color .1s,color .1s; }
+.chip:hover { background:var(--bg-hover); }
+.chip[data-active="true"] { border-color:var(--ink); background:var(--ink); color:var(--bg); }
+.search { display:flex; align-items:center; gap:8px; background:var(--bg-sunken); border:1px solid var(--line); border-radius:8px; padding:0 12px; height:34px; color:var(--ink-3); transition:border-color .15s,box-shadow .15s; }
+.search:focus-within { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); color:var(--ink); }
+.search input { background:none; border:0; outline:0; flex:1; font-size:13.5px; min-width:0; }
+.flag-row { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-top:1px solid var(--line); transition:background .12s; }
+.flag-row:first-child { border-top:0; }
+.flag-row:hover { background:var(--bg-hover); }
+.flag-row .left { display:flex; align-items:center; gap:12px; min-width:0; flex:1; }
+.flag-row .ico { width:28px; height:28px; border-radius:7px; background:var(--bg-sunken); display:grid; place-items:center; flex:0 0 auto; font-size:13px; color:var(--ink-4); }
+.flag-row .ico.bad  { background:var(--bad-soft);  color:var(--bad); }
+.flag-row .ico.warn { background:var(--warn-soft); color:var(--warn-text); }
+.flag-row .ico.info { background:var(--info-soft); color:var(--info); }
+.flag-row .ico.ok   { background:var(--ok-soft);   color:var(--ok); }
+.flag-row .t { font-size:13px; font-weight:500; color:var(--ink); }
+.flag-row .s { font-size:12px; color:var(--ink-3); }
+.tabs-priority { display:flex; align-items:stretch; gap:8px; padding-bottom:0; border-bottom:1px solid var(--line); margin-bottom:var(--d-gap); }
+.tabs-priority .tab-primary { display:inline-flex; align-items:center; gap:8px; padding:10px 14px 10px 12px; background:var(--ink); color:var(--bg); border:1px solid var(--ink); border-radius:var(--radius) var(--radius) 0 0; font-size:13.5px; font-weight:600; cursor:pointer; margin-bottom:-1px; box-shadow:var(--shadow-sm); }
+.tabs-priority .tab-primary:hover { opacity:.9; }
+.tabs-priority .tab-pill { margin-left:4px; background:rgba(255,255,255,.18); color:var(--bg); font-size:11px; font-weight:500; padding:2px 8px; border-radius:999px; }
+.tabs-priority .tabs-divider { width:1px; background:var(--line); margin:6px 6px 0; }
+.tabs-priority .tab-secondary { padding:10px; background:transparent; border:0; border-bottom:2px solid transparent; color:var(--ink-4); font-size:12.5px; font-weight:500; cursor:pointer; margin-bottom:-1px; }
+.tabs-priority .tab-secondary:hover { color:var(--ink-2); }
+.tabs-priority .tab-secondary[aria-current="true"] { color:var(--ink); border-color:var(--ink); }
+.approval { border:1px solid var(--line); border-radius:var(--radius-lg); background:var(--bg); padding:16px; display:flex; flex-direction:column; gap:12px; box-shadow:var(--shadow-sm); }
+.approval h4 { margin:0; font-size:13px; font-weight:600; }
+.approval .grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.approval textarea { width:100%; border:1px solid var(--line); background:var(--bg-sunken); border-radius:8px; padding:10px 12px; resize:vertical; font-size:13px; min-height:70px; outline:0; transition:border-color .15s,box-shadow .15s; color:var(--ink); }
+.approval textarea:focus { border-color:var(--accent); background:var(--bg); box-shadow:0 0 0 3px var(--accent-soft); }
+.btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; height:36px; padding:0 14px; border-radius:8px; font-size:13.5px; font-weight:500; border:1px solid var(--line); background:var(--bg); color:var(--ink); transition:background .12s,border-color .12s; cursor:pointer; }
+.btn:hover { background:var(--bg-hover); }
+.btn:disabled { opacity:.4; cursor:not-allowed; }
+.btn.primary { background:var(--ink); color:var(--bg); border-color:var(--ink); }
+.btn.primary:hover { background:var(--ink-2); }
+.btn.danger  { color:var(--bad); border-color:var(--bad-soft); background:var(--bad-soft); }
+.btn.danger:hover { background:#fce4e4; }
+.btn.success { color:var(--ok); border-color:var(--ok-soft); background:var(--ok-soft); }
+.btn.success:hover { background:#d8f5e1; }
+.btn.ghost { background:transparent; border-color:transparent; }
+.btn.ghost:hover { background:var(--bg-hover); }
+.btn.full  { width:100%; }
+.approver { display:flex; align-items:center; gap:10px; padding:10px; border:1px dashed var(--line); border-radius:8px; font-size:12.5px; }
+.approver.signed { border-style:solid; background:var(--ok-soft); border-color:transparent; }
+.avatar { width:30px; height:30px; border-radius:50%; background:linear-gradient(135deg,#7b8fff,#5a6fee); display:grid; place-items:center; color:white; font-size:11px; font-weight:600; flex:0 0 auto; }
+.detail-grid { display:grid; grid-template-columns:minmax(0,1fr) 320px; gap:var(--d-gap); }
+::-webkit-scrollbar { width:8px; height:8px; }
+::-webkit-scrollbar-thumb { background:var(--line-strong); border-radius:999px; border:2px solid var(--bg-sunken); }
+::-webkit-scrollbar-track { background:transparent; }
+"""
+
+    react_code = r"""
+const { useState, useMemo } = React;
+const DATA = window.__QUEUE_DATA__;
+
+function Icon({ name, size = 14, color = "currentColor" }) {
+  const s = { width: size, height: size };
+  const p = { fill: "none", stroke: color, strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round", ...s };
+  if (name === "check")    return <svg {...p} viewBox="0 0 16 16"><polyline points="2,8 6,12 14,4"/></svg>;
+  if (name === "flag")     return <svg {...p} viewBox="0 0 16 16"><path d="M3 2v12M3 2h8l-2 4 2 4H3"/></svg>;
+  if (name === "x")        return <svg {...p} viewBox="0 0 16 16"><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/></svg>;
+  if (name === "file")     return <svg {...p} viewBox="0 0 16 16"><path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/><line x1="6" y1="8" x2="10" y2="8"/><line x1="6" y1="11" x2="10" y2="11"/></svg>;
+  if (name === "chevronL") return <svg {...p} viewBox="0 0 16 16"><polyline points="10,3 5,8 10,13"/></svg>;
+  if (name === "escalate") return <svg {...p} viewBox="0 0 16 16"><polyline points="8,12 8,4"/><polyline points="4,8 8,4 12,8"/></svg>;
+  if (name === "search")   return <svg {...p} viewBox="0 0 16 16"><circle cx="7" cy="7" r="4"/><line x1="10.5" y1="10.5" x2="14" y2="14"/></svg>;
+  return <span style={{fontSize:size}}>{name}</span>;
+}
+
+function RiskBar({ risk, score }) {
+  const n = { low: 1, medium: 3, high: 5 }[risk] || 1;
+  const cls = risk === "low" ? "risk-low" : risk === "medium" ? "risk-medium" : "risk-high";
+  return (
+    <span className="row-flex gap-sm">
+      <span className={`risk-bar r-${n} ${cls}`}><i/><i/><i/><i/><i/></span>
+      <span className="tnum" style={{fontSize:12.5,color:"var(--ink-4)"}}>{score}</span>
+    </span>
+  );
+}
+
+function KpiStrip({ kpis }) {
+  const cards = [
+    { label:"Open cases",      value: kpis.total,          sub:"in current queue run" },
+    { label:"Pass rate",       value: kpis.passRate + "%", sub:`${kpis.passCount} customers cleared` },
+    { label:"Require review",  value: kpis.reviewCount,    sub:"REJECT or REVIEW disposition",
+      delta: kpis.failCount > 0 ? { cls:"down", text:`${kpis.failCount} hard fail` } : null },
+    { label:"Avg. confidence", value: kpis.avgScore,       sub:"out of 100" },
+  ];
+  return (
+    <div className="kpi-strip">
+      {cards.map((c, i) => (
+        <div className="kpi" key={i}>
+          <div className="kpi-label">{c.label}</div>
+          <div className="kpi-value">
+            {c.value}
+            {c.delta && <span className={`kpi-delta ${c.delta.cls}`}>{c.delta.text}</span>}
+          </div>
+          <div className="kpi-sub">{c.sub}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CasePanel({ c, onBack }) {
+  const [tab, setTab]         = useState("reconcile");
+  const [signoffA, setSignoffA] = useState(false);
+  const [signoffB, setSignoffB] = useState(false);
+  const [note, setNote]       = useState("");
+  const [decision, setDecision] = useState(null);
+
+  if (!c) return (
+    <div style={{padding:"60px 20px",textAlign:"center",color:"var(--ink-4)"}}>
+      <div style={{fontSize:32,marginBottom:12}}>←</div>
+      <div style={{fontSize:14,fontWeight:500,color:"var(--ink)"}}>Select a case</div>
+      <div style={{fontSize:13,marginTop:4}}>Click a row in the queue to view details</div>
+    </div>
+  );
+
+  const badgeCls = c.status==="Escalated" ? "b-bad" : c.status==="Dual-approval" ? "b-accent" : c.status==="Cleared" ? "b-ok" : c.status==="Awaiting docs" ? "b-warn" : "b-mute";
+  const totalFlags = c.rejectRules.length + c.reviewRules.length;
+
+  return (
+    <div>
+      <div className="page-h" style={{marginBottom:12}}>
+        <div>
+          <div className="row-flex" style={{marginBottom:6}}>
+            <button className="btn ghost" onClick={onBack} style={{height:28,padding:"0 8px",gap:4}}>
+              <Icon name="chevronL" size={12}/> Back
+            </button>
+            <span className="cell-id mono">{c.id}</span>
+          </div>
+          <h1 className="page-title" style={{fontSize:18,marginBottom:2}}>{c.client}</h1>
+          <div className="page-sub">{c.tier} · {c.type} · {c.jurisdiction} · RM {c.rm.split(" — ")[1]||c.rm}</div>
+        </div>
+        <div><span className={`badge ${badgeCls}`}><span className="dot"/>{c.status}</span></div>
+      </div>
+
+      <div className="kpi-strip" style={{gridTemplateColumns:"repeat(3,1fr)",marginBottom:12}}>
+        <div className="kpi">
+          <div className="kpi-label">Risk score</div>
+          <div className="kpi-value">{c.riskScore}<span className="muted" style={{fontSize:14,marginLeft:4}}>/100</span></div>
+          <div className="kpi-sub" style={{marginTop:6}}><RiskBar risk={c.risk} score={c.risk.toUpperCase()}/></div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">Entity type</div>
+          <div className="kpi-value" style={{fontSize:16,paddingTop:6}}>{c.type}</div>
+          <div className="kpi-sub">{c.jurisdiction}</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">Open flags</div>
+          <div className="kpi-value">{totalFlags}</div>
+          <div className="kpi-sub" style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+            {totalFlags > 0 ? (c.rejectRules[0]||c.reviewRules[0]).name : "No flags"}
+          </div>
+        </div>
+      </div>
+
+      <div className="tabs-priority">
+        <button className="tab-primary" aria-current={tab==="reconcile"} onClick={()=>setTab("reconcile")}>
+          <Icon name="check" size={13}/> Reconcile &amp; status
+          {totalFlags > 0 && <span className="tab-pill">{totalFlags} to review</span>}
+        </button>
+        <span className="tabs-divider"/>
+        <button className="tab-secondary" aria-current={tab==="overview"} onClick={()=>setTab("overview")}>Overview</button>
+        <button className="tab-secondary" aria-current={tab==="documents"} onClick={()=>setTab("documents")}>Documents</button>
+      </div>
+
+      <div className="detail-grid">
+        <div>
+          {tab==="overview" && (
+            <div className="card">
+              <div className="card-h"><h3>KYC dimensions</h3><span className="meta">click to drill in</span></div>
+              {c.dimensions.map((d,i)=>(
+                <div className="flag-row" key={d.key} style={{borderTop:i?"1px solid var(--line)":"0"}}>
+                  <div className="left">
+                    <div className={`ico ${d.tone==="ok"?"ok":d.tone==="bad"?"bad":"warn"}`}>
+                      <Icon name={d.tone==="ok"?"check":"flag"}/>
+                    </div>
+                    <div><div className="t">{d.title}</div><div className="s">{d.sub}</div></div>
+                  </div>
+                  <span className={`badge ${d.tone==="ok"?"b-ok":d.tone==="bad"?"b-bad":"b-warn"}`}>
+                    <span className="dot"/>{d.tone==="ok"?"Pass":d.tone==="bad"?"Fail":"Attention"} · {d.score}
+                  </span>
+                </div>
+              ))}
+              {c.dimensions.length===0 && <div style={{padding:"24px 16px",color:"var(--ink-4)",fontSize:13}}>No dimension scores available</div>}
+            </div>
+          )}
+
+          {tab==="documents" && (
+            <div className="card">
+              <div className="card-h"><h3>Documents</h3><span className="meta">on file</span></div>
+              {[
+                {n:"Identity document",s:"On file",tone:"ok"},
+                {n:"Proof of address",s:"On file",tone:"ok"},
+                {n:"Source of wealth documentation",s:"On file",tone:"ok"},
+              ].map((d,i)=>(
+                <div className="flag-row" key={i} style={{borderTop:i?"1px solid var(--line)":"0"}}>
+                  <div className="left">
+                    <div className="ico"><Icon name="file"/></div>
+                    <div><div className="t">{d.n}</div></div>
+                  </div>
+                  <span className="badge b-ok"><span className="dot"/>{d.s}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {tab==="reconcile" && (
+            <>
+              {totalFlags > 0 && (
+                <div className="card">
+                  <div className="card-h">
+                    <h3>What needs attention</h3>
+                    <span className="meta">{totalFlags} triggered</span>
+                  </div>
+                  {c.rejectRules.map((r,i)=>(
+                    <div className="flag-row" key={"rej"+i}>
+                      <div className="left">
+                        <div className="ico bad"><Icon name="x"/></div>
+                        <div><div className="t">{r.name}</div><div className="s">{r.desc}</div></div>
+                      </div>
+                      <span className="badge b-bad"><span className="dot"/>Hard Reject</span>
+                    </div>
+                  ))}
+                  {c.reviewRules.map((r,i)=>(
+                    <div className="flag-row" key={"rev"+i}>
+                      <div className="left">
+                        <div className="ico warn"><Icon name="flag"/></div>
+                        <div><div className="t">{r.name}</div><div className="s">{r.desc}</div></div>
+                      </div>
+                      <span className="badge b-warn"><span className="dot"/>Review</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {c.rationale && (
+                <div className="card">
+                  <div className="card-h"><h3>Decision rationale</h3></div>
+                  <div style={{padding:"12px 16px",fontSize:13,color:"var(--ink-3)",lineHeight:1.6}}>{c.rationale}</div>
+                </div>
+              )}
+              {totalFlags===0 && !c.rationale && (
+                <div className="card">
+                  <div style={{padding:"40px 16px",textAlign:"center"}}>
+                    <div style={{fontSize:28,color:"var(--ok)",marginBottom:8}}>✓</div>
+                    <div style={{fontSize:14,fontWeight:500,color:"var(--ink)"}}>No issues found</div>
+                    <div style={{fontSize:13,color:"var(--ink-4)",marginTop:4}}>All checks passed for this customer</div>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="col-flex">
+          <div className="approval">
+            <div className="row-flex between">
+              <h4>Decision</h4>
+              <span className={`badge ${badgeCls}`}><span className="dot"/>{c.status}</span>
+            </div>
+            <div className="muted" style={{fontSize:13}}>
+              {c.status==="Escalated" ? "Case escalated — requires senior review." :
+               c.status==="Dual-approval" ? "UHNW threshold requires sign-off from two officers." :
+               c.status==="Cleared" ? "Customer has cleared KYC review." :
+               "Case is pending review by compliance officer."}
+            </div>
+            <div className={`approver${signoffA?" signed":""}`}>
+              <div className="avatar" style={{width:26,height:26,fontSize:10}}>JM</div>
+              <div style={{flex:1}}>
+                <b>J. Marlow</b>
+                <div className="muted" style={{fontSize:11.5}}>{signoffA?"Signed · 14:22":"Awaiting signature"}</div>
+              </div>
+              {!signoffA && <button className="btn" style={{height:28}} onClick={()=>setSignoffA(true)}>Sign</button>}
+              {signoffA && <Icon name="check" color="var(--ok)"/>}
+            </div>
+            <div className={`approver${signoffB?" signed":""}`}>
+              <div className="avatar" style={{width:26,height:26,fontSize:10,background:"linear-gradient(135deg,#c07040,#e08040)"}}>KT</div>
+              <div style={{flex:1}}>
+                <b>K. Tran</b>
+                <div className="muted" style={{fontSize:11.5}}>{signoffB?"Signed · 14:31":"Pending"}</div>
+              </div>
+              {!signoffB && <button className="btn" style={{height:28}} onClick={()=>setSignoffB(true)} disabled={!signoffA}>Sign</button>}
+              {signoffB && <Icon name="check" color="var(--ok)"/>}
+            </div>
+            <textarea placeholder="Decision rationale…" value={note} onChange={e=>setNote(e.target.value)}/>
+            <div className="grid">
+              <button className="btn success" onClick={()=>setDecision("approve")} disabled={!signoffA||!signoffB}>
+                <Icon name="check"/> Approve
+              </button>
+              <button className="btn danger" onClick={()=>setDecision("reject")}>
+                <Icon name="x"/> Reject
+              </button>
+            </div>
+            <button className="btn full" onClick={()=>setDecision("escalate")}>
+              <Icon name="escalate"/> Escalate
+            </button>
+            {decision && (
+              <div className="muted" style={{fontSize:12,textAlign:"center"}}>
+                Recorded: <b style={{color:"var(--ink)"}}>{decision}</b>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WorklistView({ onOpenCase }) {
+  const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState("");
+
+  const cases = useMemo(()=>{
+    let list = DATA.cases.slice();
+    if (search) {
+      const s = search.toLowerCase();
+      list = list.filter(c=>c.client.toLowerCase().includes(s)||c.id.toLowerCase().includes(s)||c.jurisdiction.toLowerCase().includes(s));
+    }
+    if (filter==="review") list = list.filter(c=>c.status==="Escalated"||c.status==="Pending review");
+    if (filter==="high")   list = list.filter(c=>c.risk==="high");
+    if (filter==="pass")   list = list.filter(c=>c.status==="Cleared");
+    return list;
+  },[filter,search]);
+
+  const chips = [{v:"all",l:"All"},{v:"review",l:"Needs review"},{v:"high",l:"High risk"},{v:"pass",l:"Cleared"}];
+
+  return (
+    <>
+      <div className="page-h" style={{marginBottom:16}}>
+        <div>
+          <div className="eyebrow">Worklist</div>
+          <h1 className="page-title">KYC case queue</h1>
+          <div className="page-sub">High Net Worth Individuals · {DATA.runAt}</div>
+        </div>
+      </div>
+
+      <KpiStrip kpis={DATA.kpis}/>
+
+      <div className="section-h" style={{marginTop:8}}>
+        <h3>Active queue</h3>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <div className="chips">
+            {chips.map(c=>(
+              <button key={c.v} className="chip" data-active={filter===c.v} onClick={()=>setFilter(c.v)}>{c.l}</button>
+            ))}
+          </div>
+          <div className="search" style={{width:220}}>
+            <Icon name="search"/>
+            <input placeholder="Search clients, IDs…" value={search} onChange={e=>setSearch(e.target.value)}/>
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div style={{overflowX:"auto"}}>
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Client</th>
+                <th style={{width:140}}>Risk</th>
+                <th>Action needed</th>
+                <th style={{width:120}}>Due</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cases.map(c=>{
+                const bc = c.status==="Escalated"?"b-bad":c.status==="Dual-approval"?"b-accent":c.status==="Cleared"?"b-ok":c.status==="Awaiting docs"?"b-warn":"b-mute";
+                return (
+                  <tr key={c.id} onClick={()=>onOpenCase(c)}>
+                    <td>
+                      <div className="cell-client">
+                        <div className="ini">{c.ini}</div>
+                        <div>
+                          <b>{c.client}</b>
+                          <small>{c.tier} · {c.jurisdiction}</small>
+                        </div>
+                      </div>
+                    </td>
+                    <td><RiskBar risk={c.risk} score={c.riskScore}/></td>
+                    <td><span className={`badge ${bc}`}><span className="dot"/>{c.status}</span></td>
+                    <td><span className={`sla ${c.sla.tone}`}>{c.sla.label}</span></td>
+                  </tr>
+                );
+              })}
+              {cases.length===0 && (
+                <tr><td colSpan={4} style={{textAlign:"center",padding:"32px 0",color:"var(--ink-4)"}}>No cases match the current filter</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function App() {
+  const [view, setView]      = useState("worklist");
+  const [activeCase, setActiveCase] = useState(null);
+
+  const openCase = (c) => { setActiveCase(c); setView("case"); };
+  const goBack   = ()  => setView("worklist");
+
+  return (
+    <div style={{padding:"20px 24px",minHeight:"100%",background:"var(--bg-sunken)"}}>
+      {view==="worklist" && <WorklistView onOpenCase={openCase}/>}
+      {view==="case"     && <CasePanel c={activeCase} onBack={goBack}/>}
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App/>);
+"""
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>{css}</style>
+</head>
+<body>
+<div id="root"></div>
+<script>window.__QUEUE_DATA__ = {data_json};</script>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script type="text/babel" data-presets="react">
+{react_code}
+</script>
+</body>
+</html>"""
+
+
 # ── Main render ────────────────────────────────────────────────────────────────
 
 def render(user: Dict[str, Any], role: str, logger: Any) -> None:
-    st.markdown(_DASH_CSS, unsafe_allow_html=True)
-
-    # Page header
-    ph1, ph2 = st.columns([3, 1])
-    with ph1:
-        st.markdown(
-            "<div class='eyebrow'>KYC Operations</div>"
-            "<h1 class='page-title'>Customer queue</h1>"
-            f"<div class='page-sub'>High Net Worth Individuals &nbsp;·&nbsp; {datetime.now().strftime('%a, %d %b %Y')}</div>"
-            "<div style='margin-bottom:16px'></div>",
-            unsafe_allow_html=True,
-        )
-
     if not st.session_state.get("engines_initialized"):
         st.warning("No data loaded yet. Use Data & Documents to load customer files before running the queue.")
         _render_admin_tools(user, role, logger)
         return
 
-    # Institution picker + run button
+    # ── Controls row: institution picker + run button ──────────────────────────
     institutions = _get_available_institutions()
     institution_labels = [label for _, label in institutions]
     configured = get_configured_institution()
@@ -1089,28 +1707,27 @@ def render(user: Dict[str, Any], role: str, logger: Any) -> None:
     if configured and configured in [iid for iid, _ in institutions]:
         default_index = [iid for iid, _ in institutions].index(configured)
 
-    with ph2:
-        st.markdown("<div style='padding-top:12px'></div>", unsafe_allow_html=True)
+    ctrl1, ctrl2, ctrl3 = st.columns([2, 1, 1])
+    with ctrl1:
+        st.selectbox("Institution", institution_labels, index=default_index,
+                     key="dashboard_institution_label", label_visibility="collapsed")
+    with ctrl2:
         if st.button("Run queue", type="primary", use_container_width=True, key="dashboard_run_queue"):
             sel_label = st.session_state.get("dashboard_institution_label", institution_labels[default_index])
             sel_id = next((iid for iid, lbl in institutions if lbl == sel_label), "__none__")
             institution_id = None if sel_id == "__none__" else sel_id
             _run_dashboard_batch(user, logger, institution_id)
-
-    sel_label = st.selectbox("Institution", institution_labels, index=default_index,
-                             key="dashboard_institution_label", label_visibility="collapsed")
+    with ctrl3:
+        if st.session_state.get("batch_run_at"):
+            st.caption("Last sync " + str(st.session_state.get("batch_run_at", "-"))
+                       + "  ·  batch " + str(st.session_state.get("batch_id", "-")))
 
     if st.session_state.get("batch_results") is None:
         st.info("Run the queue to evaluate all customers and populate the dashboard.")
         _render_admin_tools(user, role, logger)
         return
 
-    st.caption(
-        "Last sync " + str(st.session_state.get("batch_run_at", "-"))
-        + " · batch " + str(st.session_state.get("batch_id", "-"))
-    )
-
-    # Build queue rows
+    # ── Build data and render the design-faithful HTML component ──────────────
     batch_results = st.session_state.get("batch_results")
     customers_df  = st.session_state.get("customers_df")
     all_rows = _build_queue_rows(batch_results, customers_df, role)
@@ -1120,159 +1737,13 @@ def render(user: Dict[str, Any], role: str, logger: Any) -> None:
         _render_admin_tools(user, role, logger)
         return
 
-    # KPI strip
-    queue_df_tmp = pd.DataFrame(all_rows)
-    st.markdown(_kpi_strip_html(queue_df_tmp), unsafe_allow_html=True)
-
-    # ── Filter row ─────────────────────────────────────────────────────────────
-    if "dashboard_filter" not in st.session_state:
-        st.session_state.dashboard_filter = "all"
-
-    chip_labels = [
-        ("all",    "All"),
-        ("review", "Needs review"),
-        ("high",   "High risk"),
-        ("pass",   "Cleared"),
-    ]
-    filt_cols = st.columns(len(chip_labels) + 2)
-    for i, (val, label) in enumerate(chip_labels):
-        with filt_cols[i]:
-            active = st.session_state.dashboard_filter == val
-            if st.button(label, key=f"chip_{val}", type="primary" if active else "secondary",
-                         use_container_width=True):
-                st.session_state.dashboard_filter = val
-                st.rerun()
-    with filt_cols[-2]:
-        search_term = st.text_input("Search", placeholder="ID / name / jurisdiction",
-                                    key="dashboard_search", label_visibility="collapsed")
-    with filt_cols[-1]:
-        st.markdown("<div style='padding-top:4px'></div>", unsafe_allow_html=True)
-
-    # Apply filters
-    filtered_rows = all_rows[:]
-    current_filter = st.session_state.dashboard_filter
-    if current_filter == "review":
-        filtered_rows = [r for r in filtered_rows if r["disposition"] in ("REJECT", "REVIEW")]
-    elif current_filter == "high":
-        filtered_rows = [r for r in filtered_rows if _risk_level(r["confidence_score"]) >= 4]
-    elif current_filter == "pass":
-        filtered_rows = [r for r in filtered_rows if r["disposition"] in ("PASS", "PASS_WITH_NOTES")]
-    if search_term.strip():
-        needle = search_term.strip().lower()
-        filtered_rows = [
-            r for r in filtered_rows
-            if needle in r["customer_id"].lower()
-            or needle in r["customer_name_raw"].lower()
-            or needle in r["jurisdiction"].lower()
-        ]
-
-    if not filtered_rows:
-        st.info("No customers match the current filters.")
-        _render_admin_tools(user, role, logger)
-        return
-
-    st.caption(f"Showing {len(filtered_rows)} of {len(all_rows)} customers")
-
-    # ── Main 3/2 split ─────────────────────────────────────────────────────────
-    selected_id = st.session_state.get("dashboard_selected_customer_id")
-    filtered_ids = [r["customer_id"] for r in filtered_rows]
-    if selected_id not in filtered_ids:
-        selected_id = filtered_ids[0]
-        st.session_state.dashboard_selected_customer_id = selected_id
-
-    left_col, right_col = st.columns([3, 2], gap="large")
-
-    # LEFT — styled client worklist
-    with left_col:
-        st.markdown(_client_list_html(filtered_rows, selected_id), unsafe_allow_html=True)
-        selected_id = st.selectbox(
-            "Open customer record",
-            filtered_ids,
-            index=filtered_ids.index(selected_id),
-            format_func=lambda cid: next(
-                (r["customer_name_display"] + " · " + cid
-                 for r in filtered_rows if r["customer_id"] == cid), cid
-            ),
-            key="dashboard_selected_customer_widget",
-        )
-        st.session_state.dashboard_selected_customer_id = selected_id
-
-    # RIGHT — case detail
-    selected_row    = next((r for r in filtered_rows if r["customer_id"] == selected_id), filtered_rows[0])
-    selected_result = _result_lookup(batch_results, selected_id)
-
-    last_viewed = st.session_state.get("dashboard_last_viewed_customer")
-    if last_viewed != selected_id and logger:
-        logger.log("CUSTOMER_VIEW", customer_id=selected_id,
-                   details={"tab": "dashboard",
-                            "ruleset_version": _safe_str(selected_result.get("ruleset_version")) or get_active_ruleset_version()},
-                   snapshot={f: selected_result.get(f) for f in _SNAPSHOT_FIELDS if f in selected_result})
-        st.session_state.dashboard_last_viewed_customer = selected_id
-
-    with right_col:
-        # Navigation bar
-        nav1, nav2, nav3 = st.columns([1, 3, 1])
-        with nav1:
-            if st.button("← Prev", key="dashboard_prev_customer", use_container_width=True):
-                idx = filtered_ids.index(selected_id)
-                st.session_state.dashboard_selected_customer_id = filtered_ids[(idx - 1) % len(filtered_ids)]
-                st.rerun()
-        with nav2:
-            st.caption(f"Record {filtered_ids.index(selected_id) + 1} of {len(filtered_ids)}")
-        with nav3:
-            if st.button("Next →", key="dashboard_next_customer", use_container_width=True):
-                idx = filtered_ids.index(selected_id)
-                st.session_state.dashboard_selected_customer_id = filtered_ids[(idx + 1) % len(filtered_ids)]
-                st.rerun()
-
-        # Detail header — name, mini KPI strip, disposition badge
-        st.markdown(_detail_header_html(selected_row), unsafe_allow_html=True)
-
-        # Confidence gauge — hex colors only (Plotly does not support oklch)
-        score = selected_row["confidence_score"]
-        gauge_color = (
-            _GAUGE_GREEN if score >= 70
-            else _GAUGE_AMBER if score >= 50
-            else _GAUGE_RED
-        )
-        gauge_fig = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=score,
-            number={"suffix": "/100", "font": {"size": 22}},
-            gauge={
-                "axis": {"range": [0, 100], "tickwidth": 1, "tickcolor": "rgba(128,128,128,0.25)"},
-                "bar":  {"color": gauge_color, "thickness": 0.28},
-                "bgcolor": "rgba(0,0,0,0)",
-                "steps": [
-                    {"range": [0, 50],   "color": "rgba(213,94,0,0.10)"},
-                    {"range": [50, 70],  "color": "rgba(230,159,0,0.10)"},
-                    {"range": [70, 100], "color": "rgba(0,158,115,0.10)"},
-                ],
-                "threshold": {"line": {"color": gauge_color, "width": 3}, "thickness": 0.75, "value": score},
-            },
-            title={"text": "Confidence score", "font": {"size": 12}},
-        ))
-        gauge_fig.update_layout(
-            height=200, margin=dict(l=20, r=20, t=30, b=5),
-            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-        )
-        st.plotly_chart(gauge_fig, use_container_width=True)
-
-        # Triggered rules (needs attention)
-        attn_html = _needs_attention_html(selected_result)
-        if attn_html:
-            st.markdown(attn_html, unsafe_allow_html=True)
-
-        # KYC dimension flag rows
-        dim_html = _dimension_flags_html(selected_result)
-        if dim_html:
-            st.markdown(dim_html, unsafe_allow_html=True)
-
-        # Identity profile (expander)
-        _render_identity_expander(selected_row, role)
-
-        # Remediation actions
-        _render_remediation(selected_row, selected_result, user, role, logger)
+    component_data = _build_component_data(
+        all_rows, batch_results,
+        str(st.session_state.get("batch_id", "—")),
+        str(st.session_state.get("batch_run_at", datetime.now().strftime("%a, %d %b %Y"))),
+    )
+    html = _build_dashboard_html(component_data)
+    st_components.html(html, height=980, scrolling=True)
 
     # Admin-only tools at the bottom
     _render_admin_tools(user, role, logger)
