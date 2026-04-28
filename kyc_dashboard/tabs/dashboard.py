@@ -44,35 +44,85 @@ _SNAPSHOT_FIELDS = [
 
 _DASH_CSS = """
 <style>
-/* KYC HNWI design tokens — dark-mode adaptation */
+/* KYC HNWI design tokens — light + dark adaptive */
+:root {
+  --kyc-ok:       #059669;
+  --kyc-ok-bg:    rgba(5,150,105,0.10);
+  --kyc-warn:     #b45309;
+  --kyc-warn-bg:  rgba(180,83,9,0.10);
+  --kyc-bad:      #c44000;
+  --kyc-bad-bg:   rgba(196,64,0,0.10);
+  --kyc-accent:   #4f52c2;
+  --kyc-acc-bg:   rgba(79,82,194,0.10);
+
+  --kyc-text:     #0f172a;
+  --kyc-text2:    rgba(15,23,42,0.55);
+  --kyc-text3:    rgba(15,23,42,0.38);
+  --kyc-mute:     rgba(15,23,42,0.50);
+  --kyc-surface:  rgba(15,23,42,0.025);
+  --kyc-card-bg:  rgba(15,23,42,0.02);
+  --kyc-border:   rgba(15,23,42,0.10);
+  --kyc-border2:  rgba(15,23,42,0.07);
+  --kyc-ini-bg:   rgba(15,23,42,0.08);
+  --kyc-ini-fg:   rgba(15,23,42,0.60);
+  --kyc-sel-bg:   rgba(79,82,194,0.07);
+  --kyc-risk-off: rgba(15,23,42,0.12);
+  --kyc-tbl-hdr:  rgba(15,23,42,0.025);
+}
+
+[data-theme="dark"] {
+  --kyc-ok:       #00c285;
+  --kyc-ok-bg:    rgba(0,194,133,0.13);
+  --kyc-warn:     #c9a600;
+  --kyc-warn-bg:  rgba(201,166,0,0.13);
+  --kyc-bad:      #e05c00;
+  --kyc-bad-bg:   rgba(224,92,0,0.13);
+  --kyc-accent:   #7b7fe0;
+  --kyc-acc-bg:   rgba(123,127,224,0.13);
+
+  --kyc-text:     #f3f4f7;
+  --kyc-text2:    rgba(255,255,255,0.45);
+  --kyc-text3:    rgba(255,255,255,0.32);
+  --kyc-mute:     rgba(255,255,255,0.50);
+  --kyc-surface:  rgba(255,255,255,0.03);
+  --kyc-card-bg:  rgba(255,255,255,0.02);
+  --kyc-border:   rgba(255,255,255,0.08);
+  --kyc-border2:  rgba(255,255,255,0.05);
+  --kyc-ini-bg:   rgba(255,255,255,0.09);
+  --kyc-ini-fg:   rgba(255,255,255,0.65);
+  --kyc-sel-bg:   rgba(60,62,180,0.22);
+  --kyc-risk-off: rgba(255,255,255,0.10);
+  --kyc-tbl-hdr:  rgba(255,255,255,0.02);
+}
+
 .kyc-kpi-strip {
   display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px;
 }
 .kyc-kpi-card {
-  background: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.08);
+  background: var(--kyc-surface);
+  border: 1px solid var(--kyc-border);
   border-radius: 12px;
   padding: 18px 20px 14px;
 }
 .kyc-kpi-label {
-  font-size: 11px; color: rgba(255,255,255,0.40);
+  font-size: 11px; color: var(--kyc-text3);
   text-transform: uppercase; letter-spacing: 0.08em;
   font-weight: 500; margin-bottom: 6px;
 }
 .kyc-kpi-value {
   font-size: 30px; font-weight: 600; letter-spacing: -0.025em;
-  color: #f3f4f7; line-height: 1; margin-bottom: 4px;
+  color: var(--kyc-text); line-height: 1; margin-bottom: 4px;
   font-variant-numeric: tabular-nums;
 }
-.kyc-kpi-sub { font-size: 12px; color: rgba(255,255,255,0.30); }
+.kyc-kpi-sub { font-size: 12px; color: var(--kyc-text3); }
 .kyc-kpi-delta {
   display: inline-flex; align-items: center;
   padding: 1px 6px; border-radius: 4px; font-size: 11px;
   font-weight: 500; margin-left: 6px; vertical-align: 3px;
 }
-.kyc-delta-ok   { color: oklch(72% 0.14 155); background: oklch(26% 0.06 155); }
-.kyc-delta-bad  { color: oklch(72% 0.16 27);  background: oklch(28% 0.07 27); }
-.kyc-delta-warn { color: oklch(80% 0.14 80);  background: oklch(28% 0.06 80); }
+.kyc-delta-ok   { color: var(--kyc-ok);   background: var(--kyc-ok-bg); }
+.kyc-delta-bad  { color: var(--kyc-bad);  background: var(--kyc-bad-bg); }
+.kyc-delta-warn { color: var(--kyc-warn); background: var(--kyc-warn-bg); }
 
 /* Badges */
 .kyc-badge {
@@ -81,32 +131,32 @@ _DASH_CSS = """
   font-size: 11.5px; font-weight: 500; white-space: nowrap;
 }
 .kyc-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.kyc-b-ok     { color: oklch(72% 0.14 155); background: oklch(26% 0.06 155); }
-.kyc-b-warn   { color: oklch(80% 0.14 80);  background: oklch(28% 0.06 80); }
-.kyc-b-bad    { color: oklch(72% 0.16 27);  background: oklch(28% 0.07 27); }
-.kyc-b-mute   { color: rgba(255,255,255,0.50); background: rgba(255,255,255,0.07); }
-.kyc-b-accent { color: oklch(72% 0.16 265); background: oklch(28% 0.08 265); }
+.kyc-b-ok     { color: var(--kyc-ok);     background: var(--kyc-ok-bg); }
+.kyc-b-warn   { color: var(--kyc-warn);   background: var(--kyc-warn-bg); }
+.kyc-b-bad    { color: var(--kyc-bad);    background: var(--kyc-bad-bg); }
+.kyc-b-mute   { color: var(--kyc-mute);   background: var(--kyc-surface); }
+.kyc-b-accent { color: var(--kyc-accent); background: var(--kyc-acc-bg); }
 
 /* Card */
 .kyc-card {
-  border: 1px solid rgba(255,255,255,0.08);
+  border: 1px solid var(--kyc-border);
   border-radius: 12px;
-  background: rgba(255,255,255,0.02);
+  background: var(--kyc-card-bg);
   overflow: hidden;
   margin-bottom: 14px;
 }
 .kyc-card-h {
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 18px;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
-  font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.85);
+  border-bottom: 1px solid var(--kyc-border2);
+  font-size: 13px; font-weight: 600; color: var(--kyc-text);
 }
-.kyc-card-h .meta { font-size: 12px; font-weight: 400; color: rgba(255,255,255,0.35); }
+.kyc-card-h .meta { font-size: 12px; font-weight: 400; color: var(--kyc-text2); }
 
 /* Client avatar */
 .kyc-ini {
   width: 30px; height: 30px; border-radius: 50%;
-  background: rgba(255,255,255,0.09); color: rgba(255,255,255,0.65);
+  background: var(--kyc-ini-bg); color: var(--kyc-ini-fg);
   display: inline-grid; place-items: center;
   font-size: 11px; font-weight: 600; flex: 0 0 auto;
 }
@@ -119,24 +169,24 @@ _DASH_CSS = """
 .kyc-tbl-h {
   display: grid; grid-template-columns: 1fr 90px 100px;
   padding: 7px 18px;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
-  background: rgba(255,255,255,0.02);
-  font-size: 10.5px; font-weight: 500; color: rgba(255,255,255,0.35);
+  border-bottom: 1px solid var(--kyc-border2);
+  background: var(--kyc-tbl-hdr);
+  font-size: 10.5px; font-weight: 500; color: var(--kyc-text3);
   text-transform: uppercase; letter-spacing: 0.06em;
 }
 .kyc-row {
   display: grid; grid-template-columns: 1fr 90px 100px;
   align-items: center; padding: 10px 18px;
-  border-bottom: 1px solid rgba(255,255,255,0.05);
+  border-bottom: 1px solid var(--kyc-border2);
   font-size: 13px;
 }
 .kyc-row:last-child { border-bottom: 0; }
-.kyc-row.kyc-selected { background: oklch(24% 0.07 265); }
+.kyc-row.kyc-selected { background: var(--kyc-sel-bg); }
 .kyc-row-client { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.kyc-row-name { font-weight: 500; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.kyc-row-meta { font-size: 11.5px; color: rgba(255,255,255,0.40); margin-top: 1px; }
+.kyc-row-name { font-weight: 500; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--kyc-text); }
+.kyc-row-meta { font-size: 11.5px; color: var(--kyc-text2); margin-top: 1px; }
 .kyc-row-risk { display: flex; align-items: center; gap: 6px; }
-.kyc-score-num { font-size: 12px; font-variant-numeric: tabular-nums; color: rgba(255,255,255,0.55); }
+.kyc-score-num { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--kyc-text2); }
 .kyc-row-badge { text-align: right; }
 
 /* Section header */
@@ -144,53 +194,59 @@ _DASH_CSS = """
   display: flex; align-items: center; justify-content: space-between;
   margin: 16px 0 10px;
 }
-.kyc-section-h h3 { margin: 0; font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.85); }
-.kyc-section-h .meta { font-size: 12px; color: rgba(255,255,255,0.35); }
+.kyc-section-h h3 { margin: 0; font-size: 14px; font-weight: 600; color: var(--kyc-text); }
+.kyc-section-h .meta { font-size: 12px; color: var(--kyc-text2); }
 
 /* Flag rows (KYC dimension status, triggered rules) */
 .kyc-flags { }
 .kyc-flag-row {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 18px; border-top: 1px solid rgba(255,255,255,0.05);
+  padding: 10px 18px; border-top: 1px solid var(--kyc-border2);
   font-size: 13px;
 }
 .kyc-flag-row:first-child { border-top: 0; }
 .kyc-flag-left { display: flex; align-items: center; gap: 12px; }
 .kyc-flag-ico {
   width: 28px; height: 28px; border-radius: 7px;
-  background: rgba(255,255,255,0.06);
+  background: var(--kyc-surface);
   display: inline-grid; place-items: center;
   font-size: 13px; flex: 0 0 auto;
 }
-.kyc-flag-ico-ok   { background: oklch(26% 0.06 155); color: oklch(72% 0.14 155); }
-.kyc-flag-ico-warn { background: oklch(28% 0.06 80);  color: oklch(80% 0.14 80); }
-.kyc-flag-ico-bad  { background: oklch(28% 0.07 27);  color: oklch(72% 0.16 27); }
-.kyc-flag-title { font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.85); }
-.kyc-flag-sub { font-size: 11.5px; color: rgba(255,255,255,0.40); margin-top: 1px; }
+.kyc-flag-ico-ok   { background: var(--kyc-ok-bg);   color: var(--kyc-ok); }
+.kyc-flag-ico-warn { background: var(--kyc-warn-bg); color: var(--kyc-warn); }
+.kyc-flag-ico-bad  { background: var(--kyc-bad-bg);  color: var(--kyc-bad); }
+.kyc-flag-title { font-size: 13px; font-weight: 500; color: var(--kyc-text); }
+.kyc-flag-sub { font-size: 11.5px; color: var(--kyc-text2); margin-top: 1px; }
 
 /* Customer header in detail panel */
-.kyc-detail-hdr {
-  padding: 14px 0 12px;
-}
+.kyc-detail-hdr { padding: 14px 0 12px; }
 .kyc-detail-name {
   font-size: 20px; font-weight: 600; letter-spacing: -0.02em;
-  color: #f3f4f7; margin-bottom: 4px;
+  color: var(--kyc-text); margin-bottom: 4px;
 }
-.kyc-detail-meta {
-  font-size: 12.5px; color: rgba(255,255,255,0.45);
-}
+.kyc-detail-meta { font-size: 12.5px; color: var(--kyc-text2); }
 
 /* 3-KPI mini strip for detail panel */
 .kyc-mini-strip {
   display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0;
 }
 .kyc-mini-card {
-  background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07);
-  border-radius: 10px; padding: 12px 14px;
-  text-align: center;
+  background: var(--kyc-surface); border: 1px solid var(--kyc-border2);
+  border-radius: 10px; padding: 12px 14px; text-align: center;
 }
-.kyc-mini-label { font-size: 10px; color: rgba(255,255,255,0.35); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 5px; }
+.kyc-mini-label { font-size: 10px; color: var(--kyc-text3); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 5px; }
 .kyc-mini-value { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+
+/* Page header */
+.kyc-eyebrow {
+  font-size: 11px; color: var(--kyc-text3);
+  text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 2px;
+}
+.kyc-page-title {
+  font-size: 22px; font-weight: 600; letter-spacing: -0.02em;
+  color: var(--kyc-text); margin-bottom: 2px;
+}
+.kyc-page-sub { font-size: 13px; color: var(--kyc-text2); }
 </style>
 """
 
@@ -278,16 +334,25 @@ def _risk_level(score: int) -> int:
 
 
 def _risk_color(level: int) -> str:
-    return {1: "oklch(72% 0.14 155)", 2: "oklch(72% 0.14 155)",
-            3: "oklch(80% 0.14 80)", 4: "oklch(72% 0.16 27)", 5: "oklch(72% 0.16 27)"}.get(level, "gray")
+    if level <= 2:
+        return "var(--kyc-ok)"
+    if level == 3:
+        return "var(--kyc-warn)"
+    return "var(--kyc-bad)"
 
 
 def _score_color(score: float) -> str:
     if score >= 70:
-        return "oklch(72% 0.14 155)"
+        return "var(--kyc-ok)"
     if score >= 50:
-        return "oklch(80% 0.14 80)"
-    return "oklch(72% 0.16 27)"
+        return "var(--kyc-warn)"
+    return "var(--kyc-bad)"
+
+
+# Hex equivalents for Plotly (oklch not supported by the library)
+_GAUGE_GREEN = "#00c285"
+_GAUGE_AMBER = "#c9a600"
+_GAUGE_RED   = "#e05c00"
 
 
 def _risk_bar_html(score: int) -> str:
@@ -296,7 +361,7 @@ def _risk_bar_html(score: int) -> str:
     bars = ""
     for i in range(1, 6):
         h = 6 + i * 2
-        bg = color if i <= level else "rgba(255,255,255,0.10)"
+        bg = color if i <= level else "var(--kyc-risk-off)"
         bars += f"<span style='height:{h}px;background:{bg}'></span>"
     return f"<span class='kyc-riskbar'>{bars}</span>"
 
@@ -604,7 +669,7 @@ def _detail_header_html(queue_row: Dict[str, Any]) -> str:
     risk_labels = {1: "Very Low", 2: "Low", 3: "Medium", 4: "High", 5: "Very High"}
     risk_col = _risk_color(risk_level)
     n_flags = queue_row.get("flag_count", 0)
-    flag_col = "oklch(72% 0.16 27)" if n_flags > 0 else "rgba(255,255,255,0.40)"
+    flag_col = "var(--kyc-bad)" if n_flags > 0 else "var(--kyc-text2)"
 
     return (
         f"<div class='kyc-detail-hdr'>"
@@ -934,12 +999,9 @@ def render(user: Dict[str, Any], role: str, logger: Any) -> None:
     ph1, ph2 = st.columns([3, 1])
     with ph1:
         st.markdown(
-            "<div style='font-size:11px;color:rgba(255,255,255,0.35);text-transform:uppercase;"
-            "letter-spacing:0.1em;margin-bottom:2px'>KYC Operations</div>"
-            "<div style='font-size:22px;font-weight:600;letter-spacing:-0.02em;color:#f3f4f7;"
-            "margin-bottom:2px'>Customer queue</div>"
-            "<div style='font-size:13px;color:rgba(255,255,255,0.40)'>"
-            f"{datetime.now().strftime('%a, %d %b %Y')}</div>",
+            f"<div class='kyc-eyebrow'>KYC Operations</div>"
+            f"<div class='kyc-page-title'>Customer queue</div>"
+            f"<div class='kyc-page-sub'>{datetime.now().strftime('%a, %d %b %Y')}</div>",
             unsafe_allow_html=True,
         )
 
@@ -1096,19 +1158,19 @@ def render(user: Dict[str, Any], role: str, logger: Any) -> None:
         # Detail header (name, KPIs, badge)
         st.markdown(_detail_header_html(selected_row), unsafe_allow_html=True)
 
-        # Confidence gauge
+        # Confidence gauge — hex colors only (Plotly does not support oklch)
         score = selected_row["confidence_score"]
         gauge_color = (
-            "oklch(72% 0.14 155)" if score >= 70
-            else "oklch(80% 0.14 80)" if score >= 50
-            else "oklch(72% 0.16 27)"
+            _GAUGE_GREEN if score >= 70
+            else _GAUGE_AMBER if score >= 50
+            else _GAUGE_RED
         )
         gauge_fig = go.Figure(go.Indicator(
             mode="gauge+number",
             value=score,
             number={"suffix": "/100", "font": {"size": 22}},
             gauge={
-                "axis": {"range": [0, 100], "tickwidth": 1, "tickcolor": "rgba(255,255,255,0.2)"},
+                "axis": {"range": [0, 100], "tickwidth": 1, "tickcolor": "rgba(128,128,128,0.25)"},
                 "bar":  {"color": gauge_color, "thickness": 0.28},
                 "bgcolor": "rgba(0,0,0,0)",
                 "steps": [
