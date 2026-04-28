@@ -79,11 +79,24 @@ class IdentityVerificationDimension(BaseDimension):
         'LOW': 1095,      # Triennial
     }
     
+    _SCORE_MAP = {
+        'COMPLIANT_PRIMARY_VERIFIED': 100,
+        'COMPLIANT_SECONDARY_VERIFIED': 80,
+        'NON_COMPLIANT_VERIFICATION_STALE': 60,
+        'NON_COMPLIANT_DOCUMENT_EXPIRED': 40,
+        'NON_COMPLIANT_DATA_DISCREPANCY': 40,
+        'NON_COMPLIANT_HIGH_RISK_INSUFFICIENT': 30,
+        'NON_COMPLIANT_MISSING_IDENTITY': 0,
+    }
+
+    def _compute_score(self, compliance_status: str) -> int:
+        return self._SCORE_MAP.get(compliance_status, 0)
+
     def __init__(self, params: IdentityParameters, evaluation_date=None):
         self.params = params
         self.evaluation_date = evaluation_date or datetime.now()
         logger.info(f"IdentityVerificationDimension initialized. Evaluation date: {self.evaluation_date}")
-    
+
     def evaluate(self, customer_id: str, data: Dict[str, Any]) -> Dict:
         """
         Evaluate identity verification for a single customer.
@@ -203,6 +216,7 @@ class IdentityVerificationDimension(BaseDimension):
                 'dimension': 'IdentityVerification',
                 'passed': passed,
                 'status': 'Compliant' if passed else 'Non-Compliant',
+                'score': self._compute_score(compliance_status),
                 'evaluation_details': {
                     'risk_rating': customer.get('risk_rating'),
                     'jurisdiction': customer.get('jurisdiction'),
@@ -299,6 +313,7 @@ class IdentityVerificationDimension(BaseDimension):
             'dimension': 'IdentityVerification',
             'passed': False,
             'status': 'Error',
+            'score': 0,
             'findings': [f'Customer {customer_id} not found in dataset'],
             'evaluation_details': {},
             'remediation_required': True,
@@ -312,6 +327,7 @@ class IdentityVerificationDimension(BaseDimension):
             'dimension': 'IdentityVerification',
             'passed': False,
             'status': 'Error',
+            'score': 0,
             'findings': [f'Evaluation error: {error_msg}'],
             'evaluation_details': {},
             'remediation_required': True,

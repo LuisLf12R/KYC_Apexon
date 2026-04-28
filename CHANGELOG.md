@@ -1,5 +1,19 @@
 # Changelog
 
+## Phase 3 — Dimension Schema Normalization (2026-04-28)
+
+### Changed
+- All six core dimensions (`IdentityVerification`, `AccountActivity`, `ProofOfAddressDimension`, `DataQuality`, `AMLScreening`, `BeneficialOwnership`) now emit a root `score: int` (0–100) in every code path, including error and missing-data paths.
+- `AMLScreeningDimension`: `aml_status` and `aml_hit_status` moved from the result root into `evaluation_details`. Engine reads them from `evaluation_details`.
+- `KYCComplianceEngine.evaluate_customer()`: removed `_extract_score()` adapter helper and the pass/fail fallback approximation (80/40). Scores are now read directly from `result["score"]` for all six core dimensions.
+
+### Added
+- `kyc_engine/dimensions/schema.py`: `DimensionResult` required-key set and `validate_dimension_result()` helper for contract enforcement.
+- `tests/test_dimension_schema.py`: 13 schema-contract tests covering all six core dimensions and the validator itself.
+
+### Deferred
+- SOW (`SourceOfWealthDimension`) and CRS (`CRSFATCADimension`) schema migration (engine uses `.get("score", fallback)` shim for these two).
+
 ## [0.4.0] — 2026-04-19
 
 ### Added

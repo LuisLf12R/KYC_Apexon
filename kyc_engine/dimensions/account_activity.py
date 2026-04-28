@@ -47,10 +47,22 @@ class AccountActivityDimension:
     
     # Volume spike multiplier (3x avg = spike)
     VOLUME_SPIKE_MULTIPLIER = 3.0
-    
+
     # Minimum transaction count for spike detection
     MIN_TXN_COUNT_FOR_SPIKE = 5
-    
+
+    _SCORE_MAP = {
+        'COMPLIANT_ACTIVITY': 90,
+        'REVIEW_REACTIVATION': 60,
+        'REVIEW_VOLUME_SPIKE': 50,
+        'REVIEW_ACTIVITY_ANOMALY': 50,
+        'REVIEW_DORMANCY': 30,
+        'UNKNOWN': 0,
+    }
+
+    def _compute_score(self, compliance_flag: str) -> int:
+        return self._SCORE_MAP.get(compliance_flag, 0)
+
     def __init__(self, params: TransactionParameters, evaluation_date=None):
         """
         Initialize Account Activity Dimension.
@@ -129,7 +141,8 @@ class AccountActivityDimension:
                 'dimension': 'Account Activity',
                 'passed': passed,
                 'status': 'Compliant' if passed else 'Non-Compliant',
-                
+                'score': self._compute_score(compliance_flag),
+
                 'evaluation_details': {
                     'risk_rating': risk_rating,
                     'jurisdiction': jurisdiction,
@@ -416,6 +429,7 @@ class AccountActivityDimension:
             'dimension': 'Account Activity',
             'passed': False,
             'status': 'Non-Compliant',
+            'score': 0,
             'evaluation_details': {
                 'risk_rating': risk_rating,
                 'jurisdiction': jurisdiction,
@@ -436,8 +450,11 @@ class AccountActivityDimension:
             'dimension': 'Account Activity',
             'passed': False,
             'status': 'Error',
+            'score': 0,
+            'evaluation_details': {},
             'findings': [f"Error: {error_msg}"],
             'remediation_required': True,
+            'next_review_date': self.evaluation_date.date().isoformat(),
         }
 
 

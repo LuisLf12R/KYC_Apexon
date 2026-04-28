@@ -287,30 +287,17 @@ class KYCComplianceEngine:
             "crs_fatca": crs_result,
         }
 
-        def _extract_score(
-            result: dict,
-            fallback_pass: int = 80,
-            fallback_fail: int = 40,
-        ) -> int:
-            """
-            Extract the actual computed score from a dimension result dict.
-            Falls back to pass/fail approximation only when no score key present.
-            """
-            if "score" in result and result["score"] is not None:
-                return int(result["score"])
-            return fallback_pass if result.get("passed") else fallback_fail
-
-        # P7-A: AML score and status are now sourced from AMLScreeningDimension
-        aml_score = float(_extract_score(screening_result))
-        aml_status = screening_result.get("aml_status", "no_screening_data")
-        aml_hit_status = screening_result.get("aml_hit_status", "")
+        aml_score = float(screening_result["score"])
+        aml_eval = screening_result.get("evaluation_details", {})
+        aml_status = aml_eval.get("aml_status", "no_screening_data")
+        aml_hit_status = aml_eval.get("aml_hit_status", "")
         aml_finding = "; ".join(screening_result.get("findings", [])[:2])
 
-        id_score = _extract_score(identity_result)
-        act_score = _extract_score(txn_result)
-        poa_score = _extract_score(doc_result)
-        ubo_score = _extract_score(ubo_result)
-        dq_score = _extract_score(dq_result)
+        id_score = float(identity_result["score"])
+        act_score = float(txn_result["score"])
+        poa_score = float(doc_result["score"])
+        ubo_score = float(ubo_result["score"])
+        dq_score = float(dq_result["score"])
 
         aml_details = {"status": aml_status, "hit_status": aml_hit_status, "finding": aml_finding}
         id_details = {
@@ -334,12 +321,12 @@ class KYCComplianceEngine:
             "quality_rating": "Good" if dq_result.get("passed") else "Poor",
             "finding": "; ".join(dq_result.get("findings", [])[:2]),
         }
-        sow_score = float(_extract_score(sow_result))
+        sow_score = float(sow_result.get("score", 80 if sow_result.get("passed") else 40))
         sow_details = {
             "status": sow_result.get("sow_status", "sow_not_declared"),
             "finding": "; ".join(sow_result.get("findings", [])[:2]),
         }
-        crs_score = float(_extract_score(crs_result))
+        crs_score = float(crs_result.get("score", 80 if crs_result.get("passed") else 40))
         crs_details = {
             "status": crs_result.get("crs_fatca_status", "not_applicable"),
             "finding": "; ".join(crs_result.get("findings", [])[:2]),

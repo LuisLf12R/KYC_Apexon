@@ -86,6 +86,8 @@ class AMLScreeningDimension:
                         'rescreening_evaluation': None,
                         'hit_evaluation': None,
                         'status': 'no_screening_record',
+                        'aml_status': 'no_screening_data',
+                        'aml_hit_status': '',
                     },
                     'findings': [
                         '✗ No AML screening records found for customer',
@@ -93,8 +95,6 @@ class AMLScreeningDimension:
                     ],
                     'remediation_required': True,
                     'next_review_date': self.evaluation_date.date().isoformat(),
-                    'aml_status': 'no_screening_data',
-                    'aml_hit_status': '',
                 }
 
             customers_df = data['customers']
@@ -159,23 +159,23 @@ class AMLScreeningDimension:
                 'passed': overall_passed,
                 'status': 'Compliant' if overall_passed else 'Non-Compliant',
                 'score': score,
-                'aml_status': aml_status,
-                'aml_hit_status': aml_hit_status,
-                
+
                 'evaluation_details': {
                     'risk_rating': risk_rating,
                     'jurisdiction': jurisdiction,
-                    
+                    'aml_status': aml_status,
+                    'aml_hit_status': aml_hit_status,
+
                     'screening_evaluation': screening_evaluation,
                     'rescreening_evaluation': rescreening_evaluation,
                     'hit_evaluation': hit_evaluation,
-                    
+
                     'last_screening_date': last_screening_date.date().isoformat(),
                     'days_since_last_screening': rescreening_evaluation['days_since_last_screening'],
                     'next_screening_due': rescreening_evaluation['next_screening_due'].isoformat(),
                     'screening_overdue': rescreening_evaluation['overdue'],
                 },
-                
+
                 'findings': findings,
                 'remediation_required': not overall_passed,
                 'next_review_date': (self.evaluation_date + timedelta(days=90)).date().isoformat(),
@@ -424,9 +424,12 @@ class AMLScreeningDimension:
             'dimension': 'AML Screening',
             'passed': False,
             'status': 'Non-Compliant',
+            'score': 0,
             'evaluation_details': {
                 'risk_rating': risk_rating,
                 'jurisdiction': jurisdiction,
+                'aml_status': 'no_screening_data',
+                'aml_hit_status': '',
                 'screening_evaluation': None,
                 'rescreening_evaluation': None,
                 'hit_evaluation': None,
@@ -434,9 +437,6 @@ class AMLScreeningDimension:
             'findings': ['✗ No AML screening records found for customer'],
             'remediation_required': True,
             'next_review_date': self.evaluation_date.date().isoformat(),
-            'score': 0,
-            'aml_status': 'no_screening_data',
-            'aml_hit_status': '',
         }
     
     def _error_result(self, customer_id: str, error_msg: str) -> Dict[str, Any]:
@@ -446,11 +446,14 @@ class AMLScreeningDimension:
             'dimension': 'AML Screening',
             'passed': False,
             'status': 'Error',
+            'score': 0,
+            'evaluation_details': {
+                'aml_status': 'no_screening_data',
+                'aml_hit_status': '',
+            },
             'findings': [f"Error: {error_msg}"],
             'remediation_required': True,
-            'score': 0,
-            'aml_status': 'no_screening_data',
-            'aml_hit_status': '',
+            'next_review_date': self.evaluation_date.date().isoformat(),
         }
 
 

@@ -72,11 +72,23 @@ class ProofOfAddressDimension:
         'LOW': 1095,
     }
     
+    _SCORE_MAP = {
+        'COMPLIANT_PRIMARY_POA': 100,
+        'COMPLIANT_SECONDARY_POA': 80,
+        'NON_COMPLIANT_POA_EXPIRED': 50,
+        'NON_COMPLIANT_REVERIFICATION_OVERDUE': 40,
+        'NON_COMPLIANT_ADDRESS_DISCREPANCY': 20,
+        'NON_COMPLIANT_POA_MISSING': 0,
+    }
+
+    def _compute_score(self, compliance_status: str) -> int:
+        return self._SCORE_MAP.get(compliance_status, 0)
+
     def __init__(self, params: DocumentParameters, evaluation_date=None):
         self.params = params
         self.evaluation_date = evaluation_date or datetime.now()
         logger.info(f"ProofOfAddressDimension initialized. Evaluation date: {self.evaluation_date}")
-    
+
     def evaluate(self, customer_id: str, data: Dict[str, Any]) -> Dict:
         """
         Evaluate proof of address for a single customer.
@@ -176,6 +188,7 @@ class ProofOfAddressDimension:
                 'dimension': 'ProofOfAddressDimension',
                 'passed': passed,
                 'status': 'Compliant' if passed else 'Non-Compliant',
+                'score': self._compute_score(compliance_status),
                 'evaluation_details': {
                     'entity_type': customer.get('entity_type'),
                     'jurisdiction': customer.get('jurisdiction'),
@@ -218,6 +231,7 @@ class ProofOfAddressDimension:
             'dimension': 'ProofOfAddressDimension',
             'passed': False,
             'status': 'Error',
+            'score': 0,
             'findings': [f'Customer {customer_id} not found in dataset'],
             'evaluation_details': {},
             'remediation_required': True,
@@ -231,6 +245,7 @@ class ProofOfAddressDimension:
             'dimension': 'ProofOfAddressDimension',
             'passed': False,
             'status': 'Error',
+            'score': 0,
             'findings': [f'Evaluation error: {error_msg}'],
             'evaluation_details': {},
             'remediation_required': True,

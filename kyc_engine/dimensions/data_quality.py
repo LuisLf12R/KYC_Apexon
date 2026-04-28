@@ -183,6 +183,7 @@ class DataQualityDimension:
                 'dimension': 'DataQuality',
                 'passed': passed,
                 'status': status,
+                'score': round(weighted_score),
                 'evaluation_details': {
                     'entity_type': customer.get('entity_type'),
                     'risk_rating': customer.get('risk_rating'),
@@ -454,6 +455,7 @@ class DataQualityDimension:
             'dimension': 'DataQuality',
             'passed': False,
             'status': 'Error',
+            'score': 0,
             'findings': [f'Customer {customer_id} not found in dataset'],
             'evaluation_details': {},
             'remediation_required': True,
@@ -467,6 +469,7 @@ class DataQualityDimension:
             'dimension': 'DataQuality',
             'passed': False,
             'status': 'Error',
+            'score': 0,
             'findings': [f'Evaluation error: {error_msg}'],
             'evaluation_details': {},
             'remediation_required': True,

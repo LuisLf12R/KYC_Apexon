@@ -59,8 +59,8 @@ def test_aml_001_score_present_no_hit():
 def test_aml_002_aml_status_no_hit():
     dim = AMLScreeningDimension(_make_params())
     result = dim.evaluate("C001", _make_data(screening_result="NO_HIT"))
-    assert result["aml_status"] == "no_match"
-    assert result["aml_hit_status"] == ""
+    assert result["evaluation_details"]["aml_status"] == "no_match"
+    assert result["evaluation_details"]["aml_hit_status"] == ""
 
 
 # AML-003: confirmed_match path gives score=0 and aml_status='confirmed_match'
@@ -71,7 +71,7 @@ def test_aml_003_confirmed_match():
         _make_data(screening_result="EXACT_MATCH", resolution_status="RESOLVED_BLOCKED"),
     )
     assert result["score"] == 0
-    assert result["aml_status"] == "confirmed_match"
+    assert result["evaluation_details"]["aml_status"] == "confirmed_match"
 
 
 # AML-004: no_screening_data path (missing screenings df)
@@ -90,8 +90,8 @@ def test_aml_004_no_screening_data():
     result = dim.evaluate("C001", data)
     assert "score" in result
     assert result["score"] == 0
-    assert result["aml_status"] == "no_screening_data"
-    assert result["aml_hit_status"] == ""
+    assert result["evaluation_details"]["aml_status"] == "no_screening_data"
+    assert result["evaluation_details"]["aml_hit_status"] == ""
 
 
 # AML-005: overdue rescreening gives score=30
