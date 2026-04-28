@@ -994,6 +994,14 @@ def render_main():
     _get_provenance_store()
     _seed_structured_provenance()
 
+    # Start Flask sidecar for Banker iframe (idempotent — safe to call every render)
+    if role == "Banker":
+        try:
+            from kyc_dashboard.sidecar import start_sidecar_thread
+            start_sidecar_thread()
+        except Exception:
+            pass
+
     # Inactivity warning banner (shown on next interaction after 13 min)
     if st.session_state.timeout_warning_logged:
         elapsed = (datetime.now(timezone.utc) - st.session_state.last_activity).total_seconds()
