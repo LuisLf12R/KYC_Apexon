@@ -259,10 +259,35 @@ def _make_app():
     @app.route("/")
     def index():
         from kyc_dashboard.banker_html import build_banker_html
-        html = build_banker_html({
+        from kyc_engine.engine import KYCComplianceEngine
+
+        initial: dict = {
             "institutions": _get_institutions(),
-            "sidecarUrl": "http://127.0.0.1:8502",
-        })
+            "sidecarUrl":   "http://127.0.0.1:8502",
+            "cases":        [],
+            "kpis":         {"total": 0, "passCount": 0, "passRate": 0,
+                             "failCount": 0, "reviewCount": 0, "avgScore": 0},
+            "runAt":        "",
+            "batchId":      "",
+        }
+        # Auto-run batch so the banker sees results immediately on load
+        try:
+            if _TEMP_DIR.exists():
+                engine    = KYCComplianceEngine(data_clean_dir=_TEMP_DIR)
+                customers = engine.customers
+                if customers is not None and not customers.empty:
+                    raw: list = []
+                    for _, row in customers.iterrows():
+                        cid = str(row.get("customer_id", ""))
+                        try:
+                            raw.append(engine.evaluate_customer(cid))
+                        except Exception:
+                            pass
+                    initial.update(_format_results(raw, engine.customers))
+        except Exception:
+            pass
+
+        html = build_banker_html(initial)
         return html, 200, {"Content-Type": "text/html; charset=utf-8"}
 
     @app.route("/api/health")
@@ -369,28 +394,61 @@ def _get_institutions():
 
 # ── Public entry point ─────────────────────────────────────────────────────────
 
+_proc: "Optional[Any]" = None  # subprocess.Popen handle
+
+
 def start_sidecar_thread(port: int = 8502) -> None:
-    """Start the Flask sidecar in a background daemon thread (idempotent)."""
-    global _started
+    """Start the Flask sidecar as an independent subprocess (idempotent).
+
+    A subprocess survives Streamlit hot-reloads and avoids the daemon-thread
+    lifetime issues that caused ERR_CONNECTION_REFUSED in earlier versions.
+    Falls back to a daemon thread if subprocess launch fails.
+    """
+    global _started, _proc
     with _lock:
         if _started:
-            return
+            # If we previously used a subprocess, check it's still alive.
+            if _proc is not None and _proc.poll() is not None:
+                log.warning("Sidecar subprocess died (rc=%d); restarting.", _proc.poll())
+                _started = False
+            else:
+                return
+
         try:
             import flask  # noqa: F401
         except ImportError:
-            log.warning(
-                "Flask not installed — KYC sidecar disabled. "
-                "Install with: pip install flask"
-            )
+            log.warning("Flask not installed — run: pip install flask")
             return
+
+        # ── Try subprocess first ───────────────────────────────────────────
+        try:
+            import subprocess, sys as _sys, os as _os
+            _root = str(Path(__file__).resolve().parent.parent)
+            script = (
+                f"import sys; sys.path.insert(0, {repr(_root)}); "
+                f"from kyc_dashboard.sidecar import _make_app; "
+                f"app=_make_app(); "
+                f"app.run(host='127.0.0.1',port={port},debug=False,use_reloader=False)"
+            )
+            _proc = subprocess.Popen(
+                [_sys.executable, "-c", script],
+                env=_os.environ.copy(),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            _started = True
+            log.info("KYC sidecar subprocess started (pid=%d) on port %d", _proc.pid, port)
+            return
+        except Exception as e:
+            log.warning("Subprocess launch failed (%s); falling back to daemon thread.", e)
+
+        # ── Fallback: daemon thread ────────────────────────────────────────
         app = _make_app()
         t = threading.Thread(
-            target=lambda: app.run(
-                host="127.0.0.1", port=port, debug=False, use_reloader=False
-            ),
+            target=lambda: app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False),
             daemon=True,
             name="kyc-sidecar",
         )
         t.start()
         _started = True
-        log.info("KYC sidecar started on http://127.0.0.1:%d", port)
+        log.info("KYC sidecar thread started on http://127.0.0.1:%d", port)

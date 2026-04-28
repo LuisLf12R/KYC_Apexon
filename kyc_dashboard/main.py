@@ -988,14 +988,22 @@ def _render_status_strip(logger):
 
 
 @st.cache_resource
-def _ensure_sidecar_running():
-    """Start Flask sidecar once per process (cached so Streamlit reruns don't restart it)."""
+def _ensure_sidecar_running() -> bool:
+    """Start the Flask sidecar and wait up to 5 s for it to bind. Returns True on success."""
+    import socket as _sock, time as _time
     try:
         from kyc_dashboard.sidecar import start_sidecar_thread
         start_sidecar_thread()
     except Exception:
         pass
-    return True
+    for _ in range(50):
+        try:
+            _c = _sock.create_connection(("127.0.0.1", 8502), timeout=0.1)
+            _c.close()
+            return True
+        except OSError:
+            _time.sleep(0.1)
+    return False
 
 
 def render_main():
@@ -1008,52 +1016,12 @@ def render_main():
     _get_provenance_store()
     _seed_structured_provenance()
 
-    # Banker: pre-compute KYC batch in Python, inject into the React app's initial state,
-    # and render the banker HTML inline via st.components.v1.html().
-    # No Flask sidecar or separate port needed — everything is wired through Streamlit.
+    # Banker: redirect to the standalone Flask dashboard at :8502.
+    # The sidecar runs as an independent subprocess (not a daemon thread), so it
+    # survives Streamlit hot-reloads. GET / auto-runs the KYC batch and injects
+    # results into the React app, so the banker sees data immediately.
     if role == "Banker":
-        from kyc_dashboard.banker_html import build_banker_html
-        from kyc_dashboard.sidecar import _format_results as _fmt_results
-        from kyc_engine.engine import KYCComplianceEngine as _KYCEngine
-
-        _initial: dict = {
-            "institutions": [],
-            "sidecarUrl":   "",
-            "cases":        [],
-            "kpis":         {"total": 0, "passCount": 0, "passRate": 0,
-                             "failCount": 0, "reviewCount": 0, "avgScore": 0},
-            "runAt":        "",
-            "batchId":      "",
-        }
-
-        try:
-            _data_dir = (
-                st.session_state.get("data_dir")
-                or (Path(tempfile.gettempdir()) / "kyc_data_clean")
-            )
-            if _data_dir and Path(_data_dir).exists():
-                _eng  = _KYCEngine(data_clean_dir=Path(_data_dir))
-                _custs = _eng.customers
-                if _custs is not None and not _custs.empty:
-                    _raw: list = []
-                    for _, _row in _custs.iterrows():
-                        _cid = str(_row.get("customer_id", ""))
-                        try:
-                            _raw.append(_eng.evaluate_customer(_cid))
-                        except Exception:
-                            pass
-                    _initial.update(_fmt_results(_raw, _eng.customers))
-                    for _col in ["institution_id", "institution"]:
-                        if _col in _custs.columns:
-                            for _val in _custs[_col].dropna().unique():
-                                _v = str(_val).strip()
-                                if _v:
-                                    _initial["institutions"].append({"id": _v, "label": _v})
-                            break
-        except Exception:
-            pass
-
-        _html = build_banker_html(_initial)
+        sidecar_ok = _ensure_sidecar_running()
 
         st.markdown(
             """<style>
@@ -1061,11 +1029,27 @@ def render_main():
             [data-testid="stHeader"], [data-testid="stToolbar"],
             .stDeployButton { display: none !important; }
             .main .block-container { padding: 0 !important; max-width: 100% !important; }
-            section.main > div:first-child { padding-top: 0 !important; }
+            section.main > div:first-child { padding-top: 2rem !important; }
             </style>""",
             unsafe_allow_html=True,
         )
-        _st_components.html(_html, height=900, scrolling=True)
+
+        _, col, _ = st.columns([1, 2, 1])
+        with col:
+            st.markdown("## 🏦 Banker Dashboard")
+            if sidecar_ok:
+                st.caption("Your dedicated compliance dashboard is ready.")
+                st.link_button(
+                    "Open Banker Dashboard →",
+                    "http://127.0.0.1:8502",
+                    use_container_width=True,
+                    type="primary",
+                )
+            else:
+                st.error(
+                    "The banker dashboard service failed to start on port 8502. "
+                    "Ensure port 8502 is free and restart the Streamlit server."
+                )
         st.stop()
         return
 
