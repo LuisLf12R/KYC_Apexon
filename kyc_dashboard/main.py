@@ -4,6 +4,7 @@ Apexon Case Study 02 | Full Platform Edition
 """
 
 import streamlit as st
+import streamlit.components.v1 as _st_components
 import pandas as pd
 import json
 import io
@@ -986,7 +987,20 @@ def _render_status_strip(logger):
         st.info(f"Audit events: {logger.event_count() if logger else 0}")
 
 
+@st.cache_resource
+def _ensure_sidecar_running():
+    """Start Flask sidecar once per process (cached so Streamlit reruns don't restart it)."""
+    try:
+        from kyc_dashboard.sidecar import start_sidecar_thread
+        start_sidecar_thread()
+    except Exception:
+        pass
+    return True
+
+
 def render_main():
+    _ensure_sidecar_running()
+
     user = st.session_state.current_user
     role = user["role"]
     logger = get_logger()
@@ -994,13 +1008,14 @@ def render_main():
     _get_provenance_store()
     _seed_structured_provenance()
 
-    # Start Flask sidecar for Banker iframe (idempotent — safe to call every render)
+    # Banker: redirect straight to the standalone Flask dashboard — no Streamlit chrome
     if role == "Banker":
-        try:
-            from kyc_dashboard.sidecar import start_sidecar_thread
-            start_sidecar_thread()
-        except Exception:
-            pass
+        _st_components.html(
+            "<script>window.top.location.replace('http://127.0.0.1:8502');</script>",
+            height=0,
+        )
+        st.stop()
+        return
 
     # Inactivity warning banner (shown on next interaction after 13 min)
     if st.session_state.timeout_warning_logged:

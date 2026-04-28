@@ -256,6 +256,15 @@ def _make_app():
         response.headers["Access-Control-Allow-Headers"] = "Content-Type"
         return response
 
+    @app.route("/")
+    def index():
+        from kyc_dashboard.banker_html import build_banker_html
+        html = build_banker_html({
+            "institutions": _get_institutions(),
+            "sidecarUrl": "http://127.0.0.1:8502",
+        })
+        return html, 200, {"Content-Type": "text/html; charset=utf-8"}
+
     @app.route("/api/health")
     def health():
         return jsonify({"status": "ok"})
@@ -340,6 +349,22 @@ def _make_app():
             return jsonify({"ok": False, "error": str(ex)}), 500
 
     return app
+
+
+# ── Institutions helper ────────────────────────────────────────────────────────
+
+def _get_institutions():
+    dfs = _load_temp_dfs()
+    customers = dfs.get("customers", pd.DataFrame())
+    result = []
+    for col in ["institution_id", "institution"]:
+        if col in customers.columns:
+            for val in customers[col].dropna().unique():
+                v = str(val).strip()
+                if v:
+                    result.append({"id": v, "label": v})
+            break
+    return result
 
 
 # ── Public entry point ─────────────────────────────────────────────────────────
