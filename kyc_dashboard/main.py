@@ -1008,10 +1008,10 @@ def render_main():
     _get_provenance_store()
     _seed_structured_provenance()
 
-    # Banker: hand off to the standalone Flask dashboard on :8502.
-    # Streamlit 1.28+ sandboxes component iframes with allow-top-navigation-by-user-activation
-    # (not unconditional allow-top-navigation), so a script-triggered window.top redirect is
-    # silently blocked.  Use a link_button instead — user-activated navigation is always allowed.
+    # Banker: embed the standalone Flask dashboard full-screen.
+    # st.components.v1.iframe() loads the URL directly (no sandbox attribute) so the
+    # banker React app can fetch /api/run-batch etc. without restriction.
+    # CSS strips all Streamlit chrome so only the banker dashboard is visible.
     if role == "Banker":
         import socket as _socket, time as _time
         # Poll until the sidecar has bound its port (handles cold-start race, up to 3 s).
@@ -1024,20 +1024,16 @@ def render_main():
                 _time.sleep(0.1)
 
         st.markdown(
-            "<style>#MainMenu,footer,header{display:none!important}"
-            ".block-container{padding-top:3rem!important}</style>",
+            """<style>
+            #MainMenu, footer, header,
+            [data-testid="stHeader"], [data-testid="stToolbar"],
+            .stDeployButton { display: none !important; }
+            .main .block-container { padding: 0 !important; max-width: 100% !important; }
+            section.main > div:first-child { padding-top: 0 !important; }
+            </style>""",
             unsafe_allow_html=True,
         )
-        _, col, _ = st.columns([1, 2, 1])
-        with col:
-            st.markdown("## 🏦 Banker Dashboard")
-            st.caption("Your dedicated compliance dashboard is ready.")
-            st.link_button(
-                "Open Banker Dashboard →",
-                "http://127.0.0.1:8502",
-                use_container_width=True,
-                type="primary",
-            )
+        _st_components.iframe("http://127.0.0.1:8502", height=900, scrolling=True)
         st.stop()
         return
 
