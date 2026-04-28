@@ -987,23 +987,16 @@ def _render_status_strip(logger):
         st.info(f"Audit events: {logger.event_count() if logger else 0}")
 
 
-@st.cache_resource
 def _ensure_sidecar_running() -> bool:
-    """Start the Flask sidecar and wait up to 5 s for it to bind. Returns True on success."""
-    import socket as _sock, time as _time
+    """Return True if the sidecar is already bound on port 8502.
+    The sidecar is started at app.py module level, so this is just a health check."""
+    import socket as _sock
     try:
-        from kyc_dashboard.sidecar import start_sidecar_thread
-        start_sidecar_thread()
-    except Exception:
-        pass
-    for _ in range(50):
-        try:
-            _c = _sock.create_connection(("127.0.0.1", 8502), timeout=0.1)
-            _c.close()
-            return True
-        except OSError:
-            _time.sleep(0.1)
-    return False
+        _c = _sock.create_connection(("127.0.0.1", 8502), timeout=0.5)
+        _c.close()
+        return True
+    except OSError:
+        return False
 
 
 def render_main():
