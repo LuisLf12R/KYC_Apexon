@@ -41,114 +41,234 @@ _SNAPSHOT_FIELDS = [
     "source_of_wealth_score", "crs_fatca_score",
 ]
 
-# ── Design-system CSS (faithful port of styles.css) ────────────────────────────
+# ── Design-system CSS (faithful port of styles.css, hex colors for universal support) ─
 
 _DASH_CSS = """
 <style>
-/* ── Design tokens (light default + dark override) ── */
+/* ── Design tokens ── */
 :root {
   --bg: #ffffff;
-  --bg-elev: #fbfbfc;
-  --bg-sunken: #f6f6f8;
-  --bg-hover: #f3f3f6;
-  --bg-active: #eeeef3;
-  --line: #ececf0;
-  --line-strong: #d8d8e0;
+  --bg-elev: #f8f9fb;
+  --bg-sunken: #f3f4f7;
+  --bg-hover: #eeeef4;
+  --bg-active: #e5e6ed;
+  --line: #e5e6ec;
+  --line-strong: #d0d2dc;
   --ink: #0e1014;
-  --ink-2: #2a2d35;
-  --ink-3: #4a4e59;
-  --ink-4: #6a6e79;
-  --ink-5: #8a8e98;
-  --accent:      oklch(48% 0.18 265);
-  --accent-soft: oklch(96% 0.03 265);
-  --accent-ink:  oklch(38% 0.16 265);
-  --ok:          oklch(48% 0.14 155);
-  --ok-soft:     oklch(96% 0.04 155);
-  --warn:        oklch(54% 0.14 60);
-  --warn-soft:   oklch(96% 0.05 80);
-  --bad:         oklch(50% 0.20 27);
-  --bad-soft:    oklch(96% 0.04 27);
-  --info:        oklch(50% 0.14 240);
-  --info-soft:   oklch(96% 0.03 230);
+  --ink-2: #23262f;
+  --ink-3: #464b58;
+  --ink-4: #666c7a;
+  --ink-5: #8a8e9a;
+  --accent:      #3b5bdb;
+  --accent-soft: #eef1ff;
+  --accent-ink:  #2f4abf;
+  --ok:          #2b9a48;
+  --ok-soft:     #eafbee;
+  --warn:        #b87400;
+  --warn-soft:   #fff8e0;
+  --bad:         #c22828;
+  --bad-soft:    #fff1f0;
+  --info:        #1864ab;
+  --info-soft:   #e7f5ff;
+  --warn-text:   #8a5900;
+  --risk-med:    #b07a00;
   --radius: 8px; --radius-sm: 6px; --radius-lg: 12px;
-  --shadow-sm: 0 1px 1px rgba(15,17,22,.04), 0 1px 0 rgba(15,17,22,.02);
-  --shadow-md: 0 1px 2px rgba(15,17,22,.06), 0 4px 12px rgba(15,17,22,.04);
-  --d-row: 44px; --d-pad: 16px; --d-gap: 16px; --d-text: 14px;
+  --shadow-sm: 0 1px 2px rgba(15,17,22,.05), 0 0 0 1px rgba(15,17,22,.03);
+  --shadow-md: 0 2px 8px rgba(15,17,22,.09), 0 0 0 1px rgba(15,17,22,.04);
+  --d-row: 44px; --d-pad: 16px; --d-gap: 14px; --d-text: 13.5px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
-[data-theme="dark"] {
-  --bg: #0d0e11;
-  --bg-elev: #14161b;
-  --bg-sunken: #0a0b0e;
-  --bg-hover: #1a1c22;
-  --bg-active: #20232b;
-  --line: #23252d;
-  --line-strong: #2f323c;
-  --ink: #f3f4f7;
-  --ink-2: #d6d8df;
-  --ink-3: #b0b4bd;
-  --ink-4: #8a8e98;
-  --ink-5: #5e6168;
-  --accent:      oklch(72% 0.16 265);
-  --accent-soft: oklch(28% 0.08 265);
-  --accent-ink:  oklch(82% 0.14 265);
-  --ok:          oklch(72% 0.14 155);
-  --ok-soft:     oklch(26% 0.06 155);
-  --warn:        oklch(80% 0.14 80);
-  --warn-soft:   oklch(28% 0.06 80);
-  --bad:         oklch(72% 0.16 27);
-  --bad-soft:    oklch(28% 0.07 27);
-  --info:        oklch(75% 0.10 230);
-  --info-soft:   oklch(26% 0.05 230);
+
+/* ── Streamlit layout cleanup ── */
+.main .block-container {
+  padding-top: 0.75rem !important;
+  padding-bottom: 2rem !important;
+  max-width: 1440px !important;
+}
+div[data-testid="stAppViewContainer"] > section.main {
+  background: var(--bg-sunken) !important;
+}
+div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlockBorderWrapper"] {
+  border: none !important;
+  box-shadow: none !important;
+}
+/* Caption / small text */
+div[data-testid="stCaptionContainer"] p {
+  color: var(--ink-4) !important;
+  font-size: 12px !important;
+}
+
+/* ── Filter chip buttons (override Streamlit secondary style) ── */
+div[data-testid="stHorizontalBlock"] .stButton > button {
+  border-radius: 999px !important;
+  padding: 4px 14px !important;
+  font-size: 12.5px !important;
+  font-weight: 500 !important;
+  height: auto !important;
+  min-height: 30px !important;
+  line-height: 1.4 !important;
+  border: 1px solid var(--line-strong) !important;
+  background: var(--bg) !important;
+  color: var(--ink-3) !important;
+  box-shadow: none !important;
+  transition: background .12s, border-color .12s, color .12s !important;
+}
+div[data-testid="stHorizontalBlock"] .stButton > button:hover {
+  background: var(--bg-hover) !important;
+  border-color: var(--ink-5) !important;
+  color: var(--ink-2) !important;
+}
+div[data-testid="stHorizontalBlock"] .stButton > button[kind="primary"] {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: #fff !important;
+}
+div[data-testid="stHorizontalBlock"] .stButton > button[kind="primary"]:hover {
+  background: var(--accent-ink) !important;
+}
+
+/* ── Run queue + nav buttons ── */
+.stButton > button[kind="primary"] {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: #fff !important;
+  border-radius: var(--radius) !important;
+  font-weight: 500 !important;
+}
+.stButton > button[kind="primary"]:hover {
+  background: var(--accent-ink) !important;
+  border-color: var(--accent-ink) !important;
+}
+.stButton > button[kind="secondary"] {
+  border-radius: var(--radius) !important;
+  border-color: var(--line-strong) !important;
+  color: var(--ink-3) !important;
+  background: var(--bg) !important;
+  font-weight: 400 !important;
+}
+
+/* ── Search input ── */
+div[data-testid="stTextInput"] input {
+  border-radius: var(--radius) !important;
+  border-color: var(--line-strong) !important;
+  font-size: 13px !important;
+  height: 36px !important;
+  padding: 0 10px !important;
+  background: var(--bg) !important;
+  color: var(--ink) !important;
+}
+div[data-testid="stTextInput"] input:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px rgba(59,91,219,.12) !important;
+}
+
+/* ── Selectbox ── */
+div[data-testid="stSelectbox"] > div > div {
+  border-radius: var(--radius) !important;
+  border-color: var(--line-strong) !important;
+  font-size: 13px !important;
+  min-height: 36px !important;
+  background: var(--bg) !important;
+  color: var(--ink) !important;
+}
+
+/* ── Expander ── */
+div[data-testid="stExpander"] {
+  border: 1px solid var(--line) !important;
+  border-radius: var(--radius-lg) !important;
+  background: var(--bg) !important;
+  box-shadow: var(--shadow-sm) !important;
+  overflow: hidden !important;
+}
+div[data-testid="stExpander"] summary {
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  color: var(--ink) !important;
+  padding: 10px 16px !important;
+}
+
+/* ── Plotly chart container ── */
+div[data-testid="stPlotlyChart"] {
+  border-radius: var(--radius-lg) !important;
+  overflow: hidden !important;
 }
 
 /* ── Utilities ── */
 .tnum  { font-variant-numeric: tabular-nums; }
 .muted { color: var(--ink-3); }
-.eyebrow { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-4); font-weight: 500; }
-.row-flex { display: flex; align-items: center; gap: 10px; }
-.row-flex.gap-sm { gap: 6px; }
+.eyebrow {
+  font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink-4); font-weight: 500;
+}
+.row-flex     { display: flex; align-items: center; gap: 10px; }
+.row-flex.gap-sm  { gap: 6px; }
 .row-flex.between { justify-content: space-between; }
 .divider { height: 1px; background: var(--line); margin: var(--d-gap) 0; }
 
 /* ── Page header ── */
-.page-h { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 20px; }
-.page-title { font-size: 22px; font-weight: 600; letter-spacing: -.02em; margin: 4px 0 4px; color: var(--ink); }
-.page-sub { color: var(--ink-3); font-size: 13.5px; }
+.page-h {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 24px; margin-bottom: 16px;
+}
+.page-title {
+  font-size: 22px; font-weight: 600; letter-spacing: -.02em;
+  margin: 4px 0; color: var(--ink);
+}
+.page-sub { color: var(--ink-3); font-size: 13px; }
 
 /* ── Section header ── */
-.section-h { display: flex; align-items: center; justify-content: space-between; margin: 6px 0 12px; }
+.section-h {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 6px 0 10px;
+}
 .section-h h3 { margin: 0; font-size: 14px; font-weight: 600; color: var(--ink); }
 .section-h .meta { color: var(--ink-4); font-size: 12px; }
 
 /* ── Cards ── */
 .card {
-  background: var(--bg); border: 1px solid var(--line);
-  border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
-  overflow: hidden; margin-bottom: 14px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  margin-bottom: 12px;
 }
 .card-h {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 18px; border-bottom: 1px solid var(--line);
+  padding: 12px 16px; border-bottom: 1px solid var(--line);
+  background: var(--bg-elev);
 }
-.card-h h3 { margin: 0; font-size: 13.5px; font-weight: 600; letter-spacing: -.005em; color: var(--ink); }
+.card-h h3 {
+  margin: 0; font-size: 13px; font-weight: 600;
+  letter-spacing: -.005em; color: var(--ink);
+}
 .card-h .meta { color: var(--ink-4); font-size: 12px; }
 
 /* ── KPI strip ── */
 .kpi-strip {
-  display: grid; grid-template-columns: repeat(4, 1fr);
-  gap: var(--d-gap); margin-bottom: var(--d-gap);
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--d-gap);
+  margin-bottom: var(--d-gap);
 }
 .kpi {
-  background: var(--bg); border: 1px solid var(--line);
-  border-radius: var(--radius-lg); padding: 16px 18px 18px;
-  position: relative; overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 16px 18px 18px;
+  position: relative;
+  overflow: hidden;
 }
-.kpi-label { font-size: 12px; color: var(--ink-3); }
-.kpi-value { font-size: 28px; font-weight: 600; letter-spacing: -.025em; margin-top: 6px; font-variant-numeric: tabular-nums; color: var(--ink); }
-.kpi-sub   { font-size: 12px; color: var(--ink-4); margin-top: 2px; }
+.kpi-label { font-size: 11.5px; color: var(--ink-4); font-weight: 500; text-transform: uppercase; letter-spacing: .04em; }
+.kpi-value {
+  font-size: 28px; font-weight: 600; letter-spacing: -.03em;
+  margin-top: 6px; font-variant-numeric: tabular-nums; color: var(--ink);
+  line-height: 1.1;
+}
+.kpi-sub   { font-size: 12px; color: var(--ink-4); margin-top: 4px; }
 .kpi-delta {
   display: inline-flex; align-items: center; gap: 3px;
-  font-size: 11.5px; padding: 2px 6px; border-radius: 4px;
+  font-size: 11px; padding: 2px 6px; border-radius: 4px;
   margin-left: 8px; vertical-align: 3px; font-variant-numeric: tabular-nums;
 }
 .kpi-delta.up      { color: var(--ok);    background: var(--ok-soft); }
@@ -158,82 +278,84 @@ _DASH_CSS = """
 /* ── Badges ── */
 .badge {
   display: inline-flex; align-items: center; gap: 5px;
-  padding: 2px 8px; border-radius: 999px;
+  padding: 3px 9px; border-radius: 999px;
   font-size: 11.5px; font-weight: 500; line-height: 1.5; white-space: nowrap;
 }
-.badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.b-ok     { color: var(--ok);         background: var(--ok-soft); }
-.b-warn   { color: oklch(48% .13 75); background: var(--warn-soft); }
-[data-theme="dark"] .b-warn { color: var(--warn); }
-.b-bad    { color: var(--bad);        background: var(--bad-soft); }
-.b-info   { color: var(--info);       background: var(--info-soft); }
-.b-mute   { color: var(--ink-3);      background: var(--bg-sunken); }
-.b-accent { color: var(--accent-ink); background: var(--accent-soft); }
+.badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
+.b-ok     { color: var(--ok);          background: var(--ok-soft); }
+.b-warn   { color: var(--warn-text);   background: var(--warn-soft); }
+.b-bad    { color: var(--bad);         background: var(--bad-soft); }
+.b-info   { color: var(--info);        background: var(--info-soft); }
+.b-mute   { color: var(--ink-4);       background: var(--bg-sunken); }
+.b-accent { color: var(--accent-ink);  background: var(--accent-soft); }
 
 /* ── Risk bars (5 segment) ── */
 .risk-bar {
-  display: inline-grid; grid-template-columns: repeat(5, 4px);
-  gap: 2px; vertical-align: middle; margin-right: 6px;
+  display: inline-grid;
+  grid-template-columns: repeat(5, 4px);
+  gap: 2px; vertical-align: middle; margin-right: 4px;
 }
-.risk-bar i { height: 10px; border-radius: 1px; background: var(--bg-active); display: block; }
+.risk-bar i {
+  height: 10px; border-radius: 1px;
+  background: var(--bg-active); display: block;
+}
 .risk-bar.r-1 i:nth-child(-n+1),
 .risk-bar.r-2 i:nth-child(-n+2),
 .risk-bar.r-3 i:nth-child(-n+3),
 .risk-bar.r-4 i:nth-child(-n+4),
 .risk-bar.r-5 i:nth-child(-n+5) { background: currentColor; }
 .risk-low    { color: var(--ok); }
-.risk-medium { color: oklch(58% .14 75); }
-[data-theme="dark"] .risk-medium { color: var(--warn); }
+.risk-medium { color: var(--risk-med); }
 .risk-high   { color: var(--bad); }
 
 /* ── Table (client worklist) ── */
 .tbl-wrap { overflow-x: auto; }
 .tbl { width: 100%; border-collapse: collapse; }
 .tbl thead th {
-  text-align: left; font-weight: 500; font-size: 11.5px;
-  color: var(--ink-4); text-transform: uppercase; letter-spacing: .06em;
+  text-align: left; font-weight: 500; font-size: 11px;
+  color: var(--ink-4); text-transform: uppercase; letter-spacing: .07em;
   padding: 10px 14px; border-bottom: 1px solid var(--line);
-  background: var(--bg-elev);
+  background: var(--bg-elev); white-space: nowrap;
 }
 .tbl tbody td {
   padding: 0 14px; height: var(--d-row);
   border-bottom: 1px solid var(--line);
   font-size: var(--d-text); vertical-align: middle; color: var(--ink);
 }
-.tbl tbody tr { cursor: pointer; transition: background .12s; }
+.tbl tbody tr:last-child td { border-bottom: 0; }
+.tbl tbody tr { cursor: pointer; transition: background .1s; }
 .tbl tbody tr:hover { background: var(--bg-hover); }
 .tbl tbody tr[data-selected="true"] { background: var(--accent-soft); }
-.tbl tbody tr[data-selected="true"] td { color: var(--ink); }
 .cell-client { display: flex; align-items: center; gap: 10px; }
 .cell-client .ini {
-  width: 28px; height: 28px; border-radius: 50%;
+  width: 30px; height: 30px; border-radius: 50%;
   background: var(--bg-active); color: var(--ink-2);
   display: grid; place-items: center;
   font-size: 11px; font-weight: 600; flex: 0 0 auto;
+  letter-spacing: .03em;
 }
-.cell-client b { font-weight: 500; display: block; line-height: 1.2; }
-.cell-client small { color: var(--ink-4); font-size: 11.5px; }
+.cell-client b   { font-weight: 500; display: block; line-height: 1.3; font-size: 13.5px; }
+.cell-client small { color: var(--ink-4); font-size: 11.5px; display: block; }
 
 /* ── Flag rows ── */
 .flag-row {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 14px; border-top: 1px solid var(--line);
-  transition: background .12s;
+  padding: 10px 16px; border-top: 1px solid var(--line);
+  transition: background .1s;
 }
 .flag-row:first-child { border-top: 0; }
 .flag-row:hover { background: var(--bg-hover); }
-.flag-row .left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.flag-row .left { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1; }
 .flag-row .ico {
-  width: 28px; height: 28px; border-radius: 7px;
+  width: 30px; height: 30px; border-radius: 8px;
   background: var(--bg-sunken); display: grid; place-items: center;
-  flex: 0 0 auto; font-size: 14px; color: var(--ink-3);
+  flex: 0 0 auto; font-size: 13px; color: var(--ink-4);
 }
 .flag-row .ico.ok   { background: var(--ok-soft);   color: var(--ok); }
-.flag-row .ico.warn { background: var(--warn-soft); color: oklch(48% .14 75); }
-[data-theme="dark"] .flag-row .ico.warn { color: var(--warn); }
-.flag-row .ico.bad  { background: var(--bad-soft);  color: var(--bad); }
+.flag-row .ico.warn { background: var(--warn-soft);  color: var(--warn-text); }
+.flag-row .ico.bad  { background: var(--bad-soft);   color: var(--bad); }
 .flag-row .t { font-size: 13px; font-weight: 500; color: var(--ink); }
-.flag-row .s { font-size: 12px; color: var(--ink-3); }
+.flag-row .s { font-size: 11.5px; color: var(--ink-4); margin-top: 1px; }
 </style>
 """
 
@@ -441,15 +563,15 @@ def _kpi_strip_html(queue_df: pd.DataFrame) -> str:
     pass_rate    = int(round(pass_count / total * 100)) if total else 0
 
     cards = [
-        {"label": "Customers evaluated", "value": str(total),       "sub": "in current queue run",       "delta": None},
-        {"label": "Pass rate",            "value": f"{pass_rate}%",  "sub": f"{pass_count} customers cleared", "delta": None},
+        {"label": "Open cases",          "value": str(total),       "sub": "in current queue run",            "delta": None},
+        {"label": "Pass rate",           "value": f"{pass_rate}%",  "sub": f"{pass_count} customers cleared", "delta": None},
         {
             "label": "Require review",
             "value": str(review_count),
             "sub":   "REJECT or REVIEW disposition",
             "delta": ("down", f"{fail_count} hard fail") if fail_count > 0 else None,
         },
-        {"label": "Avg. confidence",      "value": str(avg_score),   "sub": "out of 100",                 "delta": None},
+        {"label": "Avg. confidence",     "value": str(avg_score),   "sub": "out of 100",                      "delta": None},
     ]
 
     html = "<div class='kpi-strip'>"
@@ -470,16 +592,16 @@ def _kpi_strip_html(queue_df: pd.DataFrame) -> str:
 
 def _client_list_html(rows: List[Dict[str, Any]], selected_id: str) -> str:
     html = (
-        "<div class='card'>"
-        "<div class='card-h'>"
+        "<div class='section-h' style='margin-top:4px'>"
         "<h3>Active queue</h3>"
         f"<span class='meta'>{len(rows)} customers</span>"
         "</div>"
+        "<div class='card'>"
         "<div class='tbl-wrap'><table class='tbl'>"
         "<thead><tr>"
         "<th>Client</th>"
-        "<th style='width:110px'>Risk</th>"
-        "<th style='width:130px;text-align:right'>Status</th>"
+        "<th style='width:100px'>Risk</th>"
+        "<th style='width:120px;text-align:right'>Status</th>"
         "</tr></thead><tbody>"
     )
     for r in rows:
@@ -491,7 +613,7 @@ def _client_list_html(rows: List[Dict[str, Any]], selected_id: str) -> str:
         bdg  = _badge_html(lbl, tone)
         meta = r.get("entity_type", "")
         if r.get("jurisdiction"):
-            meta += f" · {r['jurisdiction']}"
+            meta += f"&nbsp;·&nbsp;{r['jurisdiction']}"
         html += (
             f"<tr{sel}>"
             f"<td><div class='cell-client'>{ini}"
@@ -606,39 +728,42 @@ def _detail_header_html(queue_row: Dict[str, Any]) -> str:
     risk_level  = _risk_level(score)
     risk_labels = {1: "Very Low", 2: "Low", 3: "Medium", 4: "High", 5: "Very High"}
     n_flags     = queue_row.get("flag_count", 0)
-    flag_badge  = (
-        f"<span class='badge b-bad'><span class='dot'></span>{n_flags} flag{'s' if n_flags != 1 else ''}</span>"
+    flag_note   = (
+        f"<span class='badge b-bad' style='font-size:11px'><span class='dot'></span>{n_flags} flag{'s' if n_flags != 1 else ''}</span>"
         if n_flags > 0
-        else f"<span class='muted' style='font-size:12px'>0 flags</span>"
+        else "<span style='color:var(--ink-4);font-size:12px'>No flags</span>"
+    )
+    entity_meta = " &nbsp;·&nbsp; ".join(
+        x for x in [queue_row["customer_id"], queue_row.get("entity_type",""), queue_row.get("jurisdiction","")] if x
     )
 
     return (
-        f"<div class='page-h' style='margin-bottom:10px'>"
+        f"<div style='display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px'>"
         f"<div>"
-        f"<div class='page-title' style='font-size:18px'>{queue_row['customer_name_display']}</div>"
-        f"<div class='page-sub'>{queue_row['customer_id']} · {queue_row.get('entity_type','')} · {queue_row.get('jurisdiction','')}</div>"
+        f"<div class='eyebrow'>Case detail</div>"
+        f"<div style='font-size:17px;font-weight:600;letter-spacing:-.015em;color:var(--ink);margin:3px 0 3px'>"
+        f"{queue_row['customer_name_display']}</div>"
+        f"<div style='font-size:12px;color:var(--ink-4)'>{entity_meta}</div>"
         f"</div>"
-        f"<div>{_badge_html(disp_label, tone)}</div>"
+        f"<div style='padding-top:4px'>{_badge_html(disp_label, tone)}</div>"
         f"</div>"
-        f"<div class='kpi-strip' style='grid-template-columns:repeat(3,1fr);margin-bottom:12px'>"
+        f"<div class='kpi-strip' style='grid-template-columns:repeat(3,1fr);margin-bottom:10px'>"
         f"<div class='kpi'>"
         f"<div class='kpi-label'>Confidence</div>"
-        f"<div class='kpi-value' style='font-size:22px'>{score}</div>"
-        f"<div class='kpi-sub'>/100</div>"
+        f"<div class='kpi-value' style='font-size:24px'>{score}</div>"
+        f"<div class='kpi-sub'>out of 100</div>"
         f"</div>"
         f"<div class='kpi'>"
         f"<div class='kpi-label'>Risk level</div>"
-        f"<div class='kpi-value' style='font-size:15px;padding-top:8px'>"
+        f"<div class='kpi-value' style='font-size:14px;margin-top:10px'>"
         f"{_risk_bar_html(score)}{risk_labels[risk_level]}</div>"
         f"</div>"
         f"<div class='kpi'>"
         f"<div class='kpi-label'>Open flags</div>"
-        f"<div class='kpi-value' style='font-size:22px'>{n_flags}</div>"
-        f"<div class='kpi-sub'>{flag_badge}</div>"
+        f"<div class='kpi-value' style='font-size:24px'>{n_flags}</div>"
+        f"<div class='kpi-sub'>{flag_note}</div>"
         f"</div>"
         f"</div>"
-        f"<div style='margin-bottom:10px;font-size:12px;color:var(--ink-3)'>"
-        f"{queue_row.get('notes','')[:120]}</div>"
     )
 
 
@@ -944,9 +1069,10 @@ def render(user: Dict[str, Any], role: str, logger: Any) -> None:
     ph1, ph2 = st.columns([3, 1])
     with ph1:
         st.markdown(
-            f"<div class='eyebrow'>KYC Operations</div>"
-            f"<h1 class='page-title'>Customer queue</h1>"
-            f"<div class='page-sub'>{datetime.now().strftime('%a, %d %b %Y')}</div>",
+            "<div class='eyebrow'>KYC Operations</div>"
+            "<h1 class='page-title'>Customer queue</h1>"
+            f"<div class='page-sub'>High Net Worth Individuals &nbsp;·&nbsp; {datetime.now().strftime('%a, %d %b %Y')}</div>"
+            "<div style='margin-bottom:16px'></div>",
             unsafe_allow_html=True,
         )
 
