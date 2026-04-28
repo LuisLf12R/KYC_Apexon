@@ -1008,12 +1008,36 @@ def render_main():
     _get_provenance_store()
     _seed_structured_provenance()
 
-    # Banker: redirect straight to the standalone Flask dashboard — no Streamlit chrome
+    # Banker: hand off to the standalone Flask dashboard on :8502.
+    # Streamlit 1.28+ sandboxes component iframes with allow-top-navigation-by-user-activation
+    # (not unconditional allow-top-navigation), so a script-triggered window.top redirect is
+    # silently blocked.  Use a link_button instead — user-activated navigation is always allowed.
     if role == "Banker":
-        _st_components.html(
-            "<script>window.top.location.replace('http://127.0.0.1:8502');</script>",
-            height=0,
+        import socket as _socket, time as _time
+        # Poll until the sidecar has bound its port (handles cold-start race, up to 3 s).
+        for _ in range(30):
+            try:
+                _c = _socket.create_connection(("127.0.0.1", 8502), timeout=0.1)
+                _c.close()
+                break
+            except OSError:
+                _time.sleep(0.1)
+
+        st.markdown(
+            "<style>#MainMenu,footer,header{display:none!important}"
+            ".block-container{padding-top:3rem!important}</style>",
+            unsafe_allow_html=True,
         )
+        _, col, _ = st.columns([1, 2, 1])
+        with col:
+            st.markdown("## 🏦 Banker Dashboard")
+            st.caption("Your dedicated compliance dashboard is ready.")
+            st.link_button(
+                "Open Banker Dashboard →",
+                "http://127.0.0.1:8502",
+                use_container_width=True,
+                type="primary",
+            )
         st.stop()
         return
 
@@ -1060,16 +1084,6 @@ def render_main():
     st.divider()
 
     render_institution_banner()
-
-    if role == "Banker":
-        banker_tabs = st.tabs(["Dashboard", "Data & Documents"])
-        with banker_tabs[0]:
-            dashboard.render(user, role, logger)
-            _render_status_strip(logger)
-        with banker_tabs[1]:
-            data_documents.render(user, role, logger)
-            _render_status_strip(logger)
-        return
 
     tabs = [
         ("Dashboard", dashboard.render),
