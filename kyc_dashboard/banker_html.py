@@ -587,7 +587,11 @@ function BatchUploadView({ onBack }) {
 
 function App() {
   const [view, setView]             = useState("worklist");
-  const [data, setData]             = useState(null);
+  const [data, setData]             = useState(
+    INIT.cases && INIT.cases.length > 0
+      ? { cases: INIT.cases, kpis: INIT.kpis || {}, batchId: INIT.batchId || "", runAt: INIT.runAt || "pre-loaded" }
+      : null
+  );
   const [loading, setLoading]       = useState(false);
   const [error, setError]           = useState(null);
   const [activeCase, setActiveCase] = useState(null);

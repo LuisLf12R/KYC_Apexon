@@ -1008,20 +1008,52 @@ def render_main():
     _get_provenance_store()
     _seed_structured_provenance()
 
-    # Banker: embed the standalone Flask dashboard full-screen.
-    # st.components.v1.iframe() loads the URL directly (no sandbox attribute) so the
-    # banker React app can fetch /api/run-batch etc. without restriction.
-    # CSS strips all Streamlit chrome so only the banker dashboard is visible.
+    # Banker: pre-compute KYC batch in Python, inject into the React app's initial state,
+    # and render the banker HTML inline via st.components.v1.html().
+    # No Flask sidecar or separate port needed — everything is wired through Streamlit.
     if role == "Banker":
-        import socket as _socket, time as _time
-        # Poll until the sidecar has bound its port (handles cold-start race, up to 3 s).
-        for _ in range(30):
-            try:
-                _c = _socket.create_connection(("127.0.0.1", 8502), timeout=0.1)
-                _c.close()
-                break
-            except OSError:
-                _time.sleep(0.1)
+        from kyc_dashboard.banker_html import build_banker_html
+        from kyc_dashboard.sidecar import _format_results as _fmt_results
+        from kyc_engine.engine import KYCComplianceEngine as _KYCEngine
+
+        _initial: dict = {
+            "institutions": [],
+            "sidecarUrl":   "",
+            "cases":        [],
+            "kpis":         {"total": 0, "passCount": 0, "passRate": 0,
+                             "failCount": 0, "reviewCount": 0, "avgScore": 0},
+            "runAt":        "",
+            "batchId":      "",
+        }
+
+        try:
+            _data_dir = (
+                st.session_state.get("data_dir")
+                or (Path(tempfile.gettempdir()) / "kyc_data_clean")
+            )
+            if _data_dir and Path(_data_dir).exists():
+                _eng  = _KYCEngine(data_clean_dir=Path(_data_dir))
+                _custs = _eng.customers
+                if _custs is not None and not _custs.empty:
+                    _raw: list = []
+                    for _, _row in _custs.iterrows():
+                        _cid = str(_row.get("customer_id", ""))
+                        try:
+                            _raw.append(_eng.evaluate_customer(_cid))
+                        except Exception:
+                            pass
+                    _initial.update(_fmt_results(_raw, _eng.customers))
+                    for _col in ["institution_id", "institution"]:
+                        if _col in _custs.columns:
+                            for _val in _custs[_col].dropna().unique():
+                                _v = str(_val).strip()
+                                if _v:
+                                    _initial["institutions"].append({"id": _v, "label": _v})
+                            break
+        except Exception:
+            pass
+
+        _html = build_banker_html(_initial)
 
         st.markdown(
             """<style>
@@ -1033,7 +1065,7 @@ def render_main():
             </style>""",
             unsafe_allow_html=True,
         )
-        _st_components.iframe("http://127.0.0.1:8502", height=900, scrolling=True)
+        _st_components.html(_html, height=900, scrolling=True)
         st.stop()
         return
 
