@@ -1,8 +1,9 @@
 """
 kyc_dashboard/tabs/dashboard.py
 --------------------------------
-KYC Operations dashboard — visual redesign aligned with the HNWI design system.
-Design language: KPI strip · client worklist · case detail with flag-row dimensions.
+KYC Operations dashboard — HNWI design system (faithful to design prototype).
+Visual language: styles.css tokens · KPI strip · flag-row dimensions · risk bars.
+Backend logic is unchanged — only CSS/HTML generation is replaced.
 """
 
 from __future__ import annotations
@@ -40,215 +41,206 @@ _SNAPSHOT_FIELDS = [
     "source_of_wealth_score", "crs_fatca_score",
 ]
 
-# ── Design-system CSS ──────────────────────────────────────────────────────────
+# ── Design-system CSS (faithful port of styles.css) ────────────────────────────
 
 _DASH_CSS = """
 <style>
-/* KYC HNWI design tokens — light + dark adaptive */
+/* ── Design tokens (light default + dark override) ── */
 :root {
-  --kyc-ok:       #059669;
-  --kyc-ok-bg:    rgba(5,150,105,0.10);
-  --kyc-warn:     #b45309;
-  --kyc-warn-bg:  rgba(180,83,9,0.10);
-  --kyc-bad:      #c44000;
-  --kyc-bad-bg:   rgba(196,64,0,0.10);
-  --kyc-accent:   #4f52c2;
-  --kyc-acc-bg:   rgba(79,82,194,0.10);
-
-  --kyc-text:     #0f172a;
-  --kyc-text2:    rgba(15,23,42,0.55);
-  --kyc-text3:    rgba(15,23,42,0.38);
-  --kyc-mute:     rgba(15,23,42,0.50);
-  --kyc-surface:  rgba(15,23,42,0.025);
-  --kyc-card-bg:  rgba(15,23,42,0.02);
-  --kyc-border:   rgba(15,23,42,0.10);
-  --kyc-border2:  rgba(15,23,42,0.07);
-  --kyc-ini-bg:   rgba(15,23,42,0.08);
-  --kyc-ini-fg:   rgba(15,23,42,0.60);
-  --kyc-sel-bg:   rgba(79,82,194,0.07);
-  --kyc-risk-off: rgba(15,23,42,0.12);
-  --kyc-tbl-hdr:  rgba(15,23,42,0.025);
+  --bg: #ffffff;
+  --bg-elev: #fbfbfc;
+  --bg-sunken: #f6f6f8;
+  --bg-hover: #f3f3f6;
+  --bg-active: #eeeef3;
+  --line: #ececf0;
+  --line-strong: #d8d8e0;
+  --ink: #0e1014;
+  --ink-2: #2a2d35;
+  --ink-3: #4a4e59;
+  --ink-4: #6a6e79;
+  --ink-5: #8a8e98;
+  --accent:      oklch(48% 0.18 265);
+  --accent-soft: oklch(96% 0.03 265);
+  --accent-ink:  oklch(38% 0.16 265);
+  --ok:          oklch(48% 0.14 155);
+  --ok-soft:     oklch(96% 0.04 155);
+  --warn:        oklch(54% 0.14 60);
+  --warn-soft:   oklch(96% 0.05 80);
+  --bad:         oklch(50% 0.20 27);
+  --bad-soft:    oklch(96% 0.04 27);
+  --info:        oklch(50% 0.14 240);
+  --info-soft:   oklch(96% 0.03 230);
+  --radius: 8px; --radius-sm: 6px; --radius-lg: 12px;
+  --shadow-sm: 0 1px 1px rgba(15,17,22,.04), 0 1px 0 rgba(15,17,22,.02);
+  --shadow-md: 0 1px 2px rgba(15,17,22,.06), 0 4px 12px rgba(15,17,22,.04);
+  --d-row: 44px; --d-pad: 16px; --d-gap: 16px; --d-text: 14px;
 }
-
 [data-theme="dark"] {
-  --kyc-ok:       #00c285;
-  --kyc-ok-bg:    rgba(0,194,133,0.13);
-  --kyc-warn:     #c9a600;
-  --kyc-warn-bg:  rgba(201,166,0,0.13);
-  --kyc-bad:      #e05c00;
-  --kyc-bad-bg:   rgba(224,92,0,0.13);
-  --kyc-accent:   #7b7fe0;
-  --kyc-acc-bg:   rgba(123,127,224,0.13);
-
-  --kyc-text:     #f3f4f7;
-  --kyc-text2:    rgba(255,255,255,0.45);
-  --kyc-text3:    rgba(255,255,255,0.32);
-  --kyc-mute:     rgba(255,255,255,0.50);
-  --kyc-surface:  rgba(255,255,255,0.03);
-  --kyc-card-bg:  rgba(255,255,255,0.02);
-  --kyc-border:   rgba(255,255,255,0.08);
-  --kyc-border2:  rgba(255,255,255,0.05);
-  --kyc-ini-bg:   rgba(255,255,255,0.09);
-  --kyc-ini-fg:   rgba(255,255,255,0.65);
-  --kyc-sel-bg:   rgba(60,62,180,0.22);
-  --kyc-risk-off: rgba(255,255,255,0.10);
-  --kyc-tbl-hdr:  rgba(255,255,255,0.02);
+  --bg: #0d0e11;
+  --bg-elev: #14161b;
+  --bg-sunken: #0a0b0e;
+  --bg-hover: #1a1c22;
+  --bg-active: #20232b;
+  --line: #23252d;
+  --line-strong: #2f323c;
+  --ink: #f3f4f7;
+  --ink-2: #d6d8df;
+  --ink-3: #b0b4bd;
+  --ink-4: #8a8e98;
+  --ink-5: #5e6168;
+  --accent:      oklch(72% 0.16 265);
+  --accent-soft: oklch(28% 0.08 265);
+  --accent-ink:  oklch(82% 0.14 265);
+  --ok:          oklch(72% 0.14 155);
+  --ok-soft:     oklch(26% 0.06 155);
+  --warn:        oklch(80% 0.14 80);
+  --warn-soft:   oklch(28% 0.06 80);
+  --bad:         oklch(72% 0.16 27);
+  --bad-soft:    oklch(28% 0.07 27);
+  --info:        oklch(75% 0.10 230);
+  --info-soft:   oklch(26% 0.05 230);
 }
 
-.kyc-kpi-strip {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px;
-}
-.kyc-kpi-card {
-  background: var(--kyc-surface);
-  border: 1px solid var(--kyc-border);
-  border-radius: 12px;
-  padding: 18px 20px 14px;
-}
-.kyc-kpi-label {
-  font-size: 11px; color: var(--kyc-text3);
-  text-transform: uppercase; letter-spacing: 0.08em;
-  font-weight: 500; margin-bottom: 6px;
-}
-.kyc-kpi-value {
-  font-size: 30px; font-weight: 600; letter-spacing: -0.025em;
-  color: var(--kyc-text); line-height: 1; margin-bottom: 4px;
-  font-variant-numeric: tabular-nums;
-}
-.kyc-kpi-sub { font-size: 12px; color: var(--kyc-text3); }
-.kyc-kpi-delta {
-  display: inline-flex; align-items: center;
-  padding: 1px 6px; border-radius: 4px; font-size: 11px;
-  font-weight: 500; margin-left: 6px; vertical-align: 3px;
-}
-.kyc-delta-ok   { color: var(--kyc-ok);   background: var(--kyc-ok-bg); }
-.kyc-delta-bad  { color: var(--kyc-bad);  background: var(--kyc-bad-bg); }
-.kyc-delta-warn { color: var(--kyc-warn); background: var(--kyc-warn-bg); }
+/* ── Utilities ── */
+.tnum  { font-variant-numeric: tabular-nums; }
+.muted { color: var(--ink-3); }
+.eyebrow { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-4); font-weight: 500; }
+.row-flex { display: flex; align-items: center; gap: 10px; }
+.row-flex.gap-sm { gap: 6px; }
+.row-flex.between { justify-content: space-between; }
+.divider { height: 1px; background: var(--line); margin: var(--d-gap) 0; }
 
-/* Badges */
-.kyc-badge {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 2px 8px; border-radius: 999px;
-  font-size: 11.5px; font-weight: 500; white-space: nowrap;
-}
-.kyc-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.kyc-b-ok     { color: var(--kyc-ok);     background: var(--kyc-ok-bg); }
-.kyc-b-warn   { color: var(--kyc-warn);   background: var(--kyc-warn-bg); }
-.kyc-b-bad    { color: var(--kyc-bad);    background: var(--kyc-bad-bg); }
-.kyc-b-mute   { color: var(--kyc-mute);   background: var(--kyc-surface); }
-.kyc-b-accent { color: var(--kyc-accent); background: var(--kyc-acc-bg); }
+/* ── Page header ── */
+.page-h { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 20px; }
+.page-title { font-size: 22px; font-weight: 600; letter-spacing: -.02em; margin: 4px 0 4px; color: var(--ink); }
+.page-sub { color: var(--ink-3); font-size: 13.5px; }
 
-/* Card */
-.kyc-card {
-  border: 1px solid var(--kyc-border);
-  border-radius: 12px;
-  background: var(--kyc-card-bg);
-  overflow: hidden;
-  margin-bottom: 14px;
+/* ── Section header ── */
+.section-h { display: flex; align-items: center; justify-content: space-between; margin: 6px 0 12px; }
+.section-h h3 { margin: 0; font-size: 14px; font-weight: 600; color: var(--ink); }
+.section-h .meta { color: var(--ink-4); font-size: 12px; }
+
+/* ── Cards ── */
+.card {
+  background: var(--bg); border: 1px solid var(--line);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
+  overflow: hidden; margin-bottom: 14px;
 }
-.kyc-card-h {
+.card-h {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 18px;
-  border-bottom: 1px solid var(--kyc-border2);
-  font-size: 13px; font-weight: 600; color: var(--kyc-text);
+  padding: 14px 18px; border-bottom: 1px solid var(--line);
 }
-.kyc-card-h .meta { font-size: 12px; font-weight: 400; color: var(--kyc-text2); }
+.card-h h3 { margin: 0; font-size: 13.5px; font-weight: 600; letter-spacing: -.005em; color: var(--ink); }
+.card-h .meta { color: var(--ink-4); font-size: 12px; }
 
-/* Client avatar */
-.kyc-ini {
-  width: 30px; height: 30px; border-radius: 50%;
-  background: var(--kyc-ini-bg); color: var(--kyc-ini-fg);
-  display: inline-grid; place-items: center;
+/* ── KPI strip ── */
+.kpi-strip {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: var(--d-gap); margin-bottom: var(--d-gap);
+}
+.kpi {
+  background: var(--bg); border: 1px solid var(--line);
+  border-radius: var(--radius-lg); padding: 16px 18px 18px;
+  position: relative; overflow: hidden;
+}
+.kpi-label { font-size: 12px; color: var(--ink-3); }
+.kpi-value { font-size: 28px; font-weight: 600; letter-spacing: -.025em; margin-top: 6px; font-variant-numeric: tabular-nums; color: var(--ink); }
+.kpi-sub   { font-size: 12px; color: var(--ink-4); margin-top: 2px; }
+.kpi-delta {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 11.5px; padding: 2px 6px; border-radius: 4px;
+  margin-left: 8px; vertical-align: 3px; font-variant-numeric: tabular-nums;
+}
+.kpi-delta.up      { color: var(--ok);    background: var(--ok-soft); }
+.kpi-delta.down    { color: var(--bad);   background: var(--bad-soft); }
+.kpi-delta.neutral { color: var(--ink-3); background: var(--bg-sunken); }
+
+/* ── Badges ── */
+.badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 500; line-height: 1.5; white-space: nowrap;
+}
+.badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.b-ok     { color: var(--ok);         background: var(--ok-soft); }
+.b-warn   { color: oklch(48% .13 75); background: var(--warn-soft); }
+[data-theme="dark"] .b-warn { color: var(--warn); }
+.b-bad    { color: var(--bad);        background: var(--bad-soft); }
+.b-info   { color: var(--info);       background: var(--info-soft); }
+.b-mute   { color: var(--ink-3);      background: var(--bg-sunken); }
+.b-accent { color: var(--accent-ink); background: var(--accent-soft); }
+
+/* ── Risk bars (5 segment) ── */
+.risk-bar {
+  display: inline-grid; grid-template-columns: repeat(5, 4px);
+  gap: 2px; vertical-align: middle; margin-right: 6px;
+}
+.risk-bar i { height: 10px; border-radius: 1px; background: var(--bg-active); display: block; }
+.risk-bar.r-1 i:nth-child(-n+1),
+.risk-bar.r-2 i:nth-child(-n+2),
+.risk-bar.r-3 i:nth-child(-n+3),
+.risk-bar.r-4 i:nth-child(-n+4),
+.risk-bar.r-5 i:nth-child(-n+5) { background: currentColor; }
+.risk-low    { color: var(--ok); }
+.risk-medium { color: oklch(58% .14 75); }
+[data-theme="dark"] .risk-medium { color: var(--warn); }
+.risk-high   { color: var(--bad); }
+
+/* ── Table (client worklist) ── */
+.tbl-wrap { overflow-x: auto; }
+.tbl { width: 100%; border-collapse: collapse; }
+.tbl thead th {
+  text-align: left; font-weight: 500; font-size: 11.5px;
+  color: var(--ink-4); text-transform: uppercase; letter-spacing: .06em;
+  padding: 10px 14px; border-bottom: 1px solid var(--line);
+  background: var(--bg-elev);
+}
+.tbl tbody td {
+  padding: 0 14px; height: var(--d-row);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--d-text); vertical-align: middle; color: var(--ink);
+}
+.tbl tbody tr { cursor: pointer; transition: background .12s; }
+.tbl tbody tr:hover { background: var(--bg-hover); }
+.tbl tbody tr[data-selected="true"] { background: var(--accent-soft); }
+.tbl tbody tr[data-selected="true"] td { color: var(--ink); }
+.cell-client { display: flex; align-items: center; gap: 10px; }
+.cell-client .ini {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--bg-active); color: var(--ink-2);
+  display: grid; place-items: center;
   font-size: 11px; font-weight: 600; flex: 0 0 auto;
 }
+.cell-client b { font-weight: 500; display: block; line-height: 1.2; }
+.cell-client small { color: var(--ink-4); font-size: 11.5px; }
 
-/* Risk bar (5 bars) */
-.kyc-riskbar { display: inline-flex; align-items: flex-end; gap: 2px; vertical-align: middle; }
-.kyc-riskbar span { width: 4px; border-radius: 1.5px; display: block; }
-
-/* Client list rows (visual only — interaction via selectbox) */
-.kyc-tbl-h {
-  display: grid; grid-template-columns: 1fr 90px 100px;
-  padding: 7px 18px;
-  border-bottom: 1px solid var(--kyc-border2);
-  background: var(--kyc-tbl-hdr);
-  font-size: 10.5px; font-weight: 500; color: var(--kyc-text3);
-  text-transform: uppercase; letter-spacing: 0.06em;
-}
-.kyc-row {
-  display: grid; grid-template-columns: 1fr 90px 100px;
-  align-items: center; padding: 10px 18px;
-  border-bottom: 1px solid var(--kyc-border2);
-  font-size: 13px;
-}
-.kyc-row:last-child { border-bottom: 0; }
-.kyc-row.kyc-selected { background: var(--kyc-sel-bg); }
-.kyc-row-client { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.kyc-row-name { font-weight: 500; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--kyc-text); }
-.kyc-row-meta { font-size: 11.5px; color: var(--kyc-text2); margin-top: 1px; }
-.kyc-row-risk { display: flex; align-items: center; gap: 6px; }
-.kyc-score-num { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--kyc-text2); }
-.kyc-row-badge { text-align: right; }
-
-/* Section header */
-.kyc-section-h {
+/* ── Flag rows ── */
+.flag-row {
   display: flex; align-items: center; justify-content: space-between;
-  margin: 16px 0 10px;
+  padding: 10px 14px; border-top: 1px solid var(--line);
+  transition: background .12s;
 }
-.kyc-section-h h3 { margin: 0; font-size: 14px; font-weight: 600; color: var(--kyc-text); }
-.kyc-section-h .meta { font-size: 12px; color: var(--kyc-text2); }
-
-/* Flag rows (KYC dimension status, triggered rules) */
-.kyc-flags { }
-.kyc-flag-row {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 18px; border-top: 1px solid var(--kyc-border2);
-  font-size: 13px;
-}
-.kyc-flag-row:first-child { border-top: 0; }
-.kyc-flag-left { display: flex; align-items: center; gap: 12px; }
-.kyc-flag-ico {
+.flag-row:first-child { border-top: 0; }
+.flag-row:hover { background: var(--bg-hover); }
+.flag-row .left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.flag-row .ico {
   width: 28px; height: 28px; border-radius: 7px;
-  background: var(--kyc-surface);
-  display: inline-grid; place-items: center;
-  font-size: 13px; flex: 0 0 auto;
+  background: var(--bg-sunken); display: grid; place-items: center;
+  flex: 0 0 auto; font-size: 14px; color: var(--ink-3);
 }
-.kyc-flag-ico-ok   { background: var(--kyc-ok-bg);   color: var(--kyc-ok); }
-.kyc-flag-ico-warn { background: var(--kyc-warn-bg); color: var(--kyc-warn); }
-.kyc-flag-ico-bad  { background: var(--kyc-bad-bg);  color: var(--kyc-bad); }
-.kyc-flag-title { font-size: 13px; font-weight: 500; color: var(--kyc-text); }
-.kyc-flag-sub { font-size: 11.5px; color: var(--kyc-text2); margin-top: 1px; }
-
-/* Customer header in detail panel */
-.kyc-detail-hdr { padding: 14px 0 12px; }
-.kyc-detail-name {
-  font-size: 20px; font-weight: 600; letter-spacing: -0.02em;
-  color: var(--kyc-text); margin-bottom: 4px;
-}
-.kyc-detail-meta { font-size: 12.5px; color: var(--kyc-text2); }
-
-/* 3-KPI mini strip for detail panel */
-.kyc-mini-strip {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0;
-}
-.kyc-mini-card {
-  background: var(--kyc-surface); border: 1px solid var(--kyc-border2);
-  border-radius: 10px; padding: 12px 14px; text-align: center;
-}
-.kyc-mini-label { font-size: 10px; color: var(--kyc-text3); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 5px; }
-.kyc-mini-value { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
-
-/* Page header */
-.kyc-eyebrow {
-  font-size: 11px; color: var(--kyc-text3);
-  text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 2px;
-}
-.kyc-page-title {
-  font-size: 22px; font-weight: 600; letter-spacing: -0.02em;
-  color: var(--kyc-text); margin-bottom: 2px;
-}
-.kyc-page-sub { font-size: 13px; color: var(--kyc-text2); }
+.flag-row .ico.ok   { background: var(--ok-soft);   color: var(--ok); }
+.flag-row .ico.warn { background: var(--warn-soft); color: oklch(48% .14 75); }
+[data-theme="dark"] .flag-row .ico.warn { color: var(--warn); }
+.flag-row .ico.bad  { background: var(--bad-soft);  color: var(--bad); }
+.flag-row .t { font-size: 13px; font-weight: 500; color: var(--ink); }
+.flag-row .s { font-size: 12px; color: var(--ink-3); }
 </style>
 """
+
+# ── Hex gauge colors (Plotly does not support oklch) ──────────────────────────
+_GAUGE_GREEN = "#00c285"
+_GAUGE_AMBER = "#c9a600"
+_GAUGE_RED   = "#e05c00"
 
 
 # ── Utility helpers ────────────────────────────────────────────────────────────
@@ -321,7 +313,7 @@ def _confidence_score(result: Dict[str, Any]) -> int:
 
 
 def _risk_level(score: int) -> int:
-    """Map 0-100 score to 1-5 risk level (inverted — lower score = higher risk)."""
+    """Map 0-100 confidence score to 1-5 risk level (inverted — lower score = higher risk)."""
     if score >= 85:
         return 1
     if score >= 70:
@@ -333,58 +325,11 @@ def _risk_level(score: int) -> int:
     return 5
 
 
-def _risk_color(level: int) -> str:
-    if level <= 2:
-        return "var(--kyc-ok)"
-    if level == 3:
-        return "var(--kyc-warn)"
-    return "var(--kyc-bad)"
-
-
-def _score_color(score: float) -> str:
-    if score >= 70:
-        return "var(--kyc-ok)"
-    if score >= 50:
-        return "var(--kyc-warn)"
-    return "var(--kyc-bad)"
-
-
-# Hex equivalents for Plotly (oklch not supported by the library)
-_GAUGE_GREEN = "#00c285"
-_GAUGE_AMBER = "#c9a600"
-_GAUGE_RED   = "#e05c00"
-
-
-def _risk_bar_html(score: int) -> str:
-    level = _risk_level(score)
-    color = _risk_color(level)
-    bars = ""
-    for i in range(1, 6):
-        h = 6 + i * 2
-        bg = color if i <= level else "var(--kyc-risk-off)"
-        bars += f"<span style='height:{h}px;background:{bg}'></span>"
-    return f"<span class='kyc-riskbar'>{bars}</span>"
-
-
-def _badge_html(text: str, tone: str) -> str:
-    cls = {"ok": "kyc-b-ok", "warn": "kyc-b-warn", "bad": "kyc-b-bad",
-           "mute": "kyc-b-mute", "accent": "kyc-b-accent"}.get(tone, "kyc-b-mute")
-    return f"<span class='kyc-badge {cls}'><span class='kyc-dot'></span>{text}</span>"
-
-
-def _ini_html(name: str) -> str:
-    parts = name.upper().split()
-    ini = (parts[0][0] + parts[-1][0]) if len(parts) >= 2 else name[:2].upper()
-    return f"<span class='kyc-ini'>{ini}</span>"
-
-
 def _disposition_tone(disposition: str) -> str:
     d = str(disposition).upper()
     if d == "PASS":
         return "ok"
-    if d == "PASS_WITH_NOTES":
-        return "warn"
-    if d == "REVIEW":
+    if d in ("PASS_WITH_NOTES", "REVIEW"):
         return "warn"
     return "bad"
 
@@ -468,52 +413,55 @@ def _result_lookup(batch_results: pd.DataFrame, customer_id: str) -> Dict[str, A
 
 # ── HTML component builders ────────────────────────────────────────────────────
 
+def _ini_html(name: str) -> str:
+    parts = name.upper().split()
+    ini = (parts[0][0] + parts[-1][0]) if len(parts) >= 2 else name[:2].upper()
+    return f"<div class='ini'>{ini}</div>"
+
+
+def _badge_html(text: str, tone: str) -> str:
+    cls = {"ok": "b-ok", "warn": "b-warn", "bad": "b-bad",
+           "mute": "b-mute", "accent": "b-accent", "info": "b-info"}.get(tone, "b-mute")
+    return f"<span class='badge {cls}'><span class='dot'></span>{text}</span>"
+
+
+def _risk_bar_html(score: int) -> str:
+    """5-segment risk bar using design CSS (.risk-bar .r-N .risk-level)."""
+    level = _risk_level(score)
+    cls = "risk-low" if level <= 2 else "risk-medium" if level == 3 else "risk-high"
+    return f"<span class='risk-bar r-{level} {cls}'><i></i><i></i><i></i><i></i><i></i></span>"
+
+
 def _kpi_strip_html(queue_df: pd.DataFrame) -> str:
-    total = len(queue_df)
-    pass_count  = int((queue_df["decision"] == "PASS").sum()) if total else 0
-    fail_count  = int((queue_df["decision"] == "FAIL").sum()) if total else 0
+    total        = len(queue_df)
+    pass_count   = int((queue_df["decision"] == "PASS").sum()) if total else 0
+    fail_count   = int((queue_df["decision"] == "FAIL").sum()) if total else 0
     review_count = int(queue_df["disposition"].isin(["REJECT", "REVIEW"]).sum()) if total else 0
-    avg_score   = round(queue_df["confidence_score"].mean(), 1) if total else 0.0
-    pass_rate   = int(round(pass_count / total * 100)) if total else 0
-    fail_tone_cls = "kyc-delta-bad" if fail_count > 0 else "kyc-delta-ok"
+    avg_score    = round(queue_df["confidence_score"].mean(), 1) if total else 0.0
+    pass_rate    = int(round(pass_count / total * 100)) if total else 0
 
     cards = [
-        {
-            "label": "Customers evaluated",
-            "value": str(total),
-            "sub":   "in current queue run",
-            "delta": None,
-        },
-        {
-            "label": "Pass rate",
-            "value": f"{pass_rate}%",
-            "sub":   f"{pass_count} customers cleared",
-            "delta": None,
-        },
+        {"label": "Customers evaluated", "value": str(total),       "sub": "in current queue run",       "delta": None},
+        {"label": "Pass rate",            "value": f"{pass_rate}%",  "sub": f"{pass_count} customers cleared", "delta": None},
         {
             "label": "Require review",
             "value": str(review_count),
             "sub":   "REJECT or REVIEW disposition",
-            "delta": (fail_tone_cls, str(fail_count) + " hard fail") if fail_count > 0 else None,
+            "delta": ("down", f"{fail_count} hard fail") if fail_count > 0 else None,
         },
-        {
-            "label": "Avg. confidence",
-            "value": f"{avg_score}",
-            "sub":   "out of 100",
-            "delta": None,
-        },
+        {"label": "Avg. confidence",      "value": str(avg_score),   "sub": "out of 100",                 "delta": None},
     ]
 
-    html = "<div class='kyc-kpi-strip'>"
+    html = "<div class='kpi-strip'>"
     for c in cards:
         delta_html = ""
         if c["delta"]:
-            delta_html = f"<span class='kyc-kpi-delta {c['delta'][0]}'>{c['delta'][1]}</span>"
+            delta_html = f"<span class='kpi-delta {c['delta'][0]}'>{c['delta'][1]}</span>"
         html += (
-            f"<div class='kyc-kpi-card'>"
-            f"<div class='kyc-kpi-label'>{c['label']}</div>"
-            f"<div class='kyc-kpi-value'>{c['value']}{delta_html}</div>"
-            f"<div class='kyc-kpi-sub'>{c['sub']}</div>"
+            f"<div class='kpi'>"
+            f"<div class='kpi-label'>{c['label']}</div>"
+            f"<div class='kpi-value'>{c['value']}{delta_html}</div>"
+            f"<div class='kpi-sub'>{c['sub']}</div>"
             f"</div>"
         )
     html += "</div>"
@@ -522,38 +470,39 @@ def _kpi_strip_html(queue_df: pd.DataFrame) -> str:
 
 def _client_list_html(rows: List[Dict[str, Any]], selected_id: str) -> str:
     html = (
-        "<div class='kyc-card'>"
-        "<div class='kyc-card-h'>"
-        "<span>Active queue</span>"
+        "<div class='card'>"
+        "<div class='card-h'>"
+        "<h3>Active queue</h3>"
         f"<span class='meta'>{len(rows)} customers</span>"
         "</div>"
-        "<div class='kyc-tbl-h'>"
-        "<div>Client</div><div>Risk</div><div style='text-align:right'>Status</div>"
-        "</div>"
-        "<div class='kyc-flags'>"
+        "<div class='tbl-wrap'><table class='tbl'>"
+        "<thead><tr>"
+        "<th>Client</th>"
+        "<th style='width:110px'>Risk</th>"
+        "<th style='width:130px;text-align:right'>Status</th>"
+        "</tr></thead><tbody>"
     )
     for r in rows:
-        sel_cls = "kyc-selected" if r["customer_id"] == selected_id else ""
-        ini = _ini_html(r.get("customer_name_raw") or r["customer_id"])
-        score = r["confidence_score"]
-        risk_bar = _risk_bar_html(score)
+        sel = ' data-selected="true"' if r["customer_id"] == selected_id else ""
+        ini  = _ini_html(r.get("customer_name_raw") or r["customer_id"])
+        rbar = _risk_bar_html(r["confidence_score"])
         tone = _disposition_tone(r.get("disposition", "REVIEW"))
-        label = r.get("disposition", "REVIEW").replace("_", " ").title()
-        badge = _badge_html(label, tone)
-        meta = f"{r.get('entity_type','')}"
+        lbl  = r.get("disposition", "REVIEW").replace("_", " ").title()
+        bdg  = _badge_html(lbl, tone)
+        meta = r.get("entity_type", "")
         if r.get("jurisdiction"):
             meta += f" · {r['jurisdiction']}"
         html += (
-            f"<div class='kyc-row {sel_cls}'>"
-            f"<div class='kyc-row-client'>{ini}"
-            f"<div><div class='kyc-row-name'>{r['customer_name_display']}</div>"
-            f"<div class='kyc-row-meta'>{meta}</div></div></div>"
-            f"<div class='kyc-row-risk'>{risk_bar}"
-            f"<span class='kyc-score-num'>{score}</span></div>"
-            f"<div class='kyc-row-badge'>{badge}</div>"
-            "</div>"
+            f"<tr{sel}>"
+            f"<td><div class='cell-client'>{ini}"
+            f"<div><b>{r['customer_name_display']}</b>"
+            f"<small>{meta}</small></div></div></td>"
+            f"<td><span class='row-flex gap-sm'>{rbar}"
+            f"<span class='tnum' style='font-size:12px;color:var(--ink-4)'>{r['confidence_score']}</span></span></td>"
+            f"<td style='text-align:right'>{bdg}</td>"
+            "</tr>"
         )
-    html += "</div></div>"
+    html += "</tbody></table></div></div>"
     return html
 
 
@@ -561,7 +510,6 @@ def _needs_attention_html(result: Dict[str, Any]) -> str:
     """Flag rows for triggered reject/review rules."""
     reject_rules = result.get("triggered_reject_rules") or []
     review_rules = result.get("triggered_review_rules") or []
-
     if not reject_rules and not review_rules:
         return ""
 
@@ -570,37 +518,32 @@ def _needs_attention_html(result: Dict[str, Any]) -> str:
         name = _safe_str(r.get("name") or r.get("rule_id", ""))
         desc = _safe_str(r.get("description", ""))[:90]
         rows_html += (
-            "<div class='kyc-flag-row'>"
-            "<div class='kyc-flag-left'>"
-            "<div class='kyc-flag-ico kyc-flag-ico-bad'>✕</div>"
-            "<div>"
-            f"<div class='kyc-flag-title'>{name}</div>"
-            f"<div class='kyc-flag-sub'>{desc}</div>"
-            "</div></div>"
-            f"<span class='kyc-badge kyc-b-bad'><span class='kyc-dot'></span>Hard Reject</span>"
+            "<div class='flag-row'>"
+            "<div class='left'>"
+            "<div class='ico bad'>✕</div>"
+            f"<div><div class='t'>{name}</div><div class='s'>{desc}</div></div>"
+            "</div>"
+            "<span class='badge b-bad'><span class='dot'></span>Hard Reject</span>"
             "</div>"
         )
     for r in review_rules:
         name = _safe_str(r.get("name") or r.get("rule_id", ""))
         desc = _safe_str(r.get("description", ""))[:90]
         rows_html += (
-            "<div class='kyc-flag-row'>"
-            "<div class='kyc-flag-left'>"
-            "<div class='kyc-flag-ico kyc-flag-ico-warn'>⚑</div>"
-            "<div>"
-            f"<div class='kyc-flag-title'>{name}</div>"
-            f"<div class='kyc-flag-sub'>{desc}</div>"
-            "</div></div>"
-            f"<span class='kyc-badge kyc-b-warn'><span class='kyc-dot'></span>Review</span>"
+            "<div class='flag-row'>"
+            "<div class='left'>"
+            "<div class='ico warn'>⚑</div>"
+            f"<div><div class='t'>{name}</div><div class='s'>{desc}</div></div>"
+            "</div>"
+            "<span class='badge b-warn'><span class='dot'></span>Review</span>"
             "</div>"
         )
-
     return (
-        "<div class='kyc-section-h'>"
+        "<div class='section-h'>"
         "<h3>What needs attention</h3>"
         f"<span class='meta'>{len(reject_rules) + len(review_rules)} triggered</span>"
         "</div>"
-        f"<div class='kyc-card'><div class='kyc-flags'>{rows_html}</div></div>"
+        f"<div class='card'>{rows_html}</div>"
     )
 
 
@@ -616,7 +559,6 @@ def _dimension_flags_html(result: Dict[str, Any]) -> str:
         ("Source of Wealth",      "source_of_wealth_score",      "source_of_wealth_details"),
         ("CRS / FATCA",           "crs_fatca_score",             "crs_fatca_details"),
     ]
-
     rows_html = ""
     any_shown = False
     for label, score_field, details_field in dim_fields:
@@ -625,75 +567,78 @@ def _dimension_flags_html(result: Dict[str, Any]) -> str:
             continue
         any_shown = True
         finding = _safe_str(
-            (result.get(details_field) or {}).get("finding", "") if isinstance(result.get(details_field), dict) else ""
+            (result.get(details_field) or {}).get("finding", "")
+            if isinstance(result.get(details_field), dict) else ""
         )
         if not finding:
             finding = f"Score: {int(s)}/100"
 
         if s >= 70:
-            ico_cls, ico_char, badge_tone, badge_lbl = "kyc-flag-ico-ok", "✓", "ok", "Pass"
+            ico_cls, ico_char, btone, blbl = "ok",   "✓", "ok",   "Pass"
         elif s >= 50:
-            ico_cls, ico_char, badge_tone, badge_lbl = "kyc-flag-ico-warn", "⚑", "warn", "Attention"
+            ico_cls, ico_char, btone, blbl = "warn", "⚑", "warn", "Attention"
         else:
-            ico_cls, ico_char, badge_tone, badge_lbl = "kyc-flag-ico-bad", "✕", "bad", "Fail"
+            ico_cls, ico_char, btone, blbl = "bad",  "✕", "bad",  "Fail"
 
         rows_html += (
-            "<div class='kyc-flag-row'>"
-            "<div class='kyc-flag-left'>"
-            f"<div class='kyc-flag-ico {ico_cls}'>{ico_char}</div>"
-            "<div>"
-            f"<div class='kyc-flag-title'>{label}</div>"
-            f"<div class='kyc-flag-sub'>{finding[:100]}</div>"
-            "</div></div>"
-            f"<span class='kyc-badge kyc-b-{badge_tone}'>"
-            f"<span class='kyc-dot'></span>{badge_lbl} · {int(s)}</span>"
+            "<div class='flag-row'>"
+            "<div class='left'>"
+            f"<div class='ico {ico_cls}'>{ico_char}</div>"
+            f"<div><div class='t'>{label}</div><div class='s'>{finding[:100]}</div></div>"
+            "</div>"
+            f"<span class='badge b-{btone}'><span class='dot'></span>{blbl} · {int(s)}</span>"
             "</div>"
         )
-
     if not any_shown:
         return ""
-
     return (
-        "<div class='kyc-section-h'><h3>KYC dimensions</h3>"
+        "<div class='section-h'><h3>KYC dimensions</h3>"
         "<span class='meta'>click a dimension to drill in</span></div>"
-        f"<div class='kyc-card'><div class='kyc-flags'>{rows_html}</div></div>"
+        f"<div class='card'>{rows_html}</div>"
     )
 
 
 def _detail_header_html(queue_row: Dict[str, Any]) -> str:
-    score = queue_row["confidence_score"]
+    score       = queue_row["confidence_score"]
     disposition = queue_row.get("disposition", "REVIEW")
-    tone = _disposition_tone(disposition)
-    disp_label = disposition.replace("_", " ").title()
-    risk_level = _risk_level(score)
+    tone        = _disposition_tone(disposition)
+    disp_label  = disposition.replace("_", " ").title()
+    risk_level  = _risk_level(score)
     risk_labels = {1: "Very Low", 2: "Low", 3: "Medium", 4: "High", 5: "Very High"}
-    risk_col = _risk_color(risk_level)
-    n_flags = queue_row.get("flag_count", 0)
-    flag_col = "var(--kyc-bad)" if n_flags > 0 else "var(--kyc-text2)"
+    n_flags     = queue_row.get("flag_count", 0)
+    flag_badge  = (
+        f"<span class='badge b-bad'><span class='dot'></span>{n_flags} flag{'s' if n_flags != 1 else ''}</span>"
+        if n_flags > 0
+        else f"<span class='muted' style='font-size:12px'>0 flags</span>"
+    )
 
     return (
-        f"<div class='kyc-detail-hdr'>"
-        f"<div class='kyc-detail-name'>{queue_row['customer_name_display']}</div>"
-        f"<div class='kyc-detail-meta'>"
-        f"{queue_row['customer_id']} · {queue_row.get('entity_type','')} · {queue_row.get('jurisdiction','')}"
-        f"</div></div>"
-        f"<div class='kyc-mini-strip'>"
-        f"<div class='kyc-mini-card'>"
-        f"<div class='kyc-mini-label'>Confidence</div>"
-        f"<div class='kyc-mini-value' style='color:{_score_color(score)}'>{score}</div>"
+        f"<div class='page-h' style='margin-bottom:10px'>"
+        f"<div>"
+        f"<div class='page-title' style='font-size:18px'>{queue_row['customer_name_display']}</div>"
+        f"<div class='page-sub'>{queue_row['customer_id']} · {queue_row.get('entity_type','')} · {queue_row.get('jurisdiction','')}</div>"
         f"</div>"
-        f"<div class='kyc-mini-card'>"
-        f"<div class='kyc-mini-label'>Risk</div>"
-        f"<div class='kyc-mini-value' style='color:{risk_col}'>{risk_labels[risk_level]}</div>"
+        f"<div>{_badge_html(disp_label, tone)}</div>"
         f"</div>"
-        f"<div class='kyc-mini-card'>"
-        f"<div class='kyc-mini-label'>Flags</div>"
-        f"<div class='kyc-mini-value' style='color:{flag_col}'>{n_flags}</div>"
+        f"<div class='kpi-strip' style='grid-template-columns:repeat(3,1fr);margin-bottom:12px'>"
+        f"<div class='kpi'>"
+        f"<div class='kpi-label'>Confidence</div>"
+        f"<div class='kpi-value' style='font-size:22px'>{score}</div>"
+        f"<div class='kpi-sub'>/100</div>"
+        f"</div>"
+        f"<div class='kpi'>"
+        f"<div class='kpi-label'>Risk level</div>"
+        f"<div class='kpi-value' style='font-size:15px;padding-top:8px'>"
+        f"{_risk_bar_html(score)}{risk_labels[risk_level]}</div>"
+        f"</div>"
+        f"<div class='kpi'>"
+        f"<div class='kpi-label'>Open flags</div>"
+        f"<div class='kpi-value' style='font-size:22px'>{n_flags}</div>"
+        f"<div class='kpi-sub'>{flag_badge}</div>"
         f"</div>"
         f"</div>"
-        f"<div style='margin-bottom:12px'>{_badge_html(disp_label, tone)}"
-        f"&nbsp;<span style='font-size:12px;color:rgba(255,255,255,0.40)'>"
-        f"{queue_row.get('notes','')[:100]}</span></div>"
+        f"<div style='margin-bottom:10px;font-size:12px;color:var(--ink-3)'>"
+        f"{queue_row.get('notes','')[:120]}</div>"
     )
 
 
@@ -781,30 +726,30 @@ def _build_queue_rows(batch_results: pd.DataFrame, customers_df: Optional[pd.Dat
         display_name = customer_id
         if raw_name:
             display_name = display_customer_name(raw_name, role)
-        score = _confidence_score(result)
+        score    = _confidence_score(result)
         rule_ids = _extract_rule_ids(result)
-        flags = _build_flags(result, rule_ids)
+        flags    = _build_flags(result, rule_ids)
         disposition = _safe_str(result.get("disposition")).upper() or "REVIEW"
         rows.append({
-            "customer_id":          customer_id,
-            "customer_name_raw":    raw_name or customer_id,
+            "customer_id":           customer_id,
+            "customer_name_raw":     raw_name or customer_id,
             "customer_name_display": display_name,
-            "entity_type":          _entity_label(_first_present(customer, "entity_type")),
-            "confidence_score":     score,
-            "decision":             _decision_label(disposition),
-            "disposition":          disposition,
-            "flag_count":           len(flags),
-            "flags":                ", ".join(flags) if flags else "-",
-            "jurisdiction":         (_first_present(customer, "jurisdiction") or
-                                     _safe_str(result.get("jurisdiction")) or "Unknown").upper(),
-            "risk_rating":          (_first_present(customer, "risk_rating") or "Unknown").title(),
-            "notes":                _safe_str(result.get("rationale", ""))[:120],
-            "account_open_date":    _format_date(_first_present(customer, "account_open_date", "open_date")),
-            "last_kyc_review_date": _format_date(_first_present(customer, "last_kyc_review_date", "kyc_date")),
-            "date_of_birth":        _format_date(_first_present(customer, "date_of_birth", "dob")),
-            "country_of_origin":    _first_present(customer, "country_of_origin", "nationality"),
-            "incorporation_date":   _format_date(_first_present(customer, "incorporation_date", "registration_date")),
-            "_id_row":              id_row,
+            "entity_type":           _entity_label(_first_present(customer, "entity_type")),
+            "confidence_score":      score,
+            "decision":              _decision_label(disposition),
+            "disposition":           disposition,
+            "flag_count":            len(flags),
+            "flags":                 ", ".join(flags) if flags else "-",
+            "jurisdiction":          (_first_present(customer, "jurisdiction") or
+                                      _safe_str(result.get("jurisdiction")) or "Unknown").upper(),
+            "risk_rating":           (_first_present(customer, "risk_rating") or "Unknown").title(),
+            "notes":                 _safe_str(result.get("rationale", ""))[:120],
+            "account_open_date":     _format_date(_first_present(customer, "account_open_date", "open_date")),
+            "last_kyc_review_date":  _format_date(_first_present(customer, "last_kyc_review_date", "kyc_date")),
+            "date_of_birth":         _format_date(_first_present(customer, "date_of_birth", "dob")),
+            "country_of_origin":     _first_present(customer, "country_of_origin", "nationality"),
+            "incorporation_date":    _format_date(_first_present(customer, "incorporation_date", "registration_date")),
+            "_id_row":               id_row,
         })
     return rows
 
@@ -813,9 +758,11 @@ def _build_queue_rows(batch_results: pd.DataFrame, customers_df: Optional[pd.Dat
 
 def _reload_engine_from_session_data() -> None:
     from kyc_engine.engine import KYCComplianceEngine
-    filename_map = {"customers": "customers_clean.csv", "screenings": "screenings_clean.csv",
-                    "id_verifications": "id_verifications_clean.csv", "transactions": "transactions_clean.csv",
-                    "documents": "documents_clean.csv", "beneficial_ownership": "beneficial_ownership_clean.csv"}
+    filename_map = {
+        "customers": "customers_clean.csv", "screenings": "screenings_clean.csv",
+        "id_verifications": "id_verifications_clean.csv", "transactions": "transactions_clean.csv",
+        "documents": "documents_clean.csv", "beneficial_ownership": "beneficial_ownership_clean.csv",
+    }
     temp_dir = Path(tempfile.mkdtemp(prefix="kyc_ruleset_reload_"))
     for df_key, filename in filename_map.items():
         df_value = (st.session_state.get("customers_df", st.session_state.get("customers"))
@@ -913,12 +860,12 @@ def _render_identity_expander(queue_row: Dict[str, Any], role: str) -> None:
     customer_id = queue_row["customer_id"]
     id_row = queue_row.get("_id_row") or {}
     identity_rows = [
-        {"Field": "Legal Name",       "Value": queue_row["customer_name_display"]},
-        {"Field": "Customer ID",      "Value": customer_id},
-        {"Field": "Entity Type",      "Value": queue_row["entity_type"]},
-        {"Field": "Jurisdiction",     "Value": queue_row["jurisdiction"]},
-        {"Field": "Country of Origin","Value": queue_row["country_of_origin"] or "-"},
-        {"Field": "Risk Rating",      "Value": queue_row["risk_rating"]},
+        {"Field": "Legal Name",        "Value": queue_row["customer_name_display"]},
+        {"Field": "Customer ID",       "Value": customer_id},
+        {"Field": "Entity Type",       "Value": queue_row["entity_type"]},
+        {"Field": "Jurisdiction",      "Value": queue_row["jurisdiction"]},
+        {"Field": "Country of Origin", "Value": queue_row["country_of_origin"] or "-"},
+        {"Field": "Risk Rating",       "Value": queue_row["risk_rating"]},
     ]
     if queue_row["entity_type"] == "Corporate":
         identity_rows.append({"Field": "Incorporation Date", "Value": queue_row["incorporation_date"]})
@@ -927,12 +874,12 @@ def _render_identity_expander(queue_row: Dict[str, Any], role: str) -> None:
         identity_rows.append({"Field": "Date of Birth",
                                "Value": mask(dob, "dob") if dob != "-" else "-"})
     identity_rows.extend([
-        {"Field": "Account Opened",   "Value": queue_row["account_open_date"]},
-        {"Field": "Last KYC Review",  "Value": queue_row["last_kyc_review_date"]},
-        {"Field": "ID Type",          "Value": _entity_label(_first_present(id_row, "document_type")) if id_row else "-"},
-        {"Field": "Document Number",  "Value": mask(_first_present(id_row, "document_number", "document_id"), "account") if id_row else "-"},
-        {"Field": "ID Expiry",        "Value": _format_date(_first_present(id_row, "expiry_date")) if id_row else "-"},
-        {"Field": "ID Verification",  "Value": _first_present(id_row, "document_status", "verification_status").upper() or "-"},
+        {"Field": "Account Opened",  "Value": queue_row["account_open_date"]},
+        {"Field": "Last KYC Review", "Value": queue_row["last_kyc_review_date"]},
+        {"Field": "ID Type",         "Value": _entity_label(_first_present(id_row, "document_type")) if id_row else "-"},
+        {"Field": "Document Number", "Value": mask(_first_present(id_row, "document_number", "document_id"), "account") if id_row else "-"},
+        {"Field": "ID Expiry",       "Value": _format_date(_first_present(id_row, "expiry_date")) if id_row else "-"},
+        {"Field": "ID Verification", "Value": _first_present(id_row, "document_status", "verification_status").upper() or "-"},
     ])
     with st.expander("Profile · Identity", expanded=False):
         st_dataframe_safe(pd.DataFrame(identity_rows), use_container_width=True, hide_index=True)
@@ -952,8 +899,7 @@ _FALSE_POSITIVE_CODES = [
 def _render_remediation(queue_row: Dict[str, Any], result: Dict[str, Any], user: Dict[str, Any], role: str, logger: Any) -> None:
     disposition = queue_row.get("disposition", "REVIEW")
     customer_id = queue_row["customer_id"]
-    score = queue_row["confidence_score"]
-    rule_ids = _extract_rule_ids(result)
+    score       = queue_row["confidence_score"]
 
     if disposition not in ("REJECT", "REVIEW"):
         return
@@ -992,16 +938,15 @@ def _render_remediation(queue_row: Dict[str, Any], result: Dict[str, Any], user:
 # ── Main render ────────────────────────────────────────────────────────────────
 
 def render(user: Dict[str, Any], role: str, logger: Any) -> None:
-    # Inject design CSS
     st.markdown(_DASH_CSS, unsafe_allow_html=True)
 
     # Page header
     ph1, ph2 = st.columns([3, 1])
     with ph1:
         st.markdown(
-            f"<div class='kyc-eyebrow'>KYC Operations</div>"
-            f"<div class='kyc-page-title'>Customer queue</div>"
-            f"<div class='kyc-page-sub'>{datetime.now().strftime('%a, %d %b %Y')}</div>",
+            f"<div class='eyebrow'>KYC Operations</div>"
+            f"<h1 class='page-title'>Customer queue</h1>"
+            f"<div class='page-sub'>{datetime.now().strftime('%a, %d %b %Y')}</div>",
             unsafe_allow_html=True,
         )
 
@@ -1067,8 +1012,8 @@ def render(user: Dict[str, Any], role: str, logger: Any) -> None:
     for i, (val, label) in enumerate(chip_labels):
         with filt_cols[i]:
             active = st.session_state.dashboard_filter == val
-            btn_type = "primary" if active else "secondary"
-            if st.button(label, key=f"chip_{val}", type=btn_type, use_container_width=True):
+            if st.button(label, key=f"chip_{val}", type="primary" if active else "secondary",
+                         use_container_width=True):
                 st.session_state.dashboard_filter = val
                 st.rerun()
     with filt_cols[-2]:
@@ -1111,11 +1056,9 @@ def render(user: Dict[str, Any], role: str, logger: Any) -> None:
 
     left_col, right_col = st.columns([3, 2], gap="large")
 
-    # LEFT — styled client list
+    # LEFT — styled client worklist
     with left_col:
         st.markdown(_client_list_html(filtered_rows, selected_id), unsafe_allow_html=True)
-
-        # Selectbox for actual navigation (label hidden, just functional)
         selected_id = st.selectbox(
             "Open customer record",
             filtered_ids,
@@ -1129,13 +1072,14 @@ def render(user: Dict[str, Any], role: str, logger: Any) -> None:
         st.session_state.dashboard_selected_customer_id = selected_id
 
     # RIGHT — case detail
-    selected_row = next((r for r in filtered_rows if r["customer_id"] == selected_id), filtered_rows[0])
+    selected_row    = next((r for r in filtered_rows if r["customer_id"] == selected_id), filtered_rows[0])
     selected_result = _result_lookup(batch_results, selected_id)
 
     last_viewed = st.session_state.get("dashboard_last_viewed_customer")
     if last_viewed != selected_id and logger:
         logger.log("CUSTOMER_VIEW", customer_id=selected_id,
-                   details={"tab": "dashboard", "ruleset_version": _safe_str(selected_result.get("ruleset_version")) or get_active_ruleset_version()},
+                   details={"tab": "dashboard",
+                            "ruleset_version": _safe_str(selected_result.get("ruleset_version")) or get_active_ruleset_version()},
                    snapshot={f: selected_result.get(f) for f in _SNAPSHOT_FIELDS if f in selected_result})
         st.session_state.dashboard_last_viewed_customer = selected_id
 
@@ -1155,7 +1099,7 @@ def render(user: Dict[str, Any], role: str, logger: Any) -> None:
                 st.session_state.dashboard_selected_customer_id = filtered_ids[(idx + 1) % len(filtered_ids)]
                 st.rerun()
 
-        # Detail header (name, KPIs, badge)
+        # Detail header — name, mini KPI strip, disposition badge
         st.markdown(_detail_header_html(selected_row), unsafe_allow_html=True)
 
         # Confidence gauge — hex colors only (Plotly does not support oklch)
@@ -1188,7 +1132,7 @@ def render(user: Dict[str, Any], role: str, logger: Any) -> None:
         )
         st.plotly_chart(gauge_fig, use_container_width=True)
 
-        # "What needs attention" — triggered rules as flag rows
+        # Triggered rules (needs attention)
         attn_html = _needs_attention_html(selected_result)
         if attn_html:
             st.markdown(attn_html, unsafe_allow_html=True)
@@ -1198,10 +1142,10 @@ def render(user: Dict[str, Any], role: str, logger: Any) -> None:
         if dim_html:
             st.markdown(dim_html, unsafe_allow_html=True)
 
-        # Identity (in expander)
+        # Identity profile (expander)
         _render_identity_expander(selected_row, role)
 
-        # Remediation
+        # Remediation actions
         _render_remediation(selected_row, selected_result, user, role, logger)
 
     # Admin-only tools at the bottom
