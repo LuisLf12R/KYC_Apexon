@@ -140,13 +140,20 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
       const [search,     setSearch]     = useState("");
       const [activeCase, setActiveCase] = useState(null);
       const [summary,    setSummary]    = useState({});
-      const [cases,      setCases]      = useState([]);
+      const [cases,      setCases]      = useState(null);
       const [kpis,       setKpis]       = useState({});
 
       useEffect(() => {
         document.documentElement.setAttribute("data-theme",   tweaks.theme);
         document.documentElement.setAttribute("data-density", tweaks.density);
       }, [tweaks.theme, tweaks.density]);
+
+      // Reload cases whenever the worklist view becomes active
+      useEffect(() => {
+        if (view === "worklist") {
+          loadCases(localStorage.getItem("auth_token"));
+        }
+      }, [view, loadCases]);
 
       const loadCases = React.useCallback(async (authToken) => {
         try {
@@ -175,18 +182,26 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
       }, [API]);
 
       const handleApprove = React.useCallback((caseId) => {
+        const tok = localStorage.getItem("auth_token");
         fetch(API + "/api/kyc/approve/" + caseId, {
           method: "POST",
-          headers: { Authorization: `Bearer ${localStorage.getItem("auth_token")}` },
-        }).then(() => loadCases(localStorage.getItem("auth_token")));
-      }, [loadCases]);
+          headers: { Authorization: `Bearer ${tok}` },
+        }).then(res => {
+          if (!res.ok) { console.error("Approve failed", res.status); return; }
+          return loadCases(tok);
+        }).catch(err => console.error("Approve error:", err));
+      }, [loadCases, API]);
 
       const handleReject = React.useCallback((caseId) => {
+        const tok = localStorage.getItem("auth_token");
         fetch(API + "/api/kyc/reject/" + caseId, {
           method: "POST",
-          headers: { Authorization: `Bearer ${localStorage.getItem("auth_token")}` },
-        }).then(() => loadCases(localStorage.getItem("auth_token")));
-      }, [loadCases]);
+          headers: { Authorization: `Bearer ${tok}` },
+        }).then(res => {
+          if (!res.ok) { console.error("Reject failed", res.status); return; }
+          return loadCases(tok);
+        }).catch(err => console.error("Reject error:", err));
+      }, [loadCases, API]);
 
       const openCase = (c) => { setActiveCase(c); setView("case"); };
       const back = () => setView("worklist");
@@ -220,7 +235,7 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
                   <WorklistView
                     search={search}
                     onOpenCase={openCase}
-                    cases={cases.length ? cases : null}
+                    cases={cases}
                     kpiData={Object.keys(kpis).length ? kpis : null}
                     onApprove={handleApprove}
                     onReject={handleReject}
