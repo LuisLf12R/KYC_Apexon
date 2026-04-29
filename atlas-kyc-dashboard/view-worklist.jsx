@@ -4,31 +4,38 @@
    View A — Compliance Worklist (case queue)
    Decluttered: 3 KPIs, simpler table, no bottom-of-page noise.
    ============================================================ */
-function WorklistView({ onOpenCase, search }) {
+function WorklistView({ onOpenCase, search, cases: propCases, kpiData, onApprove, onReject }) {
   const { useState, useMemo } = React;
   const [filter, setFilter] = useState("all"); // all | needs-me | overdue | high
 
+  const source = propCases || MOCK.cases;
+
   const cases = useMemo(() => {
-    let list = MOCK.cases.slice();
+    let list = source.slice();
     if (search) {
       const s = search.toLowerCase();
       list = list.filter(c =>
         c.client.toLowerCase().includes(s) ||
         c.id.toLowerCase().includes(s) ||
-        c.rm.toLowerCase().includes(s)
+        (c.rm || "").toLowerCase().includes(s)
       );
     }
     if (filter === "needs-me")  list = list.filter(c => c.status === "Dual-approval" || c.status === "Pending review");
     if (filter === "overdue")   list = list.filter(c => c.sla.tone === "bad");
     if (filter === "high")      list = list.filter(c => c.risk === "high");
     return list;
-  }, [search, filter]);
+  }, [source, search, filter]);
 
-  const kpis = [
-    { label: "Open cases", value: "47", sub: "across the team" },
-    { label: "Pending docs", value: "12", sub: "awaiting client upload" },
-    { label: "Ready to approve", value: "8", sub: "reconciled, awaiting sign-off" },
-    { label: "Avg. cycle time", value: "3.4d", sub: "rolling 30 days" },
+  const kpis = kpiData ? [
+    { label: "Open cases",       value: String(kpiData.total      ?? 0), sub: "across the team" },
+    { label: "Flagged",          value: String(kpiData.flagged    ?? 0), sub: "escalated or rejected" },
+    { label: "Ready to approve", value: String(kpiData.reviewCount ?? 0), sub: "awaiting sign-off" },
+    { label: "Pass rate",        value: `${kpiData.passRate ?? 0}%`,      sub: "in this batch" },
+  ] : [
+    { label: "Open cases",       value: "47",   sub: "across the team" },
+    { label: "Pending docs",     value: "12",   sub: "awaiting client upload" },
+    { label: "Ready to approve", value: "8",    sub: "reconciled, awaiting sign-off" },
+    { label: "Avg. cycle time",  value: "3.4d", sub: "rolling 30 days" },
   ];
 
   return (
@@ -76,6 +83,7 @@ function WorklistView({ onOpenCase, search }) {
                 <th style={{ width: 130 }}>Risk</th>
                 <th>Action needed</th>
                 <th style={{ width: 140 }}>Due</th>
+                {(onApprove || onReject) && <th style={{ width: 160 }}>Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -104,6 +112,24 @@ function WorklistView({ onOpenCase, search }) {
                   <td>
                     <span className={`sla ${c.sla.tone}`}>{c.sla.label}</span>
                   </td>
+                  {(onApprove || onReject) && (
+                    <td>
+                      <div className="row-flex" style={{ gap: 6 }}>
+                        {onApprove && c.status !== "Cleared" && (
+                          <button className="btn" style={{ height: 26, padding: "0 10px", fontSize: 12 }}
+                            onClick={e => { e.stopPropagation(); onApprove(c.id); }}>
+                            Approve
+                          </button>
+                        )}
+                        {onReject && c.status !== "Escalated" && (
+                          <button className="btn" style={{ height: 26, padding: "0 10px", fontSize: 12, color: "var(--bad)", borderColor: "var(--bad)" }}
+                            onClick={e => { e.stopPropagation(); onReject(c.id); }}>
+                            Reject
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

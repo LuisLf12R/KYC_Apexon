@@ -141,11 +141,52 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
       const [activeCase, setActiveCase] = useState(null);
       const [summary,    setSummary]    = useState({});
       const [cases,      setCases]      = useState([]);
+      const [kpis,       setKpis]       = useState({});
 
       useEffect(() => {
         document.documentElement.setAttribute("data-theme",   tweaks.theme);
         document.documentElement.setAttribute("data-density", tweaks.density);
       }, [tweaks.theme, tweaks.density]);
+
+      const loadCases = React.useCallback(async (authToken) => {
+        try {
+          // Fetch first available institution then run batch
+          const instRes = await fetch(API + "/api/institutions", {
+            headers: { Authorization: `Bearer ${authToken}` },
+          });
+          let instId = "bank_001";
+          if (instRes.ok) {
+            const instList = await instRes.json();
+            if (Array.isArray(instList) && instList.length > 0) instId = instList[0].id;
+          }
+          const res = await fetch(API + "/api/kyc/batch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
+            body: JSON.stringify({ institution_id: instId }),
+          });
+          if (res.ok) {
+            const json = await res.json();
+            setCases(json.results || []);
+            setKpis(json.summary || {});
+          }
+        } catch (err) {
+          console.error("Failed to load cases:", err);
+        }
+      }, [API]);
+
+      const handleApprove = React.useCallback((caseId) => {
+        fetch(API + "/api/kyc/approve/" + caseId, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${localStorage.getItem("auth_token")}` },
+        }).then(() => loadCases(localStorage.getItem("auth_token")));
+      }, [loadCases]);
+
+      const handleReject = React.useCallback((caseId) => {
+        fetch(API + "/api/kyc/reject/" + caseId, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${localStorage.getItem("auth_token")}` },
+        }).then(() => loadCases(localStorage.getItem("auth_token")));
+      }, [loadCases]);
 
       const openCase = (c) => { setActiveCase(c); setView("case"); };
       const back = () => setView("worklist");
@@ -175,7 +216,16 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
                     role={role} view={view}/>
             <div className="content">
               <div className="content-wide">
-                {view === "worklist" && <WorklistView  search={search} onOpenCase={openCase}/>}
+                {view === "worklist" && (
+                  <WorklistView
+                    search={search}
+                    onOpenCase={openCase}
+                    cases={cases.length ? cases : null}
+                    kpiData={Object.keys(kpis).length ? kpis : null}
+                    onApprove={handleApprove}
+                    onReject={handleReject}
+                  />
+                )}
                 {view === "rm"       && <RMView        search={search} onOpenCase={openCase}/>}
                 {view === "case"     && <CaseDetail    caseData={activeCase || MOCK.cases[0]} onBack={back} panels={panels} setPanels={()=>{}}/>}
                 {view === "batch" && (
