@@ -148,7 +148,7 @@ def login(payload: LoginRequest) -> LoginResponse:
     SESSIONS[token] = {
         "token": token,
         "username": user.get("username", key),
-        "role": user.get("role", "analyst").lower(),
+        "role": user.get("role", "banker").lower(),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     print(f"[LOGIN] success username={payload.username!r} role={SESSIONS[token]['role']}")
