@@ -56,6 +56,9 @@ def _load_users() -> Dict[str, Dict[str, Any]]:
 
 USERS = _load_users()
 SESSIONS: Dict[str, Dict[str, Any]] = {}
+# In-memory approval overrides: customer_id → "approved" | "rejected"
+# Ephemeral — clears on server restart (acceptable for demo).
+APPROVALS: Dict[str, str] = {}
 
 app = FastAPI(title="KYC Backend API", version="0.1.0")
 
@@ -125,6 +128,12 @@ class UploadResponse(BaseModel):
     results: list[UploadResult]
     total_rows: int
     errors: int
+
+
+class ApprovalResponse(BaseModel):
+    customer_id: str
+    action: str
+    message: str
 
 
 def _extract_token(
@@ -241,6 +250,15 @@ def kyc_batch(
         "total": len(evaluations),
         "flagged": flagged,
     })
+    # Apply manual approval overrides to batch results
+    for case in formatted.get("cases", []):
+        override = APPROVALS.get(case.get("id", ""))
+        if override == "approved":
+            case["status"] = "Cleared"
+            case["sla"]    = {"tone": "ok", "label": "Approved"}
+        elif override == "rejected":
+            case["status"] = "Escalated"
+            case["sla"]    = {"tone": "bad", "label": "Rejected"}
     return KYCBatchResponse(
         results=formatted.get("cases", []),
         summary={"total": len(evaluations), "flagged": flagged},
@@ -276,6 +294,34 @@ def kyc_customer(
         raise HTTPException(status_code=500, detail="Unable to format customer result")
 
     return KYCCustomerResponse(result=cases[0])
+
+
+@app.post("/api/kyc/approve/{customer_id}", response_model=ApprovalResponse)
+def approve_case(
+    customer_id: str,
+    session: Dict[str, Any] = Depends(_require_session),
+) -> ApprovalResponse:
+    APPROVALS[customer_id] = "approved"
+    get_logger().log("CLEAR_APPROVED", customer_id=customer_id, details={
+        "approved_by": session.get("username"),
+        "role": session.get("role"),
+    })
+    print(f"[APPROVE] customer_id={customer_id!r} by={session.get('username')!r}")
+    return ApprovalResponse(customer_id=customer_id, action="approved", message="Case approved")
+
+
+@app.post("/api/kyc/reject/{customer_id}", response_model=ApprovalResponse)
+def reject_case(
+    customer_id: str,
+    session: Dict[str, Any] = Depends(_require_session),
+) -> ApprovalResponse:
+    APPROVALS[customer_id] = "rejected"
+    get_logger().log("CLEAR_REJECTED", customer_id=customer_id, details={
+        "rejected_by": session.get("username"),
+        "role": session.get("role"),
+    })
+    print(f"[REJECT] customer_id={customer_id!r} by={session.get('username')!r}")
+    return ApprovalResponse(customer_id=customer_id, action="rejected", message="Case rejected")
 
 
 @app.post("/api/upload", response_model=UploadResponse)
