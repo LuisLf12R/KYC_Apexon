@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import uuid
@@ -25,33 +26,32 @@ API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
 
 
 def _load_users() -> Dict[str, Dict[str, Any]]:
-    """Load users from dashboard module with a minimal-role fallback."""
+    """Load users from users.json at repo root."""
+    users_json = Path(__file__).parent.parent / "users.json"
     try:
-        from kyc_dashboard.main import load_users
-
-        users = load_users()
-        if isinstance(users, dict) and users:
-            return users
+        data = json.loads(users_json.read_text(encoding="utf-8"))
+        return {
+            u["username"].lower(): u
+            for u in data.get("users", [])
+            if u.get("username")
+        }
     except Exception:
-        pass
-
-    # Fallback — must mirror users.json exactly (admin + banker only).
-    return {
-        "admin": {
-            "user_id": "usr_admin_001",
-            "username": "admin",
-            "password": "admin123",
-            "role": "Admin",
-            "full_name": "M. Lyons",
-        },
-        "banker": {
-            "user_id": "usr_banker_001",
-            "username": "banker",
-            "password": "banker123",
-            "role": "Banker",
-            "full_name": "J. Marlow",
-        },
-    }
+        return {
+            "admin": {
+                "user_id": "usr_admin_001",
+                "username": "admin",
+                "password": "admin123",
+                "role": "Admin",
+                "full_name": "M. Lyons",
+            },
+            "banker": {
+                "user_id": "usr_banker_001",
+                "username": "banker",
+                "password": "banker123",
+                "role": "Banker",
+                "full_name": "J. Marlow",
+            },
+        }
 
 
 USERS = _load_users()
