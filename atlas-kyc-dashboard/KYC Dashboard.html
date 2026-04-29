@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Atlas — KYC Dashboard for Private Wealth (HNWI)</title>
+  <link rel="stylesheet" href="styles.css?v=8"/>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <style>html, body, #root { height: 100%; }</style>
+  <template id="__bundler_thumbnail">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+      <rect width="100" height="100" fill="#0e1014"/>
+      <rect x="20" y="22" width="60" height="56" rx="6" fill="none" stroke="#fff" stroke-width="2.5"/>
+      <line x1="20" y1="34" x2="80" y2="34" stroke="#fff" stroke-width="2"/>
+      <circle cx="26" cy="28" r="1.4" fill="#fff"/>
+      <circle cx="31" cy="28" r="1.4" fill="#fff"/>
+      <circle cx="36" cy="28" r="1.4" fill="#fff"/>
+      <rect x="28" y="44" width="44" height="6" rx="2" fill="#7e8eff"/>
+      <rect x="28" y="56" width="32" height="4" rx="1.5" fill="#fff" opacity=".55"/>
+      <rect x="28" y="64" width="38" height="4" rx="1.5" fill="#fff" opacity=".4"/>
+    </svg>
+  </template>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="data.js?v=10"></script>
+  <script type="text/babel" src="icons.jsx?v=10"></script>
+  <script type="text/babel" src="shell.jsx?v=10"></script>
+  <script type="text/babel" src="view-worklist.jsx?v=10"></script>
+  <script type="text/babel" src="view-portfolio.jsx?v=10"></script>
+  <script type="text/babel" src="view-rm.jsx?v=10"></script>
+  <script type="text/babel" src="view-case.jsx?v=10"></script>
+  <script type="text/babel" src="view-batch.jsx?v=10"></script>
+  <script type="text/babel" src="view-audit.jsx?v=10"></script>
+  <script type="text/babel" src="view-ruleset.jsx?v=10"></script>
+  <script type="text/babel" src="view-system.jsx?v=10"></script>
+  <script type="text/babel" src="tweaks-panel.jsx?v=10"></script>
+
+  <script type="text/babel" data-presets="react">
+    const { useState, useEffect } = React;
+
+    const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+      "theme": "light",
+      "density": "comfortable",
+      "sidebar": "expanded",
+      "role": "admin",
+      "panel_identity": true,
+      "panel_aml": true,
+      "panel_ubo": true,
+      "panel_sow": true,
+      "panel_crs": true,
+      "panel_monitoring": true
+    }/*EDITMODE-END*/;
+
+    function App() {
+      const [tweaks, setTweak] = useTweaks(TWEAK_DEFAULTS);
+      const [view, setView] = useState("audit");
+      const [search, setSearch] = useState("");
+      const [activeCase, setActiveCase] = useState(null);
+      const role = tweaks.role || "banker";
+      const setRole = (r) => {
+        setTweak("role", r);
+        setView(r === "admin" ? "audit" : "worklist");
+      };
+
+      useEffect(() => {
+        document.documentElement.setAttribute("data-theme", tweaks.theme);
+        document.documentElement.setAttribute("data-density", tweaks.density);
+      }, [tweaks.theme, tweaks.density]);
+
+      const openCase = (c) => { setActiveCase(c); setView("case"); };
+      const back = () => setView("worklist");
+
+      const panels = {
+        identity: tweaks.panel_identity, aml: tweaks.panel_aml,
+        ubo: tweaks.panel_ubo, sow: tweaks.panel_sow,
+        crs: tweaks.panel_crs, monitoring: tweaks.panel_monitoring,
+      };
+
+      const crumbsByView = {
+        worklist:  ["Compliance", "Private Wealth", "Worklist"],
+        rm:        ["Relationship Management", "Client book"],
+        case:      ["Compliance", "Cases", activeCase ? activeCase.id : "—"],
+        batch:     ["Operations", "Batch upload"],
+        audit:     ["Administration", "Audit trail"],
+        ruleset:   ["Administration", "Ruleset & policy"],
+        system:    ["Administration", "System information"],
+      };
+
+      return (
+        <div className="app" data-sidebar={tweaks.sidebar} data-role={role} data-screen-label={`01 ${role} · ${view}`}>
+          <Sidebar active={view} onNav={setView} collapsed={tweaks.sidebar === "collapsed"} role={role} onRoleChange={setRole}/>
+          <div className="main">
+            <Topbar title="" crumbs={crumbsByView[view]} search={search} setSearch={setSearch} role={role} view={view}/>
+            <div className="content">
+              <div className="content-wide">
+                {view === "worklist"  && <WorklistView  search={search} onOpenCase={openCase}/>}
+                {view === "rm"        && <RMView        search={search} onOpenCase={openCase}/>}
+                {view === "case"      && <CaseDetail    caseData={activeCase || MOCK.cases[0]} onBack={back} panels={panels} setPanels={() => {}}/>}
+                {view === "batch"     && <BatchView/>}
+                {view === "audit"     && <AuditView     search={search}/>}
+                {view === "ruleset"   && <RulesetView/>}
+                {view === "system"    && <SystemView/>}
+              </div>
+            </div>
+          </div>
+
+          <TweaksPanel title="Tweaks">
+            <TweakSection title="Role">
+              <TweakRadio label="Active role" value={role}
+                onChange={v => setRole(v)}
+                options={[
+                  { value: "banker", label: "Banker / Analyst" },
+                  { value: "admin",  label: "Admin" },
+                ]}/>
+            </TweakSection>
+            <TweakSection title="Appearance">
+              <TweakRadio label="Theme" value={tweaks.theme}
+                onChange={v => setTweak("theme", v)}
+                options={[{ value: "light", label: "Light" }, { value: "dark", label: "Dark" }]}/>
+              <TweakRadio label="Density" value={tweaks.density}
+                onChange={v => setTweak("density", v)}
+                options={[
+                  { value: "compact", label: "Compact" },
+                  { value: "cozy", label: "Cozy" },
+                  { value: "comfortable", label: "Comfy" },
+                ]}/>
+              <TweakRadio label="Sidebar" value={tweaks.sidebar}
+                onChange={v => setTweak("sidebar", v)}
+                options={[{ value: "expanded", label: "Expanded" }, { value: "collapsed", label: "Collapsed" }]}/>
+            </TweakSection>
+            <TweakSection title="View">
+              <TweakSelect label="Screen" value={view}
+                onChange={v => setView(v)}
+                options={role === "admin" ? [
+                  { value: "audit",   label: "Audit trail" },
+                  { value: "ruleset", label: "Ruleset & policy" },
+                  { value: "system",  label: "System info" },
+                  { value: "worklist", label: "Worklist (banker)" },
+                  { value: "rm",      label: "Client book (banker)" },
+                  { value: "case",    label: "Case (banker)" },
+                ] : [
+                  { value: "worklist", label: "Worklist" },
+                  { value: "rm",       label: "RM book" },
+                  { value: "case",     label: "Case" },
+                ]}/>
+            </TweakSection>
+            <TweakSection title="Case detail panels">
+              <TweakToggle label="Identity"        value={tweaks.panel_identity}   onChange={v => setTweak("panel_identity", v)}/>
+              <TweakToggle label="AML / PEP"       value={tweaks.panel_aml}        onChange={v => setTweak("panel_aml", v)}/>
+              <TweakToggle label="UBO"             value={tweaks.panel_ubo}        onChange={v => setTweak("panel_ubo", v)}/>
+              <TweakToggle label="Source of Wealth" value={tweaks.panel_sow}       onChange={v => setTweak("panel_sow", v)}/>
+              <TweakToggle label="CRS / FATCA"     value={tweaks.panel_crs}        onChange={v => setTweak("panel_crs", v)}/>
+              <TweakToggle label="Periodic review" value={tweaks.panel_monitoring} onChange={v => setTweak("panel_monitoring", v)}/>
+            </TweakSection>
+          </TweaksPanel>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  </script>
+</body>
+</html>
