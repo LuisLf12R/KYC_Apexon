@@ -140,6 +140,7 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
       const [search,     setSearch]     = useState("");
       const [activeCase, setActiveCase] = useState(null);
       const [summary,    setSummary]    = useState({});
+      const [cases,      setCases]      = useState([]);
 
       useEffect(() => {
         document.documentElement.setAttribute("data-theme",   tweaks.theme);
