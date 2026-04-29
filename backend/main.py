@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import pandas as pd
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -17,6 +17,8 @@ from backend.utils import _format_results, _get_institutions, _load_temp_dfs
 from kyc_dashboard.admin_html import build_unified_dashboard_html
 from kyc_dashboard.banker_html import build_banker_html
 from kyc_engine.engine import KYCComplianceEngine
+from typing import List as TypingList
+from backend.pipeline import process_file
 
 DATA_DIR = Path(tempfile.gettempdir()) / "kyc_data_clean"
 API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
@@ -109,6 +111,20 @@ class KYCBatchResponse(BaseModel):
 
 class KYCCustomerResponse(BaseModel):
     result: dict[str, Any]
+
+
+class UploadResult(BaseModel):
+    filename: str
+    dataset_type: Optional[str]
+    rows: int
+    status: str
+    message: str
+
+
+class UploadResponse(BaseModel):
+    results: list[UploadResult]
+    total_rows: int
+    errors: int
 
 
 def _extract_token(
@@ -248,6 +264,24 @@ def kyc_customer(
         raise HTTPException(status_code=500, detail="Unable to format customer result")
 
     return KYCCustomerResponse(result=cases[0])
+
+
+@app.post("/api/upload", response_model=UploadResponse)
+async def upload_files(
+    files: TypingList[UploadFile] = File(...),
+    dataset_type: Optional[str] = None,
+    session: Dict[str, Any] = Depends(_require_session),
+) -> UploadResponse:
+    print(f"[UPLOAD] {len(files)} file(s) from user={session.get('username')!r}")
+    results = []
+    for f in files:
+        raw = await f.read()
+        result = process_file(raw, f.filename or "upload", dataset_type or None)
+        results.append(UploadResult(**result))
+        print(f"[UPLOAD] {f.filename!r} → {result['status']} ({result['rows']} rows)")
+    total_rows = sum(r.rows for r in results)
+    errors = sum(1 for r in results if r.status in ("error", "rejected"))
+    return UploadResponse(results=results, total_rows=total_rows, errors=errors)
 
 
 @app.get("/api/audit")
