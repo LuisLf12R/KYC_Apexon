@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 
 import pandas as pd
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -71,6 +72,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/", response_class=HTMLResponse)
+def banker_dashboard() -> HTMLResponse:
+    print("[DASHBOARD] render banker html")
+    html = build_banker_html({"sidecarUrl": "http://127.0.0.1:8000"})
+    return HTMLResponse(content=html, media_type="text/html")
+
 
 
 class LoginRequest(BaseModel):
