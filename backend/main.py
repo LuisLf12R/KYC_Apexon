@@ -5,7 +5,7 @@ import tempfile
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
@@ -13,12 +13,11 @@ from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from backend.pipeline import process_file
 from backend.utils import _format_results, _get_institutions, _load_temp_dfs
 from kyc_dashboard.admin_html import build_unified_dashboard_html
 from kyc_dashboard.banker_html import build_banker_html
 from kyc_engine.engine import KYCComplianceEngine
-from typing import List as TypingList
-from backend.pipeline import process_file
 
 DATA_DIR = Path(tempfile.gettempdir()) / "kyc_data_clean"
 API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
@@ -268,7 +267,7 @@ def kyc_customer(
 
 @app.post("/api/upload", response_model=UploadResponse)
 async def upload_files(
-    files: TypingList[UploadFile] = File(...),
+    files: List[UploadFile] = File(...),
     dataset_type: Optional[str] = None,
     session: Dict[str, Any] = Depends(_require_session),
 ) -> UploadResponse:

@@ -8,6 +8,7 @@ import io
 import json
 import logging
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List
@@ -126,13 +127,12 @@ def _llm_structure(raw_text: str, dataset_type: str, filename: str) -> pd.DataFr
         messages=[{"role": "user", "content": user}],
     )
     raw = resp.content[0].text.strip()
-    # Strip optional markdown fences
-    if raw.startswith("```"):
-        raw = "\n".join(raw.split("\n")[1:])
-        if raw.endswith("```"):
-            raw = raw[: raw.rfind("```")]
-        raw = raw.strip()
-    records = json.loads(raw)
+    raw = re.sub(r"^```[a-zA-Z]*\n?", "", raw)
+    raw = re.sub(r"\n?```$", "", raw).strip()
+    try:
+        records = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"LLM returned non-JSON response: {exc}") from exc
     if isinstance(records, dict):
         records = [records]
     return pd.DataFrame(records)
@@ -178,7 +178,7 @@ def process_file(
     """
     ext = Path(filename).suffix.lower()
     structured_exts = {".csv", ".xlsx", ".xls", ".json", ".jsonl"}
-    unstructured_exts = {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".docx"}
+    unstructured_exts = {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff"}
 
     try:
         if ext in structured_exts:
