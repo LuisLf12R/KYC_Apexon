@@ -8,9 +8,12 @@ with a real user context on every login via reinit_logger().
 """
 from __future__ import annotations
 
+import logging as _logging
 from typing import Any, Dict, List, Optional
 
 from kyc_audit.logger import AuditLogger
+
+_log = _logging.getLogger(__name__)
 
 _logger: Optional[AuditLogger] = None
 
@@ -47,11 +50,12 @@ def reinit_logger(user_id: str, username: str, role: str) -> AuditLogger:
 def get_audit_events() -> List[Dict[str, Any]]:
     """Return the list of events recorded by the current logger."""
     logger = get_logger()
-    # The AuditLogger stores events in self.events; fall back gracefully.
-    return (
-        getattr(logger, "events", None)
-        or getattr(logger, "_events", None)
-        or getattr(logger, "audit_log", None)
-        or getattr(logger, "_audit_log", None)
-        or []
+    for attr in ("events", "_events", "audit_log", "_audit_log"):
+        val = getattr(logger, attr, None)
+        if val is not None:
+            return list(val)
+    _log.warning(
+        "AuditLogger has no recognised events attribute (%s); audit data unavailable",
+        type(logger).__name__,
     )
+    return []

@@ -199,6 +199,11 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
         }
       }, [view, loadCases]);
 
+      // Reload audit log whenever the audit view becomes active
+      useEffect(() => {
+        if (view === "audit") loadAudit();
+      }, [view, loadAudit]);
+
       const handleApprove = React.useCallback((caseId) => {
         const tok = localStorage.getItem("auth_token");
         fetch(API + "/api/kyc/approve/" + caseId, {

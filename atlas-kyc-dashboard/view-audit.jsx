@@ -6,6 +6,7 @@
 function AuditView({ search, logs: propLogs }) {
   const { useState, useMemo } = React;
   const [selected, setSelected] = useState(null);
+  // range filter is display-only; server-side time-range filtering is not yet implemented
   const [activeFilters, setActiveFilters] = useState({ role: "all", action: "all", range: "24h" });
 
   const rows = propLogs || MOCK.audit;
@@ -15,7 +16,7 @@ function AuditView({ search, logs: propLogs }) {
       if (activeFilters.role !== "all" && r.role.toLowerCase() !== activeFilters.role) return false;
       if (activeFilters.action !== "all" && r.actionGroup !== activeFilters.action) return false;
       if (!q) return true;
-      return (r.user + r.action + r.description + r.customerId + r.batchId + r.eventHash).toLowerCase().includes(q);
+      return (r.user + r.action + r.description + (r.customerId || "") + (r.batchId || "") + (r.eventHash || "")).toLowerCase().includes(q);
     });
   }, [rows, search, activeFilters]);
 
