@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -18,6 +19,7 @@ from kyc_dashboard.banker_html import build_banker_html
 from kyc_engine.engine import KYCComplianceEngine
 
 DATA_DIR = Path(tempfile.gettempdir()) / "kyc_data_clean"
+API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
 
 
 def _load_users() -> Dict[str, Dict[str, Any]]:
@@ -31,28 +33,21 @@ def _load_users() -> Dict[str, Dict[str, Any]]:
     except Exception:
         pass
 
-    # Fallback credentials aligned with dashboard defaults.
+    # Fallback — must mirror users.json exactly (admin + banker only).
     return {
         "admin": {
-            "user_id": "fb_admin",
+            "user_id": "usr_admin_001",
             "username": "admin",
             "password": "admin123",
-            "role": "admin",
-            "full_name": "Administrator",
-        },
-        "analyst1": {
-            "user_id": "fb_a1",
-            "username": "analyst1",
-            "password": "analyst123",
-            "role": "analyst",
-            "full_name": "KYC Analyst One",
+            "role": "Admin",
+            "full_name": "M. Lyons",
         },
         "banker": {
-            "user_id": "fb_banker",
+            "user_id": "usr_banker_001",
             "username": "banker",
             "password": "banker123",
-            "role": "banker",
-            "full_name": "Bank Operations User",
+            "role": "Banker",
+            "full_name": "J. Marlow",
         },
     }
 
@@ -65,7 +60,6 @@ app = FastAPI(title="KYC Backend API", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -73,14 +67,14 @@ app.add_middleware(
 @app.get("/", response_class=HTMLResponse)
 def banker_dashboard() -> HTMLResponse:
     print("[DASHBOARD] render banker html")
-    html = build_banker_html({"sidecarUrl": "http://127.0.0.1:8000"})
+    html = build_banker_html({"sidecarUrl": API_BASE_URL})
     return HTMLResponse(content=html, media_type="text/html")
 
 
 @app.get("/admin", response_class=HTMLResponse)
 def admin_dashboard() -> HTMLResponse:
     print("[DASHBOARD] render unified admin dashboard")
-    html = build_unified_dashboard_html({"apiUrl": "http://127.0.0.1:8000"})
+    html = build_unified_dashboard_html({"apiUrl": API_BASE_URL})
     return HTMLResponse(content=html, media_type="text/html")
 
 
@@ -260,11 +254,9 @@ def kyc_customer(
 def audit_trail(_: Dict[str, Any] = Depends(_require_session)) -> Dict[str, Any]:
     """Return mock audit trail data for admin dashboard."""
     print("[AUDIT] fetch")
-    from datetime import datetime, timedelta, timezone
-
     now = datetime.now(timezone.utc)
     actions = ["CASE_OPENED", "CASE_APPROVED", "CASE_REJECTED", "CASE_FLAGGED", "EXPORT_CSV", "LOGIN", "LOGOUT"]
-    users = ["admin", "analyst1", "banker"]
+    users = ["admin", "banker"]
 
     audit_logs = []
     for i in range(100):
@@ -272,7 +264,7 @@ def audit_trail(_: Dict[str, Any] = Depends(_require_session)) -> Dict[str, Any]
         audit_logs.append({
             "timestamp": log_time.isoformat(),
             "user": users[i % len(users)],
-            "role": ["Admin", "Analyst", "Banker"][i % 3],
+            "role": ["Admin", "Banker"][i % 2],
             "action": actions[i % len(actions)],
             "customer_id": f"CUST-{1000 + (i % 50):05d}" if i % 3 != 0 else None,
             "status": ["success", "pending", "failed"][i % 3],
