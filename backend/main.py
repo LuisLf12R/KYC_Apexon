@@ -252,7 +252,10 @@ def kyc_batch(
     })
     # Apply manual approval overrides to batch results
     for case in formatted.get("cases", []):
-        override = APPROVALS.get(case.get("id", ""))
+        cid = case.get("id")
+        if not cid:
+            continue
+        override = APPROVALS.get(cid)
         if override == "approved":
             case["status"] = "Cleared"
             case["sla"]    = {"tone": "ok", "label": "Approved"}
@@ -301,6 +304,8 @@ def approve_case(
     customer_id: str,
     session: Dict[str, Any] = Depends(_require_session),
 ) -> ApprovalResponse:
+    if session.get("role") not in ("admin",):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
     APPROVALS[customer_id] = "approved"
     get_logger().log("CLEAR_APPROVED", customer_id=customer_id, details={
         "approved_by": session.get("username"),
@@ -315,6 +320,8 @@ def reject_case(
     customer_id: str,
     session: Dict[str, Any] = Depends(_require_session),
 ) -> ApprovalResponse:
+    if session.get("role") not in ("admin",):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
     APPROVALS[customer_id] = "rejected"
     get_logger().log("CLEAR_REJECTED", customer_id=customer_id, details={
         "rejected_by": session.get("username"),
