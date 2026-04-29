@@ -1,69 +1,90 @@
 /* global React, Icon */
 
-/* ============================================================
-   Batch upload — single-purpose tool
-   Drop a CSV/XLSX of cases. Validate. Run.
-   ============================================================ */
-function BatchView() {
-  const { useState, useRef, useMemo } = React;
-  const [files, setFiles] = useState([]);
-  const [dragOver, setDragOver] = useState(false);
-  const [running, setRunning] = useState(false);
+function BatchView({ onBatchComplete }) {
+  const { useState, useRef, useMemo, useCallback } = React;
+  const API = (window.__CONFIG__ || {}).apiUrl || "http://127.0.0.1:8000";
+
+  const [files, setFiles]           = useState([]);
+  const [dragOver, setDragOver]     = useState(false);
+  const [running, setRunning]       = useState(false);
+  const [runMsg, setRunMsg]         = useState("");
+  const [institutions, setInstitutions] = useState([]);
+  const [institutionId, setInstitutionId] = useState("");
   const inputRef = useRef(null);
 
+  const token = () => localStorage.getItem("auth_token");
+
+  // Fetch institutions once on mount
+  React.useEffect(() => {
+    fetch(API + "/api/institutions", {
+      headers: { Authorization: `Bearer ${token()}` },
+    })
+      .then(r => r.ok ? r.json() : [])
+      .then(data => {
+        const list = Array.isArray(data) ? data : [];
+        setInstitutions(list);
+        if (list.length > 0) setInstitutionId(list[0].id);
+      })
+      .catch(() => {});
+  }, []);
+
+  const uploadFile = useCallback(async (file) => {
+    const id = `f_${Date.now()}_${Math.random()}`;
+    setFiles(prev => [...prev, { id, name: file.name, size: file.size, status: "uploading", rows: 0, datasetType: null, message: "" }]);
+
+    const form = new FormData();
+    form.append("files", file);
+    try {
+      const res = await fetch(API + "/api/upload", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token()}` },
+        body: form,
+      });
+      const json = await res.json();
+      const r = json.results?.[0];
+      if (!res.ok || !r) throw new Error(json.detail || "Upload failed");
+      setFiles(prev => prev.map(f => f.id === id ? {
+        ...f, status: r.status, rows: r.rows,
+        datasetType: r.dataset_type, message: r.message,
+      } : f));
+    } catch (err) {
+      setFiles(prev => prev.map(f => f.id === id ? { ...f, status: "error", message: err.message } : f));
+    }
+  }, [API]);
+
   function addFiles(list) {
-    const next = [...list].map((f, i) => {
-      const ok = /\.(csv|xlsx|xls|json|jsonl|pdf|png|jpg|jpeg|tif|tiff|docx)$/i.test(f.name);
-      const rows = ok ? Math.floor(20 + Math.random() * 480) : 0;
-      const errs = ok ? Math.floor(Math.random() * 4) : 0;
-      const warns = ok ? Math.floor(Math.random() * 8) : 0;
-      return {
-        id: `f_${Date.now()}_${i}`,
-        name: f.name,
-        size: f.size,
-        type: ok ? "ok" : "bad",
-        rows,
-        errs,
-        warns,
-        status: "ready", // ready | running | done | failed
-      };
-    });
-    setFiles(prev => [...prev, ...next]);
+    [...list].forEach(f => uploadFile(f));
   }
 
   function onDrop(e) {
-    e.preventDefault();
-    setDragOver(false);
+    e.preventDefault(); setDragOver(false);
     if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files);
   }
 
-  function remove(id) {
-    setFiles(prev => prev.filter(f => f.id !== id));
-  }
-
-  function clearAll() {
-    setFiles([]);
-  }
-
-  function runAll() {
+  const runBatch = useCallback(async () => {
     if (running) return;
-    setRunning(true);
-    setFiles(prev => prev.map(f => f.type === "ok" ? { ...f, status: "running" } : f));
-    setTimeout(() => {
-      setFiles(prev => prev.map(f => f.type === "ok" ? { ...f, status: "done" } : f));
-      setRunning(false);
-    }, 1600);
-  }
+    const okFiles = files.filter(f => f.status === "ok");
+    if (!okFiles.length) return;
+    setRunning(true); setRunMsg("Running KYC evaluation…");
+    try {
+      const res = await fetch(API + "/api/kyc/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ institution_id: institutionId || "bank_001" }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.detail || "Batch evaluation failed");
+      setRunMsg(`Done — ${json.summary?.total ?? 0} cases evaluated`);
+      if (onBatchComplete) onBatchComplete(json.results || [], json.summary || {});
+    } catch (err) {
+      setRunMsg(`Error: ${err.message}`);
+    }
+    setRunning(false);
+  }, [files, running, API, institutionId, onBatchComplete]);
 
   const totals = useMemo(() => {
-    const valid = files.filter(f => f.type === "ok");
-    return {
-      files: files.length,
-      valid: valid.length,
-      rows: valid.reduce((a, b) => a + b.rows, 0),
-      errs: valid.reduce((a, b) => a + b.errs, 0),
-      warns: valid.reduce((a, b) => a + b.warns, 0),
-    };
+    const ok = files.filter(f => f.status === "ok");
+    return { files: files.length, ok: ok.length, rows: ok.reduce((a, b) => a + b.rows, 0) };
   }, [files]);
 
   return (
@@ -72,74 +93,84 @@ function BatchView() {
         <div>
           <div className="eyebrow">Operations</div>
           <h1 className="page-title">Batch upload</h1>
-          <div className="page-sub">Upload structured data files or documents for analysis and customer linking. Files are validated against <span className="mono" style={{ fontSize: 12.5 }}>kyc-rules-v2.1</span> before any record is queued — nothing runs until you press <b>Run batch</b>.</div>
+          <div className="page-sub">Drop KYC data files — CSV, Excel, JSON, or documents (PDF/images). Each file is processed immediately on drop. Press <b>Run batch</b> to evaluate all loaded customers.</div>
         </div>
       </div>
 
-      {/* Dropzone */}
+      {institutions.length > 0 && (
+        <div className="row-flex" style={{ marginBottom: 16, gap: 10 }}>
+          <label style={{ fontSize: 13, fontWeight: 500, color: "var(--ink-2)" }}>Institution</label>
+          <select
+            value={institutionId}
+            onChange={e => setInstitutionId(e.target.value)}
+            style={{
+              height: 34, padding: "0 10px", border: "1px solid var(--line)",
+              borderRadius: 8, background: "var(--bg)", fontSize: 13,
+              color: "var(--ink)", cursor: "pointer", minWidth: 200,
+            }}
+          >
+            {institutions.map(inst => (
+              <option key={inst.id} value={inst.id}>{inst.label || inst.id}</option>
+            ))}
+          </select>
+          <span style={{ fontSize: 12, color: "var(--ink-4)" }}>
+            {institutions.length} institution{institutions.length !== 1 ? "s" : ""} available
+          </span>
+        </div>
+      )}
+
       <div
         className={`dropzone ${dragOver ? "is-over" : ""} ${files.length ? "has-files" : ""}`}
         onDragOver={e => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
         onClick={() => inputRef.current?.click()}
-        role="button"
-        tabIndex={0}
-        onKeyDown={e => { if (e.key === "Enter" || e.key === " ") inputRef.current?.click(); }}
+        role="button" tabIndex={0}
+        onKeyDown={e => (e.key === "Enter" || e.key === " ") && inputRef.current?.click()}
         aria-label="Upload batch files"
       >
-        <input
-          ref={inputRef}
-          type="file"
-          multiple
-          accept=".csv,.xlsx,.xls,.json,.jsonl,.pdf,.png,.jpg,.jpeg,.tif,.tiff,.docx"
+        <input ref={inputRef} type="file" multiple
+          accept=".csv,.xlsx,.xls,.json,.jsonl,.pdf,.png,.jpg,.jpeg,.tif,.tiff"
           style={{ display: "none" }}
-          onChange={e => e.target.files && addFiles(e.target.files)}
-        />
+          onChange={e => e.target.files && addFiles(e.target.files)} />
         <div className="dz-ico"><Icon name="upload" size={28}/></div>
         <div className="dz-title">Drop files here</div>
         <div className="dz-sub">or <span className="lnk">browse from your computer</span></div>
         <div className="dz-meta">
-          <span>200 MB per file</span>
-          <span className="sep">·</span>
-          <span>CSV · XLSX · XLS · JSON · JSONL · PDF · PNG · JPG · TIF · DOCX</span>
+          <span>CSV · XLSX · JSON · PDF · PNG · JPG</span>
         </div>
       </div>
 
-      {/* Summary + actions */}
       {files.length > 0 && (
-        <div className="batch-summary card">
+        <div className="batch-summary card" style={{ marginTop: "var(--d-gap)" }}>
           <div className="bs-stats">
             <div><span className="eyebrow">Files</span><b>{totals.files}</b></div>
-            <div><span className="eyebrow">Valid</span><b style={{ color: "var(--ok)" }}>{totals.valid}</b></div>
+            <div><span className="eyebrow">Processed</span><b style={{ color: "var(--ok)" }}>{totals.ok}</b></div>
             <div><span className="eyebrow">Rows</span><b className="tnum">{totals.rows.toLocaleString()}</b></div>
-            <div><span className="eyebrow">Warnings</span><b style={{ color: "var(--warn)" }}>{totals.warns}</b></div>
-            <div><span className="eyebrow">Errors</span><b style={{ color: totals.errs ? "var(--bad)" : "var(--ink-3)" }}>{totals.errs}</b></div>
           </div>
-          <div className="row-flex">
-            <button className="btn ghost" onClick={clearAll} disabled={running}>Clear all</button>
-            <button className="btn primary" onClick={runAll} disabled={running || totals.valid === 0}>
-              {running ? <>Running…</> : <><Icon name="check"/> Run batch ({totals.valid})</>}
+          <div className="row-flex" style={{ gap: 8 }}>
+            {runMsg && <span style={{ fontSize: 12.5, color: "var(--ink-3)" }}>{runMsg}</span>}
+            <button className="btn ghost" onClick={() => setFiles([])} disabled={running}>Clear all</button>
+            <button className="btn primary" onClick={runBatch} disabled={running || totals.ok === 0}>
+              {running ? <>Running…</> : <><Icon name="check"/> Run batch ({totals.ok})</>}
             </button>
           </div>
         </div>
       )}
 
-      {/* File list */}
       {files.length > 0 && (
         <div className="card" style={{ marginTop: "var(--d-gap)" }}>
           <div className="card-h">
             <h3>Files in this batch</h3>
-            <span className="meta">{files.length} {files.length === 1 ? "file" : "files"}</span>
+            <span style={{ fontSize: 12, color: "var(--ink-4)" }}>{files.length} file{files.length !== 1 ? "s" : ""}</span>
           </div>
           <table className="tbl">
             <thead>
               <tr>
                 <th>Filename</th>
                 <th style={{ width: 110 }}>Size</th>
+                <th style={{ width: 120 }}>Dataset type</th>
                 <th style={{ width: 90 }}>Rows</th>
-                <th style={{ width: 90 }}>Warnings</th>
-                <th style={{ width: 90 }}>Errors</th>
                 <th style={{ width: 130 }}>Status</th>
                 <th style={{ width: 60 }}></th>
               </tr>
@@ -152,22 +183,25 @@ function BatchView() {
                       <div className="file-ico"><Icon name="file"/></div>
                       <div>
                         <div style={{ fontSize: 13.5, fontWeight: 500 }}>{f.name}</div>
-                        {f.type === "bad" && <div style={{ fontSize: 11.5, color: "var(--bad)" }}>Unsupported file type — skipped</div>}
+                        {f.message && f.status !== "ok" && (
+                          <div style={{ fontSize: 11.5, color: f.status === "error" ? "var(--bad)" : "var(--ink-4)" }}>{f.message}</div>
+                        )}
                       </div>
                     </div>
                   </td>
                   <td className="mono" style={{ fontSize: 12, color: "var(--ink-3)" }}>{prettySize(f.size)}</td>
-                  <td className="mono tnum">{f.type === "ok" ? f.rows.toLocaleString() : "—"}</td>
-                  <td>{f.type === "ok" && f.warns > 0 ? <span className="badge b-warn">{f.warns}</span> : <span style={{ color: "var(--ink-5)" }}>0</span>}</td>
-                  <td>{f.type === "ok" && f.errs > 0 ? <span className="badge b-bad">{f.errs}</span> : <span style={{ color: "var(--ink-5)" }}>0</span>}</td>
+                  <td style={{ fontSize: 12 }}>{f.datasetType || "—"}</td>
+                  <td className="mono tnum">{f.rows > 0 ? f.rows.toLocaleString() : "—"}</td>
                   <td>
-                    {f.type === "bad"      && <span className="badge b-bad">rejected</span>}
-                    {f.type === "ok" && f.status === "ready"   && <span className="badge b-mute">ready</span>}
-                    {f.type === "ok" && f.status === "running" && <span className="badge b-accent"><span className="dot pulse"/>running</span>}
-                    {f.type === "ok" && f.status === "done"    && <span className="badge b-ok"><span className="dot"/>queued</span>}
+                    {f.status === "uploading" && <span className="badge b-accent"><span className="dot pulse"/>uploading</span>}
+                    {f.status === "ok"        && <span className="badge b-ok"><span className="dot"/>ready</span>}
+                    {f.status === "error"     && <span className="badge b-bad">error</span>}
+                    {f.status === "rejected"  && <span className="badge b-bad">rejected</span>}
                   </td>
                   <td>
-                    <button className="btn ghost" style={{ height: 26, padding: "0 8px" }} onClick={() => remove(f.id)} aria-label="Remove file">
+                    <button className="btn ghost" style={{ height: 26, padding: "0 8px" }}
+                      onClick={() => setFiles(prev => prev.filter(x => x.id !== f.id))}
+                      aria-label="Remove">
                       <Icon name="x" size={14}/>
                     </button>
                   </td>
@@ -177,8 +211,6 @@ function BatchView() {
           </table>
         </div>
       )}
-
-      {files.length === 0 && null}
     </div>
   );
 }
@@ -186,8 +218,8 @@ function BatchView() {
 function prettySize(b) {
   if (!b) return "—";
   if (b < 1024) return `${b} B`;
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
-  return `${(b / 1024 / 1024).toFixed(1)} MB`;
+  if (b < 1048576) return `${(b / 1024).toFixed(1)} KB`;
+  return `${(b / 1048576).toFixed(1)} MB`;
 }
 
 window.BatchView = BatchView;
