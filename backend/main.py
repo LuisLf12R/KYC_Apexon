@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from backend.audit_state import get_logger, reinit_logger, get_audit_events
 from backend.pipeline import process_file
 from backend.utils import _format_results, _get_institutions, _load_temp_dfs
 from kyc_dashboard.admin_html import build_unified_dashboard_html
@@ -167,12 +168,19 @@ def login(payload: LoginRequest) -> LoginResponse:
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     print(f"[LOGIN] success username={payload.username!r} role={SESSIONS[token]['role']}")
+    reinit_logger(
+        user_id=user.get("user_id", key),
+        username=user.get("username", key),
+        role=SESSIONS[token]["role"],
+    )
+    get_logger().log("LOGIN", customer_id=None, details={"username": key})
     return LoginResponse(token=token, role=SESSIONS[token]["role"], message="Login successful")
 
 
 @app.post("/api/auth/logout", response_model=MessageResponse)
 def logout(payload: LogoutRequest) -> MessageResponse:
     print("[LOGOUT] request")
+    get_logger().log("LOGOUT", customer_id=None, details={})
     SESSIONS.pop(payload.token, None)
     return MessageResponse(message="Logged out")
 
@@ -228,6 +236,11 @@ def kyc_batch(
 
     formatted = _format_results(evaluations, customers_df)
     flagged = sum(1 for r in evaluations if str(r.get("disposition", "")).upper() != "PASS")
+    get_logger().log("BATCH_RUN_COMPLETE", customer_id=None, details={
+        "institution_id": payload.institution_id,
+        "total": len(evaluations),
+        "flagged": flagged,
+    })
     return KYCBatchResponse(
         results=formatted.get("cases", []),
         summary={"total": len(evaluations), "flagged": flagged},
@@ -278,6 +291,13 @@ async def upload_files(
         result = process_file(raw, f.filename or "upload", dataset_type or None)
         results.append(UploadResult(**result))
         print(f"[UPLOAD] {f.filename!r} → {result['status']} ({result['rows']} rows)")
+    for result in results:
+        if result.status == "ok":
+            get_logger().log("FILE_UPLOAD", customer_id=None, details={
+                "filename": result.filename,
+                "dataset_type": result.dataset_type,
+                "rows": result.rows,
+            })
     total_rows = sum(r.rows for r in results)
     errors = sum(1 for r in results if r.status in ("error", "rejected"))
     return UploadResponse(results=results, total_rows=total_rows, errors=errors)
@@ -285,29 +305,41 @@ async def upload_files(
 
 @app.get("/api/audit")
 def audit_trail(_: Dict[str, Any] = Depends(_require_session)) -> Dict[str, Any]:
-    """Return mock audit trail data for admin dashboard."""
+    """Return real hash-chained audit events from the current session."""
     print("[AUDIT] fetch")
-    now = datetime.now(timezone.utc)
-    actions = ["CASE_OPENED", "CASE_APPROVED", "CASE_REJECTED", "CASE_FLAGGED", "EXPORT_CSV", "LOGIN", "LOGOUT"]
-    users = ["admin", "banker"]
-
-    audit_logs = []
-    for i in range(100):
-        log_time = now - timedelta(minutes=i*5)
-        audit_logs.append({
-            "timestamp": log_time.isoformat(),
-            "user": users[i % len(users)],
-            "role": ["Admin", "Banker"][i % 2],
-            "action": actions[i % len(actions)],
-            "customer_id": f"CUST-{1000 + (i % 50):05d}" if i % 3 != 0 else None,
-            "status": ["success", "pending", "failed"][i % 3],
-            "description": f"User action #{i}: {actions[i % len(actions)].lower()}",
+    events = get_audit_events()
+    logs = []
+    for e in events:
+        logs.append({
+            "timestamp":   e.get("timestamp", ""),
+            "user":        e.get("username", ""),
+            "role":        e.get("role", ""),
+            "action":      e.get("action_type", ""),
+            "customer_id": e.get("customer_id"),
+            "batch_id":    e.get("batch_id"),
+            "status":      "success",
+            "description": _format_audit_description(e),
+            "event_hash":  e.get("event_hash", ""),
         })
+    return {"logs": logs, "total": len(logs)}
 
-    return {
-        "logs": audit_logs,
-        "total": len(audit_logs),
-    }
+
+def _format_audit_description(event: dict) -> str:
+    details = event.get("details") or {}
+    action  = event.get("action_type", "")
+    user    = event.get("username", "")
+    cid     = event.get("customer_id")
+    if action == "LOGIN":
+        return f"{user} authenticated"
+    if action == "LOGOUT":
+        return f"{user} logged out"
+    if action == "BATCH_RUN_COMPLETE":
+        return f"Batch complete — {details.get('total', 0)} customers, {details.get('flagged', 0)} flagged"
+    if action == "FILE_UPLOAD":
+        return f"Uploaded {details.get('filename', '')} ({details.get('rows', 0)} rows, type={details.get('dataset_type', '')})"
+    if cid:
+        return f"{action} on customer {cid}"
+    return action
 
 if __name__ == "__main__":
     import uvicorn

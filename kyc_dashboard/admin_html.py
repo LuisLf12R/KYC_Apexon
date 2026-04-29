@@ -142,6 +142,7 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
       const [summary,    setSummary]    = useState({});
       const [cases,      setCases]      = useState(null);
       const [kpis,       setKpis]       = useState({});
+      const [auditLogs,  setAuditLogs]  = useState(null);
 
       useEffect(() => {
         document.documentElement.setAttribute("data-theme",   tweaks.theme);
@@ -173,6 +174,23 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
           console.error("Failed to load cases:", err);
         }
       }, [API]);
+
+      const loadAudit = React.useCallback(async () => {
+        try {
+          const res = await fetch(API + "/api/audit", {
+            headers: { Authorization: `Bearer ${localStorage.getItem("auth_token")}` },
+          });
+          if (res.ok) {
+            const json = await res.json();
+            setAuditLogs(json.logs || []);
+          }
+        } catch (_) {}
+      }, [API]);
+
+      const handleNav = React.useCallback((newView) => {
+        if (newView === "audit") loadAudit();
+        setView(newView);
+      }, [loadAudit]);
 
       // Reload cases whenever the worklist view becomes active
       useEffect(() => {
@@ -224,7 +242,7 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
 
       return (
         <div className="app" data-sidebar={tweaks.sidebar} data-role={role}>
-          <Sidebar active={view} onNav={setView} collapsed={tweaks.sidebar === "collapsed"}
+          <Sidebar active={view} onNav={handleNav} collapsed={tweaks.sidebar === "collapsed"}
                    role={role} onRoleChange={onLogout}/>
           <div className="main">
             <Topbar title="" crumbs={crumbsByView[view]} search={search} setSearch={setSearch}
@@ -250,7 +268,7 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
                     setView("worklist");
                   }}/>
                 )}
-                {view === "audit"    && <AuditView     search={search}/>}
+                {view === "audit" && <AuditView search={search} logs={auditLogs}/>}
                 {view === "ruleset"  && <RulesetView/>}
                 {view === "system"   && <SystemView/>}
               </div>

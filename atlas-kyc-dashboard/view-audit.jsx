@@ -3,12 +3,12 @@
 /* ============================================================
    Audit Trail — admin view
    ============================================================ */
-function AuditView({ search }) {
+function AuditView({ search, logs: propLogs }) {
   const { useState, useMemo } = React;
   const [selected, setSelected] = useState(null);
   const [activeFilters, setActiveFilters] = useState({ role: "all", action: "all", range: "24h" });
 
-  const rows = MOCK.audit;
+  const rows = propLogs || MOCK.audit;
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows.filter(r => {
