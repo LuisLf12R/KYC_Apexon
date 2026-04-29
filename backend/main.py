@@ -64,12 +64,7 @@ app = FastAPI(title="KYC Backend API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost",
-        "http://127.0.0.1",
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -159,7 +154,7 @@ def login(payload: LoginRequest) -> LoginResponse:
     SESSIONS[token] = {
         "token": token,
         "username": user.get("username", key),
-        "role": user.get("role", "Analyst"),
+        "role": user.get("role", "analyst").lower(),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     print(f"[LOGIN] success username={payload.username!r} role={SESSIONS[token]['role']}")
