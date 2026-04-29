@@ -13,7 +13,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from backend.utils import _format_results, _get_institutions, _llm_structure, _load_temp_dfs, _run_ocr
-from kyc_dashboard.banker_html import build_banker_html
 from kyc_engine.engine import KYCComplianceEngine
 
 DATA_DIR = Path(tempfile.gettempdir()) / "kyc_data_clean"
