@@ -12,7 +12,9 @@ from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from backend.utils import _format_results, _get_institutions, _llm_structure, _load_temp_dfs, _run_ocr
+from backend.utils import _format_results, _get_institutions, _load_temp_dfs
+from kyc_dashboard.admin_html import build_unified_dashboard_html
+from kyc_dashboard.banker_html import build_banker_html
 from kyc_engine.engine import KYCComplianceEngine
 
 DATA_DIR = Path(tempfile.gettempdir()) / "kyc_data_clean"
@@ -77,6 +79,13 @@ app.add_middleware(
 def banker_dashboard() -> HTMLResponse:
     print("[DASHBOARD] render banker html")
     html = build_banker_html({"sidecarUrl": "http://127.0.0.1:8000"})
+    return HTMLResponse(content=html, media_type="text/html")
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_dashboard() -> HTMLResponse:
+    print("[DASHBOARD] render unified admin dashboard")
+    html = build_unified_dashboard_html({"apiUrl": "http://127.0.0.1:8000"})
     return HTMLResponse(content=html, media_type="text/html")
 
 
@@ -251,6 +260,34 @@ def kyc_customer(
 
     return KYCCustomerResponse(result=cases[0])
 
+
+@app.get("/api/audit")
+def audit_trail(_: Dict[str, Any] = Depends(_require_session)) -> Dict[str, Any]:
+    """Return mock audit trail data for admin dashboard."""
+    print("[AUDIT] fetch")
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    actions = ["CASE_OPENED", "CASE_APPROVED", "CASE_REJECTED", "CASE_FLAGGED", "EXPORT_CSV", "LOGIN", "LOGOUT"]
+    users = ["admin", "analyst1", "banker"]
+
+    audit_logs = []
+    for i in range(100):
+        log_time = now - timedelta(minutes=i*5)
+        audit_logs.append({
+            "timestamp": log_time.isoformat(),
+            "user": users[i % len(users)],
+            "role": ["Admin", "Analyst", "Banker"][i % 3],
+            "action": actions[i % len(actions)],
+            "customer_id": f"CUST-{1000 + (i % 50):05d}" if i % 3 != 0 else None,
+            "status": ["success", "pending", "failed"][i % 3],
+            "description": f"User action #{i}: {actions[i % len(actions)].lower()}",
+        })
+
+    return {
+        "logs": audit_logs,
+        "total": len(audit_logs),
+    }
 
 if __name__ == "__main__":
     import uvicorn
