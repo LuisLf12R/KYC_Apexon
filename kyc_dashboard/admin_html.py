@@ -148,13 +148,6 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
         document.documentElement.setAttribute("data-density", tweaks.density);
       }, [tweaks.theme, tweaks.density]);
 
-      // Reload cases whenever the worklist view becomes active
-      useEffect(() => {
-        if (view === "worklist") {
-          loadCases(localStorage.getItem("auth_token"));
-        }
-      }, [view, loadCases]);
-
       const loadCases = React.useCallback(async (authToken) => {
         try {
           // Fetch first available institution then run batch
@@ -180,6 +173,13 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
           console.error("Failed to load cases:", err);
         }
       }, [API]);
+
+      // Reload cases whenever the worklist view becomes active
+      useEffect(() => {
+        if (view === "worklist") {
+          loadCases(localStorage.getItem("auth_token"));
+        }
+      }, [view, loadCases]);
 
       const handleApprove = React.useCallback((caseId) => {
         const tok = localStorage.getItem("auth_token");
