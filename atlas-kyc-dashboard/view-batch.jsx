@@ -1,22 +1,23 @@
 /* global React, Icon */
 
+const _BATCH_API = (window.__CONFIG__ || {}).apiUrl || "http://127.0.0.1:8000";
+
 function BatchView({ onBatchComplete }) {
   const { useState, useRef, useMemo, useCallback } = React;
-  const API = (window.__CONFIG__ || {}).apiUrl || "http://127.0.0.1:8000";
 
-  const [files, setFiles]           = useState([]);
-  const [dragOver, setDragOver]     = useState(false);
-  const [running, setRunning]       = useState(false);
-  const [runMsg, setRunMsg]         = useState("");
+  const [files, setFiles]               = useState([]);
+  const [dragOver, setDragOver]         = useState(false);
+  const [running, setRunning]           = useState(false);
+  const [runMsg, setRunMsg]             = useState("");
   const [institutions, setInstitutions] = useState([]);
   const [institutionId, setInstitutionId] = useState("");
   const inputRef = useRef(null);
 
-  const token = () => localStorage.getItem("auth_token");
+  const token = useCallback(() => localStorage.getItem("auth_token"), []);
 
   // Fetch institutions once on mount
   React.useEffect(() => {
-    fetch(API + "/api/institutions", {
+    fetch(_BATCH_API + "/api/institutions", {
       headers: { Authorization: `Bearer ${token()}` },
     })
       .then(r => r.ok ? r.json() : [])
@@ -26,7 +27,7 @@ function BatchView({ onBatchComplete }) {
         if (list.length > 0) setInstitutionId(list[0].id);
       })
       .catch(() => {});
-  }, []);
+  }, [token]);
 
   const uploadFile = useCallback(async (file) => {
     const id = `f_${Date.now()}_${Math.random()}`;
@@ -35,14 +36,15 @@ function BatchView({ onBatchComplete }) {
     const form = new FormData();
     form.append("files", file);
     try {
-      const res = await fetch(API + "/api/upload", {
+      const res = await fetch(_BATCH_API + "/api/upload", {
         method: "POST",
         headers: { Authorization: `Bearer ${token()}` },
         body: form,
       });
-      const json = await res.json();
+      let json;
+      try { json = await res.json(); } catch { json = {}; }
       const r = json.results?.[0];
-      if (!res.ok || !r) throw new Error(json.detail || "Upload failed");
+      if (!res.ok || !r) throw new Error(json.detail || `HTTP ${res.status}`);
       setFiles(prev => prev.map(f => f.id === id ? {
         ...f, status: r.status, rows: r.rows,
         datasetType: r.dataset_type, message: r.message,
@@ -50,42 +52,44 @@ function BatchView({ onBatchComplete }) {
     } catch (err) {
       setFiles(prev => prev.map(f => f.id === id ? { ...f, status: "error", message: err.message } : f));
     }
-  }, [API]);
+  }, [token]);
 
-  function addFiles(list) {
+  const addFiles = useCallback((list) => {
     [...list].forEach(f => uploadFile(f));
-  }
+  }, [uploadFile]);
 
-  function onDrop(e) {
+  const onDrop = useCallback((e) => {
     e.preventDefault(); setDragOver(false);
     if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files);
-  }
+  }, [addFiles]);
 
   const runBatch = useCallback(async () => {
-    if (running) return;
     const okFiles = files.filter(f => f.status === "ok");
-    if (!okFiles.length) return;
+    if (!okFiles.length || !institutionId) return;
     setRunning(true); setRunMsg("Running KYC evaluation…");
     try {
-      const res = await fetch(API + "/api/kyc/batch", {
+      const res = await fetch(_BATCH_API + "/api/kyc/batch", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token()}` },
-        body: JSON.stringify({ institution_id: institutionId || "bank_001" }),
+        body: JSON.stringify({ institution_id: institutionId }),
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.detail || "Batch evaluation failed");
+      let json;
+      try { json = await res.json(); } catch { json = {}; }
+      if (!res.ok) throw new Error(json.detail || `HTTP ${res.status}`);
       setRunMsg(`Done — ${json.summary?.total ?? 0} cases evaluated`);
       if (onBatchComplete) onBatchComplete(json.results || [], json.summary || {});
     } catch (err) {
       setRunMsg(`Error: ${err.message}`);
     }
     setRunning(false);
-  }, [files, running, API, institutionId, onBatchComplete]);
+  }, [files, token, institutionId, onBatchComplete]);
 
   const totals = useMemo(() => {
     const ok = files.filter(f => f.status === "ok");
     return { files: files.length, ok: ok.length, rows: ok.reduce((a, b) => a + b.rows, 0) };
   }, [files]);
+
+  const canRun = !running && totals.ok > 0 && !!institutionId;
 
   return (
     <div className="batch-page">
@@ -151,7 +155,7 @@ function BatchView({ onBatchComplete }) {
           <div className="row-flex" style={{ gap: 8 }}>
             {runMsg && <span style={{ fontSize: 12.5, color: "var(--ink-3)" }}>{runMsg}</span>}
             <button className="btn ghost" onClick={() => setFiles([])} disabled={running}>Clear all</button>
-            <button className="btn primary" onClick={runBatch} disabled={running || totals.ok === 0}>
+            <button className="btn primary" onClick={runBatch} disabled={!canRun}>
               {running ? <>Running…</> : <><Icon name="check"/> Run batch ({totals.ok})</>}
             </button>
           </div>
