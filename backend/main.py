@@ -230,6 +230,12 @@ def kyc_batch(
     if not customer_ids:
         return KYCBatchResponse(results=[], summary={"total": 0, "flagged": 0})
 
+    batch_id = f"batch_{uuid.uuid4().hex[:8]}"
+    get_logger().log("BATCH_RUN_START", batch_id=batch_id, details={
+        "institution_id": payload.institution_id,
+        "total_customers": len(customer_ids),
+    })
+
     engine = KYCComplianceEngine(data_clean_dir=DATA_DIR)
     evaluations = []
     for cid in customer_ids:
@@ -240,7 +246,7 @@ def kyc_batch(
 
     formatted = _format_results(evaluations, customers_df, dfs)
     flagged = sum(1 for r in evaluations if str(r.get("disposition", "")).upper() != "PASS")
-    get_logger().log("BATCH_RUN_COMPLETE", customer_id=None, details={
+    get_logger().log("BATCH_RUN_COMPLETE", batch_id=batch_id, details={
         "institution_id": payload.institution_id,
         "total": len(evaluations),
         "flagged": flagged,
@@ -371,7 +377,7 @@ def audit_trail() -> Dict[str, Any]:
             "description":   _format_audit_description(e),
             "customerId":    e.get("customer_id") or "",
             "batchId":       e.get("batch_id") or "",
-            "promptVersion": "",
+            "promptVersion": e.get("prompt_version") or "",
             "ruleset":       "kyc-rules-v2.1",
             "eventHash":     event_hash,
             "prevHash":      prev_hash,
@@ -461,7 +467,7 @@ def system_info() -> Dict[str, Any]:
 @app.get("/api/ruleset")
 def get_ruleset() -> Dict[str, Any]:
     """Return the active KYC ruleset JSON from the rules directory."""
-    for fname in ("kyc_rules_v2.0.json", "kyc_rules_v1.1.json", "kyc_rules_v1.0.json"):
+    for fname in ("kyc_rules_v2.1.json", "kyc_rules_v2.0.json", "kyc_rules_v1.1.json", "kyc_rules_v1.0.json"):
         candidate = RULES_DIR / fname
         if candidate.exists():
             return json.loads(candidate.read_text(encoding="utf-8"))

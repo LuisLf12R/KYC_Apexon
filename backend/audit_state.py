@@ -18,10 +18,10 @@ _log = _logging.getLogger(__name__)
 _logger: Optional[AuditLogger] = None
 
 _SYSTEM_USER: Dict[str, Any] = {
-    "user_id": "system",
-    "username": "system",
-    "role": "system",
-    "full_name": "System",
+    "user_id": "usr_demo_admin",
+    "username": "admin",
+    "role": "Admin",
+    "full_name": "M. Lyons",
 }
 
 

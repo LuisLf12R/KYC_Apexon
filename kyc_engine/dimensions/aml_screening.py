@@ -46,8 +46,8 @@ class AMLScreeningDimension:
     }
     
     # Resolved statuses that indicate case closure
-    RESOLVED_STATUSES = {'FALSE_POSITIVE', 'RESOLVED_APPROVED', 'RESOLVED_BLOCKED'}
-    UNRESOLVED_STATUSES = {'UNRESOLVED', 'UNDER_REVIEW'}
+    RESOLVED_STATUSES = {'FALSE_POSITIVE', 'RESOLVED_APPROVED', 'RESOLVED_BLOCKED', 'CLEARED'}
+    UNRESOLVED_STATUSES = {'UNRESOLVED', 'UNDER_REVIEW', 'PENDING', 'ESCALATED', 'REVIEW'}
     
     def __init__(self, params: ScreeningParameters, evaluation_date=None):
         """
@@ -133,7 +133,7 @@ class AMLScreeningDimension:
             )
             
             # Evaluate hit resolution (if applicable)
-            hit_evaluation = self._evaluate_hit_resolution(last_screening) if screening_result != 'NO_HIT' else None
+            hit_evaluation = self._evaluate_hit_resolution(last_screening) if screening_result not in ('NO_HIT', 'NO_MATCH') else None
             
             # Determine overall compliance
             overall_passed = self._determine_compliance(
@@ -165,6 +165,7 @@ class AMLScreeningDimension:
                     'jurisdiction': jurisdiction,
                     'aml_status': aml_status,
                     'aml_hit_status': aml_hit_status,
+                    'screening_result': screening_result,
 
                     'screening_evaluation': screening_evaluation,
                     'rescreening_evaluation': rescreening_evaluation,
@@ -210,9 +211,9 @@ class AMLScreeningDimension:
         """
         screening_result = screening_record['screening_result']
         
-        if screening_result == 'NO_HIT':
+        if screening_result in ('NO_HIT', 'NO_MATCH'):
             return {
-                'screening_result': 'NO_HIT',
+                'screening_result': screening_result,
                 'screening_status': 'NO_HIT',
                 'compliance_status': 'COMPLIANT_LAST_SCREENING',
                 'hit_severity': None,
@@ -287,7 +288,7 @@ class AMLScreeningDimension:
             # Map resolution status to compliance status
             if resolution_status == 'FALSE_POSITIVE':
                 compliance_status = 'COMPLIANT_FALSE_POSITIVE'
-            elif resolution_status == 'RESOLVED_APPROVED':
+            elif resolution_status in ('RESOLVED_APPROVED', 'CLEARED'):
                 compliance_status = 'COMPLIANT_APPROVED_HIT'
             elif resolution_status == 'RESOLVED_BLOCKED':
                 compliance_status = 'NON_COMPLIANT_BLOCKED_RELATIONSHIP'
@@ -317,7 +318,7 @@ class AMLScreeningDimension:
             return False
         
         # Fail if no-hit but there's a hit evaluation (contradiction)
-        if screening_eval['screening_status'] == 'NO_HIT':
+        if screening_eval['screening_status'] in ('NO_HIT', 'NO_MATCH'):
             return True  # No-hit is compliant (assuming next screening scheduled)
         
         # For hits: only compliant if properly resolved
@@ -346,7 +347,7 @@ class AMLScreeningDimension:
         findings = []
         
         # Screening findings
-        if screening_eval['screening_status'] == 'NO_HIT':
+        if screening_eval['screening_status'] in ('NO_HIT', 'NO_MATCH'):
             findings.append(f" Last screening ({screening_eval['list_reference']}) returned NO_HIT")
         else:
             findings.append(f" Hit detected: {screening_eval['hit_severity']} on {screening_eval['list_reference']}")
@@ -391,7 +392,7 @@ class AMLScreeningDimension:
         """Map compliance outcome to a 0-100 integer score."""
         if rescreening_eval["overdue"]:
             return 30
-        if screening_eval["screening_status"] == "NO_HIT":
+        if screening_eval["screening_status"] in ("NO_HIT", "NO_MATCH"):
             return 100
         if hit_eval is None:
             return 50
@@ -406,7 +407,7 @@ class AMLScreeningDimension:
 
     def _compute_aml_status(self, screening_eval: Dict, hit_eval) -> str:
         """Return a canonical aml_status string for the engine."""
-        if screening_eval["screening_status"] == "NO_HIT":
+        if screening_eval["screening_status"] in ("NO_HIT", "NO_MATCH"):
             return "no_match"
         if hit_eval is None:
             return "match_requires_review"

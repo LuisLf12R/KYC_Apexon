@@ -5,7 +5,7 @@
    ============================================================ */
 
 const PROMPT_CONTENT = {
-  "KYC-SCREEN-01": `You are a KYC compliance analyst. Given a customer record and their AML/PEP screening results, perform a structured risk assessment.
+  "kyc-structuring-v1.0": `You are a KYC compliance analyst. Given a customer record and their AML/PEP screening results, perform a structured risk assessment.
 
 INPUT:
 - customer_id: {{customer_id}}
@@ -27,8 +27,7 @@ Rules:
 - Never speculate beyond the data provided.
 - Use FATF Recommendation 6 for sanctions and Rec 12 for PEPs.
 - Output must be valid JSON only. No preamble or explanation outside the JSON block.`,
-
-  "KYC-SUMM-01": `You are a KYC case summariser for a Private Wealth compliance team. Generate a concise case summary for analyst review.
+  "kyc-analysis-v1.0": `You are a KYC case summariser for a Private Wealth compliance team. Generate a concise case summary for analyst review.
 
 INPUT:
 - case_id: {{case_id}}
@@ -52,8 +51,7 @@ Constraints:
 - Do not include personally identifiable information beyond client name and case ID.
 - Tone: professional, regulatory-grade.
 - Output format: plain text, not JSON.`,
-
-  "KYC-FLAG-01": `You are a KYC compliance reasoning engine. Explain why a specific KYC flag was raised for an analyst who must decide whether to clear or escalate.
+  "autodetect-v1.0": `You are a KYC compliance reasoning engine. Explain why a specific KYC flag was raised for an analyst who must decide whether to clear or escalate.
 
 INPUT:
 - flag_type: {{flag_type}}
@@ -192,9 +190,9 @@ function SystemView() {
 
         {/* Active prompts */}
         <div className="card">
-          <div className="card-h"><h3>Active prompts</h3><span className="meta">3 in production · model claude-haiku-4-5</span></div>
+          <div className="card-h"><h3>Active prompts</h3><span className="meta">{MOCK.prompts.filter(p => PROMPT_CONTENT[p.id]).length} in production · model claude-haiku-4-5</span></div>
           <ul className="prompt-list">
-            {MOCK.prompts.map((p, i) => (
+            {MOCK.prompts.filter(p => PROMPT_CONTENT[p.id]).map((p, i) => (
               <li key={i}>
                 <div className="row-flex" style={{ gap: 8 }}>
                   <span className="badge b-ok mono" style={{ fontSize: 11 }}>{p.id}</span>
@@ -289,7 +287,10 @@ function SystemView() {
       <div className="card" style={{ marginTop: "var(--d-gap)" }}>
         <div className="card-h">
           <h3>AI Observability</h3>
-          <span className="meta">Claude API · last 24h · agentic pipeline</span>
+          <span className="meta" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            Claude API · last 24h · agentic pipeline
+            <span className="badge b-warn" style={{ fontSize: 10, fontWeight: 500 }}>Estimated · demo data</span>
+          </span>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "var(--d-gap)", padding: "16px 20px" }}>
           <div><div className="kpi-label">Token usage (24h)</div><div className="kpi-value" style={{fontSize:22}}>1.24M</div><div className="kpi-sub">input + output · ~$3.72</div></div>

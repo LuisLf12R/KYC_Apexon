@@ -85,6 +85,21 @@ ACTION_TYPES = {
     "EXPORT_PACKAGE_CREATED":   "Full export package (zip) created",
     "PII_MASK_TOGGLED":         "PII masking toggled on or off",
     "RULESET_UPDATED":          "Active ruleset updated from the dashboard",
+    
+    # Navigation
+    "NAV_WORKLIST":      "User navigated to the KYC case worklist",
+    "NAV_BATCH":         "User navigated to the Batch upload view",
+    "NAV_SYSTEM":        "User navigated to System information view",
+    "NAV_RULESET":       "User navigated to Ruleset & policy view",
+    "NAV_CLIENT_BOOK":   "User navigated to the Client book view",
+    "NAV_CASE":          "User navigated to the Case detail view",
+    "NAV_AUDIT":         "User navigated to the Audit trail view",
+    "NAV_RM":            "User navigated to the RM portfolio view",
+    "VIEW_CASE":         "User opened a specific case for review",
+    "STATUS_CHANGE":     "Case status updated by analyst or admin",
+    "CASE_TAB_SWITCH":   "User switched tab within a case detail view",
+    "EXPORT":            "User exported data (CSV, JSON, or report)",
+    "BATCH_RUN_START":   "Batch evaluation started by user",
 }
 
 

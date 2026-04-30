@@ -25,6 +25,10 @@ function RulesetView() {
     } catch (_) {}
   }, []);
 
+  const activeFile = rulesData
+    ? rulesData.version.replace("kyc-rules-", "kyc_rules_") + ".json"
+    : "kyc_rules_v2.1.json";
+
   const activeVersion = rulesData ? (rulesData.version || "kyc-rules-v2.1") : "kyc-rules-v2.1";
   const effectiveDate = rulesData ? (rulesData.effective_date || "2026-01-01") : "2026-01-01";
   const jsonText = rulesData ? JSON.stringify(rulesData, null, 2) : (loading ? "Loading…" : "{}");
@@ -44,7 +48,7 @@ function RulesetView() {
         <div className="row-flex">
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", marginRight: 8 }}>
             <span style={{ fontSize: 11.5, color: "var(--ink-4)" }}>Active file</span>
-            <span className="mono" style={{ fontSize: 13, fontWeight: 500 }}>kyc_rules_v2.0.json</span>
+            <span className="mono" style={{ fontSize: 13, fontWeight: 500 }}>{activeFile}</span>
           </div>
           <button className="btn" style={{ whiteSpace: "nowrap" }} onClick={() => { setLoading(true); fetch("/api/ruleset").then(r=>r.ok?r.json():null).then(d=>{setRulesData(d);setLoading(false);}).catch(()=>setLoading(false)); }}><Icon name="refresh"/> Reload file</button>
           <button className="btn primary" style={{ whiteSpace: "nowrap" }} onClick={() => setShowOverride(true)}><Icon name="plus"/> Propose change</button>
@@ -95,7 +99,7 @@ function RulesetView() {
         <button onClick={() => setTab("history")} aria-current={tab === "history"}>Override log</button>
       </div>
 
-      {tab === "active"    && <RulesetActive jsonText={jsonText} jurisdictions={jurisdictions} hardRejectRules={hardRejectRules} reviewRules={reviewRules} loading={loading} onPropose={() => setShowOverride(true)}/>}
+      {tab === "active"    && <RulesetActive jsonText={jsonText} jurisdictions={jurisdictions} hardRejectRules={hardRejectRules} reviewRules={reviewRules} loading={loading} onPropose={() => setShowOverride(true)} activeFile={activeFile}/>}
       {tab === "changelog" && <RulesetChangelog items={rulesData && rulesData.changelog ? rulesData.changelog : null}/>}
       {tab === "approvals" && <RulesetApprovals/>}
       {tab === "history"   && <RulesetOverrideLog/>}
@@ -105,7 +109,7 @@ function RulesetView() {
   );
 }
 
-function RulesetActive({ jsonText, jurisdictions, hardRejectRules, reviewRules, loading, onPropose }) {
+function RulesetActive({ jsonText, jurisdictions, hardRejectRules, reviewRules, loading, onPropose, activeFile }) {
   const JURISDICTION_NOTES = {
     USA: "Reg-K · OFAC SDN", GBR: "60-day doc expiry", EU: "180-day rescreen",
     CHE: "180-day rescreen", SGP: "MAS 30-day velocity", HKG: "SFC 10% UBO",
@@ -129,7 +133,7 @@ function RulesetActive({ jsonText, jurisdictions, hardRejectRules, reviewRules, 
     <div className="ruleset-grid">
       <div className="card">
         <div className="card-h">
-          <h3>Active ruleset JSON <span className="muted" style={{ fontWeight: 400, marginLeft: 8 }}>kyc_rules_v2.0.json</span></h3>
+          <h3>Active ruleset JSON <span className="muted" style={{ fontWeight: 400, marginLeft: 8 }}>{activeFile}</span></h3>
           <div className="row-flex">
             <button className="btn ghost"><Icon name="download"/> Download</button>
             <button className="btn ghost"><Icon name="expand"/> Fullscreen</button>
