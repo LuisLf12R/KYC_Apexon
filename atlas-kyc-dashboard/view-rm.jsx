@@ -1,20 +1,31 @@
 /* global React, Icon, MOCK */
 
 /* ============================================================
-   View C — RM Client Book — decluttered to 6 cards, fewer stats.
+   View C — RM Client Book
    ============================================================ */
-function RMView({ search, onOpenCase }) {
+function RMView({ search, cases: propCases, onOpenCase }) {
   const { useState, useMemo } = React;
   const [tier, setTier] = useState("all");
+
+  const allClients = propCases && propCases.length > 0 ? propCases : MOCK.cases.slice(0, 6);
+
   const clients = useMemo(() => {
-    let list = MOCK.cases.slice(0, 6);
+    let list = allClients;
     if (tier !== "all") list = list.filter(c => c.tier === tier);
     if (search) {
       const s = search.toLowerCase();
-      list = list.filter(c => c.client.toLowerCase().includes(s));
+      list = list.filter(c => (c.client || "").toLowerCase().includes(s));
     }
     return list;
-  }, [tier, search]);
+  }, [allClients, tier, search]);
+
+  const totalAum = allClients.reduce((s, c) => s + parseFloat(c.aum || 0), 0);
+  const sorted = [...allClients].sort((a, b) => parseFloat(b.aum || 0) - parseFloat(a.aum || 0));
+  const top3Aum = sorted.slice(0, 3).reduce((s, c) => s + parseFloat(c.aum || 0), 0);
+  const top3Conc = totalAum > 0 ? Math.round(top3Aum / totalAum * 100) : 0;
+  const onTimePct = allClients.length > 0
+    ? Math.round(allClients.filter(c => c.risk !== "high").length / allClients.length * 100)
+    : 0;
 
   return (
     <>
@@ -30,24 +41,24 @@ function RMView({ search, onOpenCase }) {
 
       <div className="kpi-strip" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
         <div className="kpi">
-          <div className="kpi-label">Net new AUM</div>
-          <div className="kpi-value">+$18.4M</div>
-          <div className="kpi-sub">QTD · 142% of target</div>
+          <div className="kpi-label">Total book AUM</div>
+          <div className="kpi-value">${totalAum.toFixed(1)}M</div>
+          <div className="kpi-sub">{allClients.length} clients · current batch</div>
         </div>
         <div className="kpi">
-          <div className="kpi-label">Wallet share</div>
-          <div className="kpi-value">61%</div>
-          <div className="kpi-sub">est. across book</div>
+          <div className="kpi-label">High-risk clients</div>
+          <div className="kpi-value">{allClients.filter(c => c.risk === "high").length}</div>
+          <div className="kpi-sub">of {allClients.length} total</div>
         </div>
         <div className="kpi">
           <div className="kpi-label">Top-3 concentration</div>
-          <div className="kpi-value">48%</div>
+          <div className="kpi-value">{top3Conc}%</div>
           <div className="kpi-sub">of book AUM</div>
         </div>
         <div className="kpi">
-          <div className="kpi-label">KYC refresh on-time</div>
-          <div className="kpi-value">89%</div>
-          <div className="kpi-sub">trailing 12 months</div>
+          <div className="kpi-label">KYC on-time rate</div>
+          <div className="kpi-value">{onTimePct}%</div>
+          <div className="kpi-sub">non-high-risk · current batch</div>
         </div>
       </div>
 

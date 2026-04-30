@@ -11,6 +11,9 @@ function CaseDetail({ caseData, onBack, panels }) {
   const [decision, setDecision] = useState(null);
   const [signoffA, setSignoffA] = useState(false);
   const [signoffB, setSignoffB] = useState(false);
+  const [uploadedDocs, setUploadedDocs] = useState([]);
+
+  const addUploadedDoc = (doc) => setUploadedDocs(prev => [doc, ...prev]);
 
   const dimensions = (c.dimensions && c.dimensions.length > 0) ? c.dimensions : [
     { key: "identity",   title: "Identity verification", tone: "ok",   sub: "No data" },
@@ -103,8 +106,8 @@ function CaseDetail({ caseData, onBack, panels }) {
             </>
           )}
 
-          {tab === "documents" && <DocumentsList documents={c.documents || []}/>}
-          {tab === "reconcile" && <ReconcilePanel client={c}/>}
+          {tab === "documents" && <DocumentsList documents={[...(c.documents || []), ...uploadedDocs]}/>}
+          {tab === "reconcile" && <ReconcilePanel client={c} onAddDoc={addUploadedDoc}/>}
         </div>
 
         {/* Right rail — approval workflow only */}
@@ -194,6 +197,8 @@ function UBOGraph({ subject, ini, ubos }) {
 }
 
 function DocumentsList({ documents }) {
+  const { useState } = React;
+  const [expanded, setExpanded] = useState(null);
   const docs = documents && documents.length > 0 ? documents : [];
   const outstanding = docs.filter(d => (d.status || "").toLowerCase() === "outstanding" || (d.status || "").toLowerCase() === "expired").length;
   const statusTone = (s) => {
@@ -210,15 +215,46 @@ function DocumentsList({ documents }) {
       </div>
       {docs.length === 0 && <div className="card-pad" style={{ color: "var(--ink-4)", fontSize: 13 }}>No documents on file.</div>}
       {docs.map((d, i) => (
-        <div className="flag-row" key={i} style={{ borderTop: i ? "1px solid var(--line)" : "0" }}>
-          <div className="left">
-            <div className="ico"><Icon name="file"/></div>
-            <div>
-              <div className="t">{d.name || d.type || "Document"}</div>
-              <div className="s">{d.type}{d.expiry ? ` · Expires ${d.expiry}` : ""}{d.issuer ? ` · ${d.issuer}` : ""}</div>
+        <div key={i}>
+          <div className="flag-row" style={{ borderTop: i ? "1px solid var(--line)" : "0", cursor: "pointer" }}
+               onClick={() => setExpanded(expanded === i ? null : i)}>
+            <div className="left">
+              <div className="ico"><Icon name="file"/></div>
+              <div>
+                <div className="t">{d.name || d.type || "Document"}</div>
+                <div className="s">
+                  {d.type}{d.expiry ? ` · Expires ${d.expiry}` : ""}{d.issuer ? ` · ${d.issuer}` : ""}
+                  {d.confidence != null ? ` · OCR ${d.confidence}% confidence` : ""}
+                </div>
+              </div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span className={`badge b-${statusTone(d.status)}`}><span className="dot"/>{d.status || "Unknown"}</span>
+              <Icon name={expanded === i ? "chevronU" : "chevronD"} size={13}/>
             </div>
           </div>
-          <span className={`badge b-${statusTone(d.status)}`}><span className="dot"/>{d.status || "Unknown"}</span>
+          {expanded === i && (
+            <div style={{ padding: "12px 16px 14px", background: "var(--bg-sunken)", borderTop: "1px solid var(--line)", fontSize: 12.5 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 24px", color: "var(--ink-2)" }}>
+                {d.name      && <div><span style={{ color: "var(--ink-4)" }}>File</span> {d.name}</div>}
+                {d.type      && <div><span style={{ color: "var(--ink-4)" }}>Type</span> {d.type}</div>}
+                {d.issuer    && <div><span style={{ color: "var(--ink-4)" }}>Issuer</span> {d.issuer}</div>}
+                {d.expiry    && <div><span style={{ color: "var(--ink-4)" }}>Expires</span> {d.expiry}</div>}
+                {d.issueDate && <div><span style={{ color: "var(--ink-4)" }}>Issued</span> {d.issueDate}</div>}
+                {d.confidence != null && (
+                  <div style={{ gridColumn: "1 / -1" }}>
+                    <div style={{ color: "var(--ink-4)", marginBottom: 4 }}>OCR confidence</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ flex: 1, height: 6, background: "var(--line)", borderRadius: 3, overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${d.confidence}%`, background: d.confidence >= 90 ? "var(--ok)" : d.confidence >= 70 ? "oklch(58% 0.14 75)" : "var(--bad)", borderRadius: 3 }}/>
+                      </div>
+                      <span style={{ fontWeight: 600, minWidth: 36 }}>{d.confidence}%</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       ))}
     </div>
@@ -228,7 +264,7 @@ function DocumentsList({ documents }) {
 /* ============================================================
    Reconciliation — upload docs, match fields, change status
    ============================================================ */
-function ReconcilePanel({ client }) {
+function ReconcilePanel({ client, onAddDoc }) {
   const { useState, useRef } = React;
   const initialFiles = (client.documents || []).map(d => ({
     n: d.name || d.type || "Document",
@@ -253,18 +289,31 @@ function ReconcilePanel({ client }) {
     { field: "UBO ≥ 25%",        source: "Ownership data", ours: `${verifiedUbos} verified`,                       theirs: uboCount > 0 ? `${uboCount} on file` : "None on file", match: verifiedUbos === uboCount && uboCount > 0 },
   ];
 
+  const finishProcessing = (newFiles) => {
+    setFiles(f => f.map(x => x.s === "processing" ? { ...x, s: "matched", conf: 92, k: "Identity" } : x));
+    if (onAddDoc) {
+      newFiles.forEach(df => onAddDoc({
+        name: df.n,
+        type: "Identity",
+        status: "Valid",
+        issuer: "—",
+        confidence: 92,
+      }));
+    }
+  };
+
   const onDrop = (e) => {
     e.preventDefault(); setDrag(false);
     const dropped = Array.from(e.dataTransfer.files).map(f => ({
       n: f.name, k: "Unclassified", s: "processing", conf: 0,
     }));
     setFiles(f => [...dropped, ...f]);
-    setTimeout(() => setFiles(f => f.map(x => x.s === "processing" ? { ...x, s: "matched", conf: 92, k: "Identity" } : x)), 1400);
+    setTimeout(() => finishProcessing(dropped), 1400);
   };
   const onPick = (e) => {
     const dropped = Array.from(e.target.files).map(f => ({ n: f.name, k: "Unclassified", s: "processing", conf: 0 }));
     setFiles(f => [...dropped, ...f]);
-    setTimeout(() => setFiles(f => f.map(x => x.s === "processing" ? { ...x, s: "matched", conf: 92, k: "Identity" } : x)), 1400);
+    setTimeout(() => finishProcessing(dropped), 1400);
   };
 
   const allMatched = files.every(f => f.s === "matched") && reconciliations.every(r => r.match);

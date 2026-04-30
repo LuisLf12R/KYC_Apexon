@@ -6,10 +6,20 @@
 function AuditView({ search, logs: propLogs }) {
   const { useState, useMemo } = React;
   const [selected, setSelected] = useState(null);
-  // range filter is display-only; server-side time-range filtering is not yet implemented
   const [activeFilters, setActiveFilters] = useState({ role: "all", action: "all", range: "24h" });
 
-  const rows = propLogs || MOCK.audit;
+  const loading = propLogs === null;
+  const rows = propLogs || [];
+
+  const downloadJson = () => {
+    const blob = new Blob([JSON.stringify(rows, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `audit-trail-${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows.filter(r => {
@@ -29,10 +39,21 @@ function AuditView({ search, logs: propLogs }) {
           <div className="page-sub">Immutable log of every interaction with the application — UI, API, ruleset, prompts, model calls. Append-only · SHA-256 hash chain · 7-year retention (FFIEC).</div>
         </div>
         <div className="row-flex">
-          <button className="btn"><Icon name="download"/> Export CSV</button>
+          <button className="btn" onClick={downloadJson} disabled={loading || rows.length === 0}><Icon name="download"/> Export JSON</button>
           <button className="btn"><Icon name="shield"/> Verify chain</button>
         </div>
       </div>
+
+      {loading && (
+        <div style={{ padding: "32px 0", textAlign: "center", color: "var(--ink-4)", fontSize: 13 }}>
+          <Icon name="refresh"/> Loading audit events…
+        </div>
+      )}
+      {!loading && rows.length === 0 && (
+        <div style={{ padding: "32px 0", textAlign: "center", color: "var(--ink-4)", fontSize: 13 }}>
+          No audit events recorded in this session yet.
+        </div>
+      )}
 
       {/* KPI strip */}
       <div className="kpi-strip">

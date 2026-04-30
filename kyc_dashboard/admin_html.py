@@ -253,7 +253,7 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
       return (
         <div className="app" data-sidebar={tweaks.sidebar} data-role={role}>
           <Sidebar active={view} onNav={handleNav} collapsed={tweaks.sidebar === "collapsed"}
-                   role={role} onRoleChange={handleSidebarRoleChange}/>
+                   role={role} onRoleChange={handleSidebarRoleChange} casesCount={cases ? cases.length : null}/>
           <div className="main">
             <Topbar title="" crumbs={crumbsByView[view]} search={search} setSearch={setSearch}
                     role={role} view={view}/>
@@ -269,7 +269,7 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
                     onReject={handleReject}
                   />
                 )}
-                {view === "rm"       && <RMView        search={search} onOpenCase={openCase}/>}
+                {view === "rm"       && <RMView        search={search} cases={cases} onOpenCase={openCase}/>}
                 {view === "case"     && <CaseDetail    caseData={activeCase || MOCK.cases[0]} onBack={back} panels={panels} setPanels={()=>{}}/>}
                 {view === "batch" && (
                   <BatchView onBatchComplete={(newCases, newSummary) => {

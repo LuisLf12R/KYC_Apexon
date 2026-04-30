@@ -3,20 +3,16 @@
 /* ============================================================
    Sidebar
    ============================================================ */
-function Sidebar({ active, onNav, collapsed, role, onRoleChange }) {
+function Sidebar({ active, onNav, collapsed, role, onRoleChange, casesCount }) {
   const isAdmin = role === "admin";
   const items = [
-    { id: "worklist", icon: "inbox", label: "Worklist", pill: "47" },
+    { id: "worklist", icon: "inbox", label: "Worklist", pill: casesCount != null ? String(casesCount) : null },
     { id: "rm", icon: "users", label: "Client book" },
     { id: "case", icon: "case", label: "Case detail" },
     { id: "batch", icon: "upload", label: "Batch upload" },
   ];
-  const compliance = [
-    { id: "alerts", icon: "bell", label: "Alerts", pill: "7", disabled: true },
-    { id: "monitoring", icon: "eye", label: "Periodic review", pill: "12", disabled: true },
-  ];
   const admin = [
-    { id: "audit", icon: "audit", label: "Audit trail", pill: "12.8k" },
+    { id: "audit", icon: "audit", label: "Audit trail" },
     { id: "ruleset", icon: "shield", label: "Ruleset & policy", pill: "1" },
     { id: "system", icon: "settings", label: "System info" },
   ];
@@ -30,16 +26,6 @@ function Sidebar({ active, onNav, collapsed, role, onRoleChange }) {
         {!collapsed && <div className="sb-section-h">Workspaces</div>}
         {items.map(it => (
           <button key={it.id} className="sb-link" aria-current={active === it.id} onClick={() => onNav(it.id)}>
-            <span className="sb-icon"><Icon name={it.icon}/></span>
-            <span>{it.label}</span>
-            {it.pill && <span className="pill tnum">{it.pill}</span>}
-          </button>
-        ))}
-      </div>
-      <div className="sb-section">
-        {!collapsed && <div className="sb-section-h">Compliance</div>}
-        {compliance.map(it => (
-          <button key={it.id} className="sb-link" onClick={() => {}} aria-disabled="true">
             <span className="sb-icon"><Icon name={it.icon}/></span>
             <span>{it.label}</span>
             {it.pill && <span className="pill tnum">{it.pill}</span>}
@@ -114,7 +100,6 @@ function Topbar({ title, crumbs, search, setSearch, role, view }) {
       </>}
       {inAdmin && view === "audit" && <>
         <button className="tb-btn"><Icon name="filter"/> Filters</button>
-        <button className="tb-btn"><Icon name="download"/> Export CSV</button>
       </>}
       {inAdmin && view === "ruleset" && <>
         <button className="tb-btn"><Icon name="file"/> Diff</button>

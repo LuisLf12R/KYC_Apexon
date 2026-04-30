@@ -77,16 +77,16 @@ function SystemView() {
       {/* Runtime + integrations */}
       <div className="split-1-1" style={{ marginTop: "var(--d-gap)" }}>
         <div className="card">
-          <div className="card-h"><h3>Runtime</h3><span className="meta">production · eu-west-1</span></div>
+          <div className="card-h"><h3>Runtime</h3><span className="meta">production · us-east</span></div>
           <div className="kv-grid">
-            <div><span>Hosting</span><b>Railway · Pro plan</b></div>
-            <div><span>Framework</span><b>Streamlit 1.36 / Python 3.12</b></div>
+            <div><span>Hosting</span><b>Render.com · Starter plan</b></div>
+            <div><span>Framework</span><b>FastAPI 0.115 / Python 3.12</b></div>
             <div><span>Active ruleset</span><b className="mono"><span className="badge b-accent mono" style={{ fontSize: 10.5 }}>kyc-rules-v2.1</span></b></div>
-            <div><span>Region</span><b>eu-west-1 (Dublin)</b></div>
-            <div><span>Build</span><b className="mono">9f3a2e1 · 2026-04-22</b></div>
-            <div><span>Replicas</span><b>3 / 3 healthy</b></div>
-            <div><span>CPU / Mem</span><b>22% / 1.8 GB / 4 GB</b></div>
-            <div><span>Queue depth</span><b>12 jobs</b></div>
+            <div><span>Live URL</span><b>kyc-apexon.onrender.com</b></div>
+            <div><span>Build</span><b className="mono">eda192f · 2026-04-30</b></div>
+            <div><span>Replicas</span><b>1 / 1 healthy</b></div>
+            <div><span>Storage</span><b>tempfile (session-scoped)</b></div>
+            <div><span>Auth</span><b>In-memory sessions (RBAC)</b></div>
           </div>
         </div>
 
@@ -144,9 +144,9 @@ function SystemView() {
       </div>
 
       <div className="sysfoot">
-        <span><b>Hosting:</b> Railway</span>
+        <span><b>Hosting:</b> Render.com</span>
         <span className="sep">|</span>
-        <span><b>Framework:</b> Streamlit</span>
+        <span><b>Framework:</b> FastAPI / Python 3.12</span>
         <span className="sep">|</span>
         <span><b>Ruleset:</b> <span className="badge b-ok mono" style={{ fontSize: 10.5 }}>kyc-rules-v2.1</span></span>
         <span className="sep">|</span>
