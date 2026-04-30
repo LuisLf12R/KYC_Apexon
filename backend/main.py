@@ -395,6 +395,74 @@ def _format_audit_description(event: dict) -> str:
         return f"{action} on customer {cid}"
     return action
 
+class RunBatchRequest(BaseModel):
+    institution_id: Optional[str] = None
+
+
+@app.post("/api/upload-docs")
+async def upload_docs(
+    files: List[UploadFile] = File(...),
+    dataset_type: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Banker dashboard upload — no auth required."""
+    results = []
+    for f in files:
+        raw = await f.read()
+        result = process_file(raw, f.filename or "upload", dataset_type or "customers")
+        results.append({
+            "filename": result["filename"],
+            "status": result["status"],
+            "rows": result.get("rows", 0),
+            "error": result.get("message", ""),
+        })
+    return {"ok": True, "results": results}
+
+
+@app.post("/api/run-batch")
+def run_batch(payload: RunBatchRequest) -> Dict[str, Any]:
+    """Banker dashboard batch run — no auth required."""
+    dfs = _load_temp_dfs()
+    customers_df = dfs.get("customers", pd.DataFrame())
+
+    if customers_df.empty:
+        return {"ok": False, "error": "No data loaded. Use Batch upload to upload data first."}
+    if "customer_id" not in customers_df.columns:
+        return {"ok": False, "error": "customers dataset missing customer_id column"}
+
+    filtered = customers_df.copy()
+    if payload.institution_id:
+        for col in ("institution_id", "institution"):
+            if col in filtered.columns:
+                filtered = filtered[filtered[col].astype(str) == payload.institution_id]
+                break
+
+    customer_ids = filtered["customer_id"].dropna().astype(str).unique().tolist()
+    if not customer_ids:
+        return {"ok": False, "error": "No customers found for the selected institution"}
+
+    engine = KYCComplianceEngine(data_clean_dir=DATA_DIR)
+    evaluations = []
+    for cid in customer_ids:
+        try:
+            evaluations.append(engine.evaluate_customer(cid, institution_id=payload.institution_id))
+        except Exception as ex:
+            print(f"[RUN_BATCH] skip customer_id={cid!r}: {ex}")
+
+    formatted = _format_results(evaluations, customers_df)
+    for case in formatted.get("cases", []):
+        cid = case.get("id")
+        if not cid:
+            continue
+        override = APPROVALS.get(cid)
+        if override == "approved":
+            case["status"] = "Cleared"
+            case["sla"] = {"tone": "ok", "label": "Approved"}
+        elif override == "rejected":
+            case["status"] = "Escalated"
+            case["sla"] = {"tone": "bad", "label": "Rejected"}
+    return {"ok": True, **formatted}
+
+
 if __name__ == "__main__":
     import uvicorn
 
