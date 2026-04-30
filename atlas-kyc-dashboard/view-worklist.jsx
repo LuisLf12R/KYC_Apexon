@@ -4,6 +4,12 @@
    View A — Compliance Worklist (case queue)
    Decluttered: 3 KPIs, simpler table, no bottom-of-page noise.
    ============================================================ */
+function fmtAum(v) {
+  const n = parseFloat(v);
+  if (!v || isNaN(n) || n === 0) return "—";
+  return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "M";
+}
+
 function WorklistView({ onOpenCase, cases: propCases, kpiData, onApprove, onReject }) {
   const { useState, useMemo } = React;
   const [filter, setFilter] = useState("all"); // all | needs-me | overdue | high
@@ -59,9 +65,9 @@ function WorklistView({ onOpenCase, cases: propCases, kpiData, onApprove, onReje
         ))}
       </div>
 
-      <div className="section-h" style={{ marginTop: 8 }}>
+      <div className="section-h" style={{ marginTop: 8, gap: 16 }}>
         <h3>Active queue</h3>
-        <div className="chips">
+        <div className="chips" style={{ marginLeft: 8 }}>
           {[
             { v: "all",      l: "All" },
             { v: "needs-me", l: "Needs my action" },
@@ -104,7 +110,7 @@ function WorklistView({ onOpenCase, cases: propCases, kpiData, onApprove, onReje
                       </div>
                     </div>
                   </td>
-                  <td className="cell-num">{c.aum && !isNaN(parseFloat(c.aum)) ? `$${parseFloat(c.aum).toFixed(1)}M` : "—"}</td>
+                  <td className="cell-num">{fmtAum(c.aum)}</td>
                   <td><RiskBar level={c.risk} score={c.riskScore}/></td>
                   <td>
                     <span className={`badge ${

@@ -60,6 +60,7 @@
       const [view, setView] = useState("audit");
       const [search, setSearch] = useState("");
       const [activeCase, setActiveCase] = useState(null);
+      const [auditLogs, setAuditLogs] = useState(null);
       const role = tweaks.role || "banker";
       const setRole = (r) => {
         setTweak("role", r);
@@ -70,6 +71,15 @@
         document.documentElement.setAttribute("data-theme", tweaks.theme);
         document.documentElement.setAttribute("data-density", tweaks.density);
       }, [tweaks.theme, tweaks.density]);
+
+      useEffect(() => {
+        if (view !== "audit") return;
+        const token = localStorage.getItem("auth_token") || "";
+        fetch("/api/audit", { headers: { Authorization: `Bearer ${token}` } })
+          .then(r => r.ok ? r.json() : { logs: [] })
+          .then(data => setAuditLogs(Array.isArray(data.logs) ? data.logs : []))
+          .catch(() => setAuditLogs([]));
+      }, [view]);
 
       const openCase = (c) => { setActiveCase(c); setView("case"); };
       const back = () => setView("worklist");
@@ -101,7 +111,7 @@
                 {view === "rm"        && <RMView        search={search} onOpenCase={openCase}/>}
                 {view === "case"      && <CaseDetail    caseData={activeCase || MOCK.cases[0]} onBack={back} panels={panels} setPanels={() => {}}/>}
                 {view === "batch"     && <BatchView/>}
-                {view === "audit"     && <AuditView     search={search}/>}
+                {view === "audit"     && <AuditView     search={search} logs={auditLogs}/>}
                 {view === "ruleset"   && <RulesetView/>}
                 {view === "system"    && <SystemView/>}
               </div>

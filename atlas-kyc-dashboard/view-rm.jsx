@@ -3,6 +3,12 @@
 /* ============================================================
    View C — RM Client Book
    ============================================================ */
+function fmtAum(v) {
+  const n = parseFloat(v);
+  if (!v || isNaN(n) || n === 0) return "—";
+  return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "M";
+}
+
 function RMView({ cases: propCases, onOpenCase }) {
   const { useState, useMemo } = React;
   const [tier, setTier] = useState("all");
@@ -46,7 +52,7 @@ function RMView({ cases: propCases, onOpenCase }) {
       <div className="kpi-strip" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
         <div className="kpi">
           <div className="kpi-label">Total book AUM</div>
-          <div className="kpi-value">{totalAum > 0 ? `$${totalAum.toFixed(1)}M` : "—"}</div>
+          <div className="kpi-value">{totalAum > 0 ? fmtAum(String(totalAum)) : "—"}</div>
           <div className="kpi-sub">{allClients.length} clients · current batch</div>
         </div>
         <div className="kpi">
@@ -95,7 +101,7 @@ function RMView({ cases: propCases, onOpenCase }) {
                 </span>
               </div>
               <div className="stats" style={{ gridTemplateColumns: "1fr 1fr" }}>
-                <div className="stat"><label>AUM</label><b>{parseAum(c.aum) > 0 ? `$${parseFloat(c.aum).toFixed(1)}M` : "—"}</b></div>
+                <div className="stat"><label>AUM</label><b>{fmtAum(c.aum)}</b></div>
                 <div className="stat"><label>Next review</label><b style={{ fontSize: 13, fontWeight: 400 }} className="tnum">{c.nextReview}</b></div>
               </div>
               <div className="row">
