@@ -19,9 +19,10 @@ function RMView({ search, cases: propCases, onOpenCase }) {
     return list;
   }, [allClients, tier, search]);
 
-  const totalAum = allClients.reduce((s, c) => s + parseFloat(c.aum || 0), 0);
-  const sorted = [...allClients].sort((a, b) => parseFloat(b.aum || 0) - parseFloat(a.aum || 0));
-  const top3Aum = sorted.slice(0, 3).reduce((s, c) => s + parseFloat(c.aum || 0), 0);
+  const parseAum = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+  const totalAum = allClients.reduce((s, c) => s + parseAum(c.aum), 0);
+  const sorted = [...allClients].sort((a, b) => parseAum(b.aum) - parseAum(a.aum));
+  const top3Aum = sorted.slice(0, 3).reduce((s, c) => s + parseAum(c.aum), 0);
   const top3Conc = totalAum > 0 ? Math.round(top3Aum / totalAum * 100) : 0;
   const onTimePct = allClients.length > 0
     ? Math.round(allClients.filter(c => c.risk !== "high").length / allClients.length * 100)
@@ -34,15 +35,13 @@ function RMView({ search, cases: propCases, onOpenCase }) {
           <div className="eyebrow">A. Mercer · Senior RM</div>
           <h1 className="page-title">Client book</h1>
         </div>
-        <div className="row-flex">
-          <button className="tb-btn primary"><Icon name="plus"/> Onboard client</button>
-        </div>
+        <div/>
       </div>
 
       <div className="kpi-strip" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
         <div className="kpi">
           <div className="kpi-label">Total book AUM</div>
-          <div className="kpi-value">${totalAum.toFixed(1)}M</div>
+          <div className="kpi-value">{totalAum > 0 ? `$${totalAum.toFixed(1)}M` : "—"}</div>
           <div className="kpi-sub">{allClients.length} clients · current batch</div>
         </div>
         <div className="kpi">
@@ -91,7 +90,7 @@ function RMView({ search, cases: propCases, onOpenCase }) {
                 </span>
               </div>
               <div className="stats" style={{ gridTemplateColumns: "1fr 1fr" }}>
-                <div className="stat"><label>AUM</label><b>${c.aum}M</b></div>
+                <div className="stat"><label>AUM</label><b>{parseAum(c.aum) > 0 ? `$${parseFloat(c.aum).toFixed(1)}M` : "—"}</b></div>
                 <div className="stat"><label>Next review</label><b style={{ fontSize: 13, fontWeight: 400 }} className="tnum">{c.nextReview}</b></div>
               </div>
               <div className="row">

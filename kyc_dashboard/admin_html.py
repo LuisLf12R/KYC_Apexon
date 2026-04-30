@@ -185,8 +185,12 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
           if (res.ok) {
             const json = await res.json();
             setAuditLogs(json.logs || []);
+          } else {
+            setAuditLogs([]);
           }
-        } catch (_) {}
+        } catch (_) {
+          setAuditLogs([]);
+        }
       }, [API]);
 
       const handleNav = React.useCallback((newView) => {
@@ -265,12 +269,10 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
                     onOpenCase={openCase}
                     cases={cases}
                     kpiData={Object.keys(kpis).length ? kpis : null}
-                    onApprove={handleApprove}
-                    onReject={handleReject}
                   />
                 )}
                 {view === "rm"       && <RMView        search={search} cases={cases} onOpenCase={openCase}/>}
-                {view === "case"     && <CaseDetail    caseData={activeCase || MOCK.cases[0]} onBack={back} panels={panels} setPanels={()=>{}}/>}
+                {view === "case"     && <CaseDetail    caseData={activeCase || MOCK.cases[0]} onBack={back} panels={panels} setPanels={()=>{}} onApprove={handleApprove} onReject={handleReject}/>}
                 {view === "batch" && (
                   <BatchView onBatchComplete={(newCases, newSummary) => {
                     setCases(newCases);

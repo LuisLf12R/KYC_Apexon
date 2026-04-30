@@ -98,7 +98,7 @@ function WorklistView({ onOpenCase, search, cases: propCases, kpiData, onApprove
                       </div>
                     </div>
                   </td>
-                  <td className="cell-num">${c.aum}M</td>
+                  <td className="cell-num">{c.aum && !isNaN(parseFloat(c.aum)) ? `$${parseFloat(c.aum).toFixed(1)}M` : "—"}</td>
                   <td><RiskBar level={c.risk} score={c.riskScore}/></td>
                   <td>
                     <span className={`badge ${

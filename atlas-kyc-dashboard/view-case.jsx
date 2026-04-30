@@ -3,7 +3,7 @@
 /* ============================================================
    View D — Case Detail (HNWI deep-dive) — decluttered.
    ============================================================ */
-function CaseDetail({ caseData, onBack, panels }) {
+function CaseDetail({ caseData, onBack, panels, onApprove, onReject }) {
   const { useState } = React;
   const c = caseData || MOCK.cases[0];
   const [tab, setTab] = useState("reconcile");
@@ -12,8 +12,19 @@ function CaseDetail({ caseData, onBack, panels }) {
   const [signoffA, setSignoffA] = useState(false);
   const [signoffB, setSignoffB] = useState(false);
   const [uploadedDocs, setUploadedDocs] = useState([]);
+  const [resolvedStatus, setResolvedStatus] = useState(null);
+  const [statusSaved, setStatusSaved] = useState(false);
 
+  const effectiveStatus = resolvedStatus || c.status;
   const addUploadedDoc = (doc) => setUploadedDocs(prev => [doc, ...prev]);
+
+  const handleStatusSave = (newStatus) => {
+    setResolvedStatus(newStatus);
+    setStatusSaved(true);
+    setTimeout(() => setStatusSaved(false), 3000);
+    if (newStatus === "Cleared" && onApprove) onApprove(c.id);
+    else if (newStatus === "Escalated" && onReject) onReject(c.id);
+  };
 
   const dimensions = (c.dimensions && c.dimensions.length > 0) ? c.dimensions : [
     { key: "identity",   title: "Identity verification", tone: "ok",   sub: "No data" },
@@ -40,8 +51,8 @@ function CaseDetail({ caseData, onBack, panels }) {
           </div>
         </div>
         <div className="row-flex">
-          <span className={`badge ${c.status === "Escalated" ? "b-bad" : c.status === "Dual-approval" ? "b-accent" : "b-mute"}`}>
-            <span className="dot"/>{c.status}
+          <span className={`badge ${effectiveStatus === "Escalated" ? "b-bad" : effectiveStatus === "Cleared" ? "b-ok" : effectiveStatus === "Dual-approval" ? "b-accent" : "b-mute"}`}>
+            <span className="dot"/>{effectiveStatus}
           </span>
         </div>
       </div>
@@ -107,7 +118,7 @@ function CaseDetail({ caseData, onBack, panels }) {
           )}
 
           {tab === "documents" && <DocumentsList documents={[...(c.documents || []), ...uploadedDocs]}/>}
-          {tab === "reconcile" && <ReconcilePanel client={c} onAddDoc={addUploadedDoc}/>}
+          {tab === "reconcile" && <ReconcilePanel client={c} currentStatus={effectiveStatus} onAddDoc={addUploadedDoc} onStatusSave={handleStatusSave} statusSaved={statusSaved}/>}
         </div>
 
         {/* Right rail — approval workflow only */}
@@ -140,23 +151,36 @@ function CaseDetail({ caseData, onBack, panels }) {
             </div>
 
             <textarea
-              placeholder="Decision rationale…"
+              placeholder="Decision rationale (required)…"
               value={note} onChange={e => setNote(e.target.value)}/>
+            {!note.trim() && (signoffA || signoffB) && (
+              <div style={{ fontSize: 11.5, color: "oklch(48% 0.13 75)", marginTop: -4 }}>
+                A written rationale is required before approving or rejecting.
+              </div>
+            )}
 
             <div className="grid">
-              <button className="btn success" onClick={() => setDecision("approve")} disabled={!signoffA || !signoffB}>
+              <button className="btn success" onClick={() => setDecision("approve")} disabled={!signoffA || !signoffB || !note.trim()}>
                 <Icon name="check"/> Approve
               </button>
-              <button className="btn danger" onClick={() => setDecision("reject")}>
+              <button className="btn danger" onClick={() => setDecision("reject")} disabled={!note.trim()}>
                 <Icon name="x"/> Reject
               </button>
             </div>
-            <button className="btn full" onClick={() => setDecision("escalate")}>
+            <button className="btn full" onClick={() => setDecision("escalate")} disabled={!note.trim()}>
               <Icon name="escalate"/> Escalate
             </button>
             {decision && (
-              <div className="muted" style={{ fontSize: 12, textAlign: "center" }}>
-                Recorded: <b style={{ color: "var(--ink)" }}>{decision}</b>
+              <div style={{
+                padding: "12px 14px", borderRadius: 8, textAlign: "center", fontSize: 13,
+                background: decision === "approve" ? "var(--ok-soft, oklch(96% 0.05 145))" : decision === "reject" ? "var(--bad-soft, oklch(97% 0.04 25))" : "oklch(97% 0.03 75)",
+                border: `1px solid ${decision === "approve" ? "var(--ok)" : decision === "reject" ? "var(--bad)" : "oklch(58% 0.14 75)"}`,
+              }}>
+                <div style={{ fontWeight: 600 }}>
+                  <Icon name={decision === "approve" ? "check" : decision === "reject" ? "x" : "escalate"}/>
+                  {" "}{decision === "approve" ? "Case approved" : decision === "reject" ? "Case rejected" : "Case escalated"}
+                </div>
+                <div style={{ marginTop: 4, fontSize: 11.5, color: "var(--ink-3)" }}>Recorded · {new Date().toLocaleTimeString()}</div>
               </div>
             )}
           </div>
@@ -196,9 +220,74 @@ function UBOGraph({ subject, ini, ubos }) {
   );
 }
 
+function DocPreviewModal({ doc, onClose }) {
+  const statusTone = (s) => {
+    const sl = (s || "").toLowerCase();
+    if (sl === "verified" || sl === "valid" || sl === "reviewed") return "ok";
+    if (sl === "outstanding" || sl === "expired") return "bad";
+    return "warn";
+  };
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}
+         onClick={onClose}>
+      <div style={{ background: "var(--bg)", borderRadius: "var(--radius-lg)", width: 520, boxShadow: "0 20px 60px rgba(0,0,0,0.22)", overflow: "hidden" }}
+           onClick={e => e.stopPropagation()}>
+        <div style={{ padding: "18px 22px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 36, height: 36, borderRadius: 10, background: "var(--bg-sunken)", display: "grid", placeItems: "center" }}>
+              <Icon name="file" size={18}/>
+            </div>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 14.5 }}>{doc.name || doc.type || "Document"}</div>
+              <div style={{ fontSize: 12, color: "var(--ink-4)", marginTop: 1 }}>{doc.type || "—"}</div>
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span className={`badge b-${statusTone(doc.status)}`}><span className="dot"/>{doc.status || "Unknown"}</span>
+            <button className="btn ghost" onClick={onClose} style={{ padding: "0 6px" }}><Icon name="x"/></button>
+          </div>
+        </div>
+
+        <div style={{ background: "var(--bg-sunken)", padding: "36px 24px", textAlign: "center", borderBottom: "1px solid var(--line)" }}>
+          <div style={{ width: 72, height: 90, margin: "0 auto 14px", background: "var(--bg)", borderRadius: 6, border: "1px solid var(--line)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.06)" }}>
+            <Icon name="file" size={28}/>
+          </div>
+          <div style={{ fontSize: 13, fontWeight: 500, color: "var(--ink-2)" }}>{doc.name || doc.type || "Document"}</div>
+          <div style={{ fontSize: 12, color: "var(--ink-5)", marginTop: 4 }}>Stored securely in document vault · full preview requires vault access</div>
+        </div>
+
+        <div style={{ padding: "20px 22px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 24px", fontSize: 13 }}>
+            {doc.type      && <div><span style={{ color: "var(--ink-4)" }}>Type </span><b>{doc.type}</b></div>}
+            {doc.issuer    && <div><span style={{ color: "var(--ink-4)" }}>Issuer </span><b>{doc.issuer}</b></div>}
+            {doc.issueDate && <div><span style={{ color: "var(--ink-4)" }}>Issued </span><b>{doc.issueDate}</b></div>}
+            {doc.expiry    && <div><span style={{ color: "var(--ink-4)" }}>Expires </span><b>{doc.expiry}</b></div>}
+          </div>
+          {doc.confidence != null && (
+            <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
+              <div style={{ fontSize: 12, color: "var(--ink-4)", marginBottom: 8 }}>OCR confidence</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ flex: 1, height: 8, background: "var(--line)", borderRadius: 4, overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${doc.confidence}%`, background: doc.confidence >= 90 ? "var(--ok)" : doc.confidence >= 70 ? "oklch(58% 0.14 75)" : "var(--bad)", borderRadius: 4 }}/>
+                </div>
+                <span style={{ fontWeight: 700, fontSize: 14, minWidth: 36 }}>{doc.confidence}%</span>
+              </div>
+              <div style={{ fontSize: 11.5, color: "var(--ink-5)", marginTop: 6 }}>
+                {doc.confidence >= 90 ? "High confidence · all fields extracted and verified" :
+                 doc.confidence >= 70 ? "Medium confidence · manual review recommended" :
+                 "Low confidence · document may require re-submission"}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DocumentsList({ documents }) {
   const { useState } = React;
-  const [expanded, setExpanded] = useState(null);
+  const [previewDoc, setPreviewDoc] = useState(null);
   const docs = documents && documents.length > 0 ? documents : [];
   const outstanding = docs.filter(d => (d.status || "").toLowerCase() === "outstanding" || (d.status || "").toLowerCase() === "expired").length;
   const statusTone = (s) => {
@@ -209,52 +298,29 @@ function DocumentsList({ documents }) {
   };
   return (
     <div className="card">
+      {previewDoc && <DocPreviewModal doc={previewDoc} onClose={() => setPreviewDoc(null)}/>}
       <div className="card-h">
         <h3>Documents</h3>
         <span className="meta">{docs.length} on file{outstanding > 0 ? ` · ${outstanding} outstanding` : ""}</span>
       </div>
       {docs.length === 0 && <div className="card-pad" style={{ color: "var(--ink-4)", fontSize: 13 }}>No documents on file.</div>}
       {docs.map((d, i) => (
-        <div key={i}>
-          <div className="flag-row" style={{ borderTop: i ? "1px solid var(--line)" : "0", cursor: "pointer" }}
-               onClick={() => setExpanded(expanded === i ? null : i)}>
-            <div className="left">
-              <div className="ico"><Icon name="file"/></div>
-              <div>
-                <div className="t">{d.name || d.type || "Document"}</div>
-                <div className="s">
-                  {d.type}{d.expiry ? ` · Expires ${d.expiry}` : ""}{d.issuer ? ` · ${d.issuer}` : ""}
-                  {d.confidence != null ? ` · OCR ${d.confidence}% confidence` : ""}
-                </div>
+        <div className="flag-row" key={i} style={{ borderTop: i ? "1px solid var(--line)" : "0", cursor: "pointer" }}
+             onClick={() => setPreviewDoc(d)}>
+          <div className="left">
+            <div className="ico"><Icon name="file"/></div>
+            <div>
+              <div className="t">{d.name || d.type || "Document"}</div>
+              <div className="s">
+                {d.type}{d.expiry ? ` · Expires ${d.expiry}` : ""}{d.issuer ? ` · ${d.issuer}` : ""}
+                {d.confidence != null ? ` · OCR ${d.confidence}% confidence` : ""}
               </div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span className={`badge b-${statusTone(d.status)}`}><span className="dot"/>{d.status || "Unknown"}</span>
-              <Icon name={expanded === i ? "chevronU" : "chevronD"} size={13}/>
             </div>
           </div>
-          {expanded === i && (
-            <div style={{ padding: "12px 16px 14px", background: "var(--bg-sunken)", borderTop: "1px solid var(--line)", fontSize: 12.5 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 24px", color: "var(--ink-2)" }}>
-                {d.name      && <div><span style={{ color: "var(--ink-4)" }}>File</span> {d.name}</div>}
-                {d.type      && <div><span style={{ color: "var(--ink-4)" }}>Type</span> {d.type}</div>}
-                {d.issuer    && <div><span style={{ color: "var(--ink-4)" }}>Issuer</span> {d.issuer}</div>}
-                {d.expiry    && <div><span style={{ color: "var(--ink-4)" }}>Expires</span> {d.expiry}</div>}
-                {d.issueDate && <div><span style={{ color: "var(--ink-4)" }}>Issued</span> {d.issueDate}</div>}
-                {d.confidence != null && (
-                  <div style={{ gridColumn: "1 / -1" }}>
-                    <div style={{ color: "var(--ink-4)", marginBottom: 4 }}>OCR confidence</div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <div style={{ flex: 1, height: 6, background: "var(--line)", borderRadius: 3, overflow: "hidden" }}>
-                        <div style={{ height: "100%", width: `${d.confidence}%`, background: d.confidence >= 90 ? "var(--ok)" : d.confidence >= 70 ? "oklch(58% 0.14 75)" : "var(--bad)", borderRadius: 3 }}/>
-                      </div>
-                      <span style={{ fontWeight: 600, minWidth: 36 }}>{d.confidence}%</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span className={`badge b-${statusTone(d.status)}`}><span className="dot"/>{d.status || "Unknown"}</span>
+            <Icon name="expand" size={12} style={{ color: "var(--ink-5)" }}/>
+          </div>
         </div>
       ))}
     </div>
@@ -264,7 +330,7 @@ function DocumentsList({ documents }) {
 /* ============================================================
    Reconciliation — upload docs, match fields, change status
    ============================================================ */
-function ReconcilePanel({ client, onAddDoc }) {
+function ReconcilePanel({ client, currentStatus, onAddDoc, onStatusSave, statusSaved }) {
   const { useState, useRef } = React;
   const initialFiles = (client.documents || []).map(d => ({
     n: d.name || d.type || "Document",
@@ -274,7 +340,7 @@ function ReconcilePanel({ client, onAddDoc }) {
     conf: (d.status || "").toLowerCase() === "verified" ? 99 : (d.status || "").toLowerCase() === "valid" ? 95 : 78,
   }));
   const [files, setFiles] = useState(initialFiles);
-  const [status, setStatus] = useState(client.status);
+  const [status, setStatus] = useState(currentStatus || client.status);
   const [drag, setDrag] = useState(false);
   const inputRef = useRef(null);
 
@@ -397,7 +463,7 @@ function ReconcilePanel({ client, onAddDoc }) {
         <div className="card-h"><h3>Update client status</h3><span className="meta">applies to case {client.id}</span></div>
         <div className="card-pad">
           <div className="muted" style={{ fontSize: 13, marginBottom: 14 }}>
-            Current status: <span className="badge b-mute"><span className="dot"/>{client.status}</span>
+            Current status: <span className="badge b-mute"><span className="dot"/>{currentStatus || client.status}</span>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10, marginBottom: 14 }}>
             {[
@@ -431,9 +497,14 @@ function ReconcilePanel({ client, onAddDoc }) {
               Resolve outstanding mismatches before marking ready for approval.
             </div>
           )}
+          {statusSaved && (
+            <div style={{ marginBottom: 10, padding: "8px 12px", borderRadius: 7, background: "var(--ok-soft, oklch(96% 0.05 145))", border: "1px solid var(--ok)", fontSize: 12.5, color: "var(--ok)", display: "flex", alignItems: "center", gap: 6 }}>
+              <Icon name="check" size={13}/> Status updated to <b>{status}</b>
+            </div>
+          )}
           <div className="row-flex" style={{ marginTop: 14, justifyContent: "flex-end" }}>
-            <button className="btn">Cancel</button>
-            <button className="btn primary" disabled={status === client.status}>
+            <button className="btn" onClick={() => setStatus(currentStatus || client.status)}>Cancel</button>
+            <button className="btn primary" disabled={status === (currentStatus || client.status)} onClick={() => onStatusSave && onStatusSave(status)}>
               <Icon name="check"/> Save status change
             </button>
           </div>
