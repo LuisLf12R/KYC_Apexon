@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -69,12 +69,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/")
 @app.head("/")
-def banker_dashboard() -> HTMLResponse:
-    print("[DASHBOARD] render banker html")
-    html = build_banker_html({"sidecarUrl": API_BASE_URL})
-    return HTMLResponse(content=html, media_type="text/html")
+def root():
+    return RedirectResponse(url="/admin", status_code=302)
 
 
 @app.get("/admin", response_class=HTMLResponse)

@@ -1,6 +1,6 @@
 /* global React, Icon */
 
-const _BATCH_API = (window.__CONFIG__ || {}).apiUrl || "http://127.0.0.1:8000";
+const _BATCH_API = ((window.__CONFIG__ || {}).apiUrl != null) ? (window.__CONFIG__ || {}).apiUrl : "";
 
 function BatchView({ onBatchComplete }) {
   const { useState, useRef, useMemo, useCallback } = React;
