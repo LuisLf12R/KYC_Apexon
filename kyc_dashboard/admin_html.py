@@ -36,7 +36,7 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
     # Auth layer + App replacement (replaces the inline <script> in KYC Dashboard.html)
     auth_app = r"""
     const { useState, useEffect } = React;
-    const API = (window.__CONFIG__ || {}).apiUrl || "http://127.0.0.1:8000";
+    const API = ((window.__CONFIG__ || {}).apiUrl != null) ? (window.__CONFIG__ || {}).apiUrl : "";
 
     /* ── Login screen ── */
     function LoginView({ onLogin }) {

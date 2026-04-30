@@ -22,7 +22,7 @@ from kyc_dashboard.banker_html import build_banker_html
 from kyc_engine.engine import KYCComplianceEngine
 
 DATA_DIR = Path(tempfile.gettempdir()) / "kyc_data_clean"
-API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
+API_BASE_URL = os.getenv("API_BASE_URL", "")
 
 
 def _load_users() -> Dict[str, Dict[str, Any]]:

@@ -168,7 +168,7 @@ input, textarea, select { font:inherit; color:inherit; }
     react_code = r"""
 const { useState, useMemo, useCallback } = React;
 const INIT = window.__INITIAL_DATA__;
-const SIDECAR = INIT.sidecarUrl || "http://127.0.0.1:8000";
+const SIDECAR = (INIT.sidecarUrl != null) ? INIT.sidecarUrl : "";
 
 function Icon({ name, size = 14, color = "currentColor" }) {
   const s = { width: size, height: size };
