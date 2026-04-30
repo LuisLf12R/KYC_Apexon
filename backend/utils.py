@@ -116,22 +116,30 @@ def _format_results(
                 "desc": _safe(rule.get("description", ""))[:90],
             })
 
+        jur   = _safe(customer.get("jurisdiction", "—")).upper()
+        flags = [rule["name"] for rule in (reject_rules + review_rules)] or ["No compliance flags"]
+        aum_raw = _as_float(customer.get("aum") or customer.get("assets_under_management") or 0)
+        aum_str = f"{aum_raw:.1f}" if aum_raw else "0.0"
+
         cases.append({
-            "id":          cid,
-            "client":      display_name,
-            "ini":         ini,
-            "tier":        _safe(customer.get("risk_rating", "Standard")),
-            "type":        _safe(customer.get("entity_type", "Individual")),
-            "jurisdiction":_safe(customer.get("jurisdiction", "—")).upper(),
-            "rm":          "Officer — J. Marlow",
-            "status":      status,
-            "risk":        risk,
-            "riskScore":   score,
-            "sla":         sla,
-            "dimensions":  dimensions,
-            "rejectRules": reject_rules,
-            "reviewRules": review_rules,
-            "rationale":   _safe(r.get("rationale", ""))[:200],
+            "id":           cid,
+            "client":       display_name,
+            "ini":          ini,
+            "tier":         _safe(customer.get("risk_rating", "Standard")),
+            "type":         _safe(customer.get("entity_type", "Individual")).capitalize(),
+            "jurisdiction": jur,
+            "jurisdictions":[jur],
+            "rm":           "Officer — J. Marlow",
+            "status":       status,
+            "risk":         risk,
+            "riskScore":    score,
+            "aum":          aum_str,
+            "sla":          sla,
+            "flags":        flags,
+            "dimensions":   dimensions,
+            "rejectRules":  reject_rules,
+            "reviewRules":  review_rules,
+            "rationale":    _safe(r.get("rationale", ""))[:200],
         })
 
     total = len(cases)

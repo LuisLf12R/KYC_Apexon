@@ -33,7 +33,7 @@ function CaseDetail({ caseData, onBack, panels }) {
           </div>
           <h1 className="page-title">{c.client}</h1>
           <div className="page-sub">
-            {c.tier} · {c.type} · {c.jurisdiction} · RM {c.rm.split(" — ")[1]}
+            {c.tier} · {c.type} · {c.jurisdiction} · RM {(c.rm || "").split(" — ")[1] || c.rm}
           </div>
         </div>
         <div className="row-flex">
@@ -56,8 +56,8 @@ function CaseDetail({ caseData, onBack, panels }) {
         </div>
         <div className="kpi">
           <div className="kpi-label">Open flags</div>
-          <div className="kpi-value">{c.flags.length}</div>
-          <div className="kpi-sub">{c.flags[0]}</div>
+          <div className="kpi-value">{(c.flags || []).length}</div>
+          <div className="kpi-sub">{(c.flags || [])[0] || "—"}</div>
         </div>
       </div>
 
@@ -243,7 +243,7 @@ function ReconcilePanel({ client }) {
     { field: "Full legal name",  source: "Passport OCR",        ours: client.client,                  theirs: client.client,                match: true  },
     { field: "Date of birth",    source: "Passport OCR",        ours: "1968-04-12",                   theirs: "1968-04-12",                 match: true  },
     { field: "Domicile",         source: "Self-declared",       ours: client.jurisdiction,            theirs: client.jurisdiction,          match: true  },
-    { field: "Tax residences",   source: "CRS self-cert",       ours: client.jurisdictions.join(", "), theirs: "GB, CH, AE",                match: true  },
+    { field: "Tax residences",   source: "CRS self-cert",       ours: (client.jurisdictions || [client.jurisdiction]).join(", "), theirs: client.jurisdiction || "—", match: true  },
     { field: "Source of Wealth", source: "SPA + financials",    ours: "Founder exit (2019)",          theirs: "Founder exit (2019)",        match: true  },
     { field: "UBO ≥ 25%",        source: "Trust deed + PSC",    ours: "2 verified",                   theirs: "PSC pending",                match: false },
   ];
