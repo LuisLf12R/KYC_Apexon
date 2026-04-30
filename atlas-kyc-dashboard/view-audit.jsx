@@ -112,7 +112,7 @@ function AuditView({ search, logs: propLogs }) {
                     <td className="mono" style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{r.batchId || "—"}</td>
                     <td className="mono" style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{r.promptVersion || "—"}</td>
                     <td><span className="badge b-mute mono" style={{ fontSize: 10.5 }}>{r.ruleset}</span></td>
-                    <td className="mono" style={{ fontSize: 11, color: "var(--ink-4)" }}>{r.eventHash.slice(0, 8)}…</td>
+                    <td className="mono" style={{ fontSize: 11, color: "var(--ink-4)" }}>{(r.eventHash || "").slice(0, 8) || "—"}</td>
                   </tr>
                 ))}
               </tbody>

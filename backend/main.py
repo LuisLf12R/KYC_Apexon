@@ -361,19 +361,39 @@ def audit_trail(_: Dict[str, Any] = Depends(_require_session)) -> Dict[str, Any]
     print("[AUDIT] fetch")
     events = get_audit_events()
     logs = []
-    for e in events:
+    for i, e in enumerate(events):
+        action = e.get("action_type", "")
+        event_hash = e.get("event_hash", "") or ""
+        prev_hash  = events[i - 1].get("event_hash", "") if i > 0 else ""
+        next_hash  = events[i + 1].get("event_hash", "") if i < len(events) - 1 else ""
         logs.append({
-            "timestamp":   e.get("timestamp", ""),
-            "user":        e.get("username", ""),
-            "role":        e.get("role", ""),
-            "action":      e.get("action_type", ""),
-            "customer_id": e.get("customer_id"),
-            "batch_id":    e.get("batch_id"),
-            "status":      "success",
-            "description": _format_audit_description(e),
-            "event_hash":  e.get("event_hash", ""),
+            "id":            e.get("event_id", f"evt_{i:04d}"),
+            "timestamp":     e.get("timestamp", ""),
+            "user":          e.get("username", ""),
+            "role":          e.get("role", "analyst").capitalize(),
+            "action":        action,
+            "actionGroup":   _action_group(action),
+            "description":   _format_audit_description(e),
+            "customerId":    e.get("customer_id") or "",
+            "batchId":       e.get("batch_id") or "",
+            "promptVersion": "",
+            "ruleset":       "kyc-rules-v2.1",
+            "eventHash":     event_hash,
+            "prevHash":      prev_hash,
+            "nextHash":      next_hash,
+            "source":        "ui-app",
         })
     return {"logs": logs, "total": len(logs)}
+
+
+def _action_group(action: str) -> str:
+    if action in ("LOGIN", "LOGOUT"):
+        return "auth"
+    if action in ("APPROVE", "REJECT", "BATCH_RUN_COMPLETE"):
+        return "case"
+    if action in ("FILE_UPLOAD",):
+        return "system"
+    return "system"
 
 
 def _format_audit_description(event: dict) -> str:
