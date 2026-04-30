@@ -103,7 +103,7 @@ class MessageResponse(BaseModel):
 
 
 class KYCBatchRequest(BaseModel):
-    institution_id: str = Field(..., min_length=1)
+    institution_id: Optional[str] = None
 
 
 class KYCBatchResponse(BaseModel):
@@ -200,7 +200,7 @@ def health() -> Dict[str, str]:
 
 
 @app.get("/api/institutions")
-def institutions(_: Dict[str, Any] = Depends(_require_session)) -> list[dict[str, str]]:
+def institutions() -> list[dict[str, str]]:
     print("[INSTITUTIONS] fetch")
     return _get_institutions()
 
@@ -219,15 +219,11 @@ def kyc_batch(
         raise HTTPException(status_code=500, detail="customers dataset missing customer_id")
 
     filtered_df = customers_df.copy()
-    if "institution_id" in filtered_df.columns:
-        filtered_df = filtered_df[filtered_df["institution_id"].astype(str) == payload.institution_id]
-    elif "institution" in filtered_df.columns:
-        filtered_df = filtered_df[filtered_df["institution"].astype(str) == payload.institution_id]
-    else:
-        raise HTTPException(
-            status_code=400,
-            detail="customers dataset has no institution_id/institution column",
-        )
+    if payload.institution_id:
+        for col in ("institution_id", "institution"):
+            if col in filtered_df.columns:
+                filtered_df = filtered_df[filtered_df[col].astype(str) == payload.institution_id]
+                break
 
     customer_ids = filtered_df["customer_id"].dropna().astype(str).unique().tolist()
     if not customer_ids:

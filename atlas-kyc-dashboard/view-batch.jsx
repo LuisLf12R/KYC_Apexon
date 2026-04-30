@@ -65,7 +65,7 @@ function BatchView({ onBatchComplete }) {
 
   const runBatch = useCallback(async () => {
     const okFiles = files.filter(f => f.status === "ok");
-    if (!okFiles.length || !institutionId) return;
+    if (!okFiles.length) return;
     setRunning(true); setRunMsg("Running KYC evaluation…");
     try {
       const res = await fetch(_BATCH_API + "/api/kyc/batch", {
@@ -89,7 +89,7 @@ function BatchView({ onBatchComplete }) {
     return { files: files.length, ok: ok.length, rows: ok.reduce((a, b) => a + b.rows, 0) };
   }, [files]);
 
-  const canRun = !running && totals.ok > 0 && !!institutionId;
+  const canRun = !running && totals.ok > 0;
 
   return (
     <div className="batch-page">
