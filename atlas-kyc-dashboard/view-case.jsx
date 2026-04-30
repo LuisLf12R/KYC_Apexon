@@ -12,13 +12,13 @@ function CaseDetail({ caseData, onBack, panels }) {
   const [signoffA, setSignoffA] = useState(false);
   const [signoffB, setSignoffB] = useState(false);
 
-  const dimensions = [
-    { key: "identity",   title: "Identity verification", tone: "ok",   sub: "Passport verified · OCR 99.2%" },
-    { key: "aml",        title: "AML / PEP screening",   tone: "warn", sub: "Close associate match — review" },
-    { key: "ubo",        title: "Beneficial ownership",  tone: "warn", sub: "3 layers · PSC confirmation pending" },
-    { key: "sow",        title: "Source of Wealth",     tone: "ok",   sub: "Founder exit (2019) · documented" },
-    { key: "crs",        title: "CRS / FATCA",          tone: "warn", sub: "Tax residence: GB, CH, AE" },
-    { key: "monitoring", title: "Ongoing monitoring",   tone: "ok",   sub: "Annual + event-driven" },
+  const dimensions = (c.dimensions && c.dimensions.length > 0) ? c.dimensions : [
+    { key: "identity",   title: "Identity verification", tone: "ok",   sub: "No data" },
+    { key: "aml",        title: "AML / PEP screening",   tone: "warn", sub: "No data" },
+    { key: "ubo",        title: "Beneficial ownership",  tone: "warn", sub: "No data" },
+    { key: "sow",        title: "Source of Wealth",      tone: "ok",   sub: "No data" },
+    { key: "crs",        title: "CRS / FATCA",           tone: "warn", sub: "No data" },
+    { key: "monitoring", title: "Ongoing monitoring",    tone: "ok",   sub: "No data" },
   ];
 
   return (
@@ -98,12 +98,12 @@ function CaseDetail({ caseData, onBack, panels }) {
 
           {tab === "ubo" && (
             <>
-              <div className="section-h"><h3>Ownership structure</h3><span className="meta">3 layers · click a node</span></div>
-              <UBOGraph subject={c.client} ini={c.ini}/>
+              <div className="section-h"><h3>Ownership structure</h3><span className="meta">{(c.ubos || []).length} UBO{(c.ubos || []).length !== 1 ? "s" : ""} on record</span></div>
+              <UBOGraph subject={c.client} ini={c.ini} ubos={c.ubos || []}/>
             </>
           )}
 
-          {tab === "documents" && <DocumentsList/>}
+          {tab === "documents" && <DocumentsList documents={c.documents || []}/>}
           {tab === "reconcile" && <ReconcilePanel client={c}/>}
         </div>
 
@@ -166,59 +166,59 @@ function CaseDetail({ caseData, onBack, panels }) {
 /* ============================================================
    UBO Graph
    ============================================================ */
-function UBOGraph({ subject, ini }) {
-  const nodes = [
-    { id: "subject", x: 50, y: 14, t: "subject", b: subject,                s: "Settlor & UBO · GB",       pct: "" },
-    { id: "trust",   x: 50, y: 42, t: "",        b: "Family Trust (JE)",    s: "Discretionary · 2014",     pct: "" },
-    { id: "spv1",    x: 25, y: 72, t: "",        b: "Holding SPV (KY)",     s: "100% owned by Trust",      pct: "100%" },
-    { id: "spv2",    x: 75, y: 72, t: "flag",    b: "Investment SPV (CH)",  s: "PSC confirmation pending", pct: "100%" },
-  ];
-  const edges = [["subject", "trust"], ["trust", "spv1"], ["trust", "spv2"]];
-  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+function UBOGraph({ subject, ini, ubos }) {
+  if (!ubos || ubos.length === 0) {
+    return (
+      <div className="card">
+        <div className="card-pad" style={{ color: "var(--ink-4)", fontSize: 13 }}>No beneficial ownership data on file.</div>
+      </div>
+    );
+  }
   return (
-    <div className="ubo">
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none">
-        {edges.map(([a, b], i) => {
-          const A = byId[a], B = byId[b];
-          return (
-            <line key={i} x1={A.x} y1={A.y + 3} x2={B.x} y2={B.y - 3}
-                  stroke="var(--line-strong)" strokeWidth="0.2"
-                  vectorEffect="non-scaling-stroke"/>
-          );
-        })}
-      </svg>
-      {nodes.map(n => (
-        <div key={n.id} className={`node ${n.t}`} style={{ left: `${n.x}%`, top: `${n.y}%`, transform: "translate(-50%, -50%)" }}>
-          <b>{n.b} {n.pct && <span className="pct">{n.pct}</span>}</b>
-          <small>{n.s}</small>
+    <div className="card">
+      <div className="card-h"><h3>Beneficial owners</h3><span className="meta">{ubos.length} UBO{ubos.length !== 1 ? "s" : ""}</span></div>
+      {ubos.map((u, i) => (
+        <div className="flag-row" key={i} style={{ borderTop: i ? "1px solid var(--line)" : "0" }}>
+          <div className="left">
+            <div className={`ico ${u.isPep ? "bad" : ""}`}><Icon name={u.isPep ? "flag" : "users"}/></div>
+            <div>
+              <div className="t">{u.name || "Unknown"}{u.isPep ? " · PEP" : ""}</div>
+              <div className="s">{u.pct ? `${u.pct}% ownership` : ""}{ u.country ? ` · ${u.country}` : ""}{ u.verified ? ` · Verified ${u.verified}` : ""}</div>
+            </div>
+          </div>
+          <span className={`badge ${u.isPep ? "b-bad" : "b-ok"}`}><span className="dot"/>{u.isPep ? "PEP" : "Clear"}</span>
         </div>
       ))}
     </div>
   );
 }
 
-function DocumentsList() {
-  const docs = [
-    { n: "Passport — primary holder",        s: "Verified",      d: "01 Mar 2026", tone: "ok" },
-    { n: "Proof of address",                 s: "Verified",      d: "12 Apr 2026", tone: "ok" },
-    { n: "SPA — 2019 founder exit",          s: "Reviewed",      d: "22 Apr 2026", tone: "ok" },
-    { n: "Trust deed (Jersey)",              s: "Reviewed",      d: "11 Mar 2026", tone: "warn" },
-    { n: "PSC confirmation — Investment SPV", s: "Outstanding",   d: "—",           tone: "bad" },
-    { n: "CRS self-certification",           s: "Valid",         d: "12 Apr 2026", tone: "ok" },
-  ];
+function DocumentsList({ documents }) {
+  const docs = documents && documents.length > 0 ? documents : [];
+  const outstanding = docs.filter(d => (d.status || "").toLowerCase() === "outstanding" || (d.status || "").toLowerCase() === "expired").length;
+  const statusTone = (s) => {
+    const sl = (s || "").toLowerCase();
+    if (sl === "verified" || sl === "valid" || sl === "reviewed") return "ok";
+    if (sl === "outstanding" || sl === "expired") return "bad";
+    return "warn";
+  };
   return (
     <div className="card">
-      <div className="card-h"><h3>Documents</h3><span className="meta">6 on file · 1 outstanding</span></div>
+      <div className="card-h">
+        <h3>Documents</h3>
+        <span className="meta">{docs.length} on file{outstanding > 0 ? ` · ${outstanding} outstanding` : ""}</span>
+      </div>
+      {docs.length === 0 && <div className="card-pad" style={{ color: "var(--ink-4)", fontSize: 13 }}>No documents on file.</div>}
       {docs.map((d, i) => (
         <div className="flag-row" key={i} style={{ borderTop: i ? "1px solid var(--line)" : "0" }}>
           <div className="left">
             <div className="ico"><Icon name="file"/></div>
             <div>
-              <div className="t">{d.n}</div>
-              <div className="s">Updated {d.d}</div>
+              <div className="t">{d.name || d.type || "Document"}</div>
+              <div className="s">{d.type}{d.expiry ? ` · Expires ${d.expiry}` : ""}{d.issuer ? ` · ${d.issuer}` : ""}</div>
             </div>
           </div>
-          <span className={`badge ${d.tone === "ok" ? "b-ok" : d.tone === "warn" ? "b-warn" : "b-bad"}`}><span className="dot"/>{d.s}</span>
+          <span className={`badge b-${statusTone(d.status)}`}><span className="dot"/>{d.status || "Unknown"}</span>
         </div>
       ))}
     </div>
@@ -230,22 +230,27 @@ function DocumentsList() {
    ============================================================ */
 function ReconcilePanel({ client }) {
   const { useState, useRef } = React;
-  const [files, setFiles] = useState([
-    { n: "passport_2026.pdf",       k: "Identity",        s: "matched",   conf: 99 },
-    { n: "utility_bill_apr.pdf",    k: "Address",         s: "matched",   conf: 96 },
-    { n: "trust_deed_redacted.pdf", k: "Structure",       s: "review",    conf: 78 },
-  ]);
+  const initialFiles = (client.documents || []).map(d => ({
+    n: d.name || d.type || "Document",
+    k: d.type || "Document",
+    s: (d.status || "").toLowerCase() === "verified" || (d.status || "").toLowerCase() === "valid" ? "matched" :
+       (d.status || "").toLowerCase() === "outstanding" || (d.status || "").toLowerCase() === "expired" ? "review" : "matched",
+    conf: (d.status || "").toLowerCase() === "verified" ? 99 : (d.status || "").toLowerCase() === "valid" ? 95 : 78,
+  }));
+  const [files, setFiles] = useState(initialFiles);
   const [status, setStatus] = useState(client.status);
   const [drag, setDrag] = useState(false);
   const inputRef = useRef(null);
 
+  const uboCount = (client.ubos || []).length;
+  const verifiedUbos = (client.ubos || []).filter(u => u.verified).length;
   const reconciliations = [
-    { field: "Full legal name",  source: "Passport OCR",        ours: client.client,                  theirs: client.client,                match: true  },
-    { field: "Date of birth",    source: "Passport OCR",        ours: "1968-04-12",                   theirs: "1968-04-12",                 match: true  },
-    { field: "Domicile",         source: "Self-declared",       ours: client.jurisdiction,            theirs: client.jurisdiction,          match: true  },
-    { field: "Tax residences",   source: "CRS self-cert",       ours: (client.jurisdictions || [client.jurisdiction]).join(", "), theirs: client.jurisdiction || "—", match: true  },
-    { field: "Source of Wealth", source: "SPA + financials",    ours: "Founder exit (2019)",          theirs: "Founder exit (2019)",        match: true  },
-    { field: "UBO ≥ 25%",        source: "Trust deed + PSC",    ours: "2 verified",                   theirs: "PSC pending",                match: false },
+    { field: "Full legal name",  source: "On record",      ours: client.client,                                    theirs: client.client,                    match: true },
+    { field: "Date of birth",    source: "On record",      ours: client.dateOfBirth || "—",                        theirs: client.dateOfBirth || "—",        match: true },
+    { field: "Domicile",         source: "Self-declared",  ours: client.jurisdiction || "—",                       theirs: client.jurisdiction || "—",       match: true },
+    { field: "Tax residences",   source: "CRS self-cert",  ours: (client.jurisdictions || [client.jurisdiction]).join(", "), theirs: client.jurisdiction || "—", match: true },
+    { field: "Account opened",   source: "On record",      ours: client.accountOpenDate || "—",                    theirs: client.accountOpenDate || "—",    match: true },
+    { field: "UBO ≥ 25%",        source: "Ownership data", ours: `${verifiedUbos} verified`,                       theirs: uboCount > 0 ? `${uboCount} on file` : "None on file", match: verifiedUbos === uboCount && uboCount > 0 },
   ];
 
   const onDrop = (e) => {

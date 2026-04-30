@@ -5,7 +5,7 @@ import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from kyc_dashboard.sidecar import _as_float, _safe
@@ -34,11 +34,29 @@ def _load_temp_dfs() -> Dict[str, pd.DataFrame]:
     return dfs
 
 
+def _df_rows_for(df: pd.DataFrame, cid: str) -> List[Dict[str, Any]]:
+    """Return all rows matching customer_id as plain dicts."""
+    if df is None or df.empty or "customer_id" not in df.columns:
+        return []
+    mask = df["customer_id"].astype(str) == cid
+    return [
+        {k: ("" if (v != v or v is None) else str(v)) for k, v in row.items()}
+        for row in df[mask].to_dict("records")
+    ]
+
+
 def _format_results(
     results: List[Dict[str, Any]],
     customers_df: pd.DataFrame,
+    dfs: Optional[Dict[str, pd.DataFrame]] = None,
 ) -> Dict[str, Any]:
     """Convert raw engine result dicts to the React component data format."""
+    dfs = dfs or {}
+    docs_df  = dfs.get("documents",            pd.DataFrame())
+    ubo_df   = dfs.get("beneficial_ownership", pd.DataFrame())
+    idv_df   = dfs.get("id_verifications",     pd.DataFrame())
+    scr_df   = dfs.get("screenings",           pd.DataFrame())
+
     cases: List[Dict[str, Any]] = []
     pass_count = review_count = fail_count = 0
     total_score = 0.0
@@ -77,7 +95,7 @@ def _format_results(
         raw_name = ""
         for col in ["full_name", "customer_name", "name", "legal_name"]:
             v = customer.get(col)
-            if v and str(v).strip():
+            if v and str(v).strip() and str(v).strip().lower() != "nan":
                 raw_name = str(v).strip()
                 break
         display_name = raw_name or cid
@@ -119,27 +137,90 @@ def _format_results(
         jur   = _safe(customer.get("jurisdiction", "—")).upper()
         flags = [rule["name"] for rule in (reject_rules + review_rules)] or ["No compliance flags"]
         aum_raw = _as_float(customer.get("aum") or customer.get("assets_under_management") or 0)
-        aum_str = f"{aum_raw:.1f}" if aum_raw else "0.0"
+        aum_str = f"{aum_raw:.1f}" if aum_raw else "N/A"
+
+        # ── Real documents from documents_clean.csv ──────────────────────────
+        raw_docs = _df_rows_for(docs_df, cid)
+        documents = [
+            {
+                "name":      d.get("document_reference") or d.get("document_type", "Document"),
+                "type":      d.get("document_type", "").replace("_", " ").title(),
+                "status":    d.get("document_status", "Unknown"),
+                "issueDate": d.get("issue_date", ""),
+                "expiry":    d.get("expiry_date", ""),
+                "issuer":    d.get("issuing_entity", ""),
+            }
+            for d in raw_docs
+        ]
+
+        # ── Real UBO data from beneficial_ownership_clean.csv ─────────────────
+        raw_ubos = _df_rows_for(ubo_df, cid)
+        ubos = [
+            {
+                "name":       u.get("ubo_name", "Unknown"),
+                "pct":        u.get("ownership_percentage", ""),
+                "country":    u.get("country_of_residence", ""),
+                "isPep":      str(u.get("is_pep", "False")).lower() in ("true", "1", "yes"),
+                "verified":   u.get("verification_date", ""),
+            }
+            for u in raw_ubos
+        ]
+
+        # ── Real ID verification ──────────────────────────────────────────────
+        raw_idv = _df_rows_for(idv_df, cid)
+        id_verifications = [
+            {
+                "docType":    v.get("document_type", ""),
+                "docNumber":  v.get("document_number", ""),
+                "country":    v.get("issuing_country", ""),
+                "expiry":     v.get("expiry_date", ""),
+                "status":     v.get("verification_status", ""),
+                "date":       v.get("verification_date", ""),
+            }
+            for v in raw_idv
+        ]
+
+        # ── Real screening results ────────────────────────────────────────────
+        raw_scr = _df_rows_for(scr_df, cid)
+        screenings = [
+            {
+                "date":       s.get("screening_date", ""),
+                "result":     s.get("screening_result", ""),
+                "resolution": s.get("resolution_status", ""),
+                "matchedName":s.get("matched_name", ""),
+                "list":       s.get("matched_list", ""),
+                "score":      s.get("match_score", ""),
+            }
+            for s in raw_scr
+        ]
 
         cases.append({
-            "id":           cid,
-            "client":       display_name,
-            "ini":          ini,
-            "tier":         _safe(customer.get("risk_rating", "Standard")),
-            "type":         _safe(customer.get("entity_type", "Individual")).capitalize(),
-            "jurisdiction": jur,
-            "jurisdictions":[jur],
-            "rm":           "Officer — J. Marlow",
-            "status":       status,
-            "risk":         risk,
-            "riskScore":    score,
-            "aum":          aum_str,
-            "sla":          sla,
-            "flags":        flags,
-            "dimensions":   dimensions,
-            "rejectRules":  reject_rules,
-            "reviewRules":  review_rules,
-            "rationale":    _safe(r.get("rationale", ""))[:200],
+            "id":               cid,
+            "client":           display_name,
+            "ini":              ini,
+            "tier":             _safe(customer.get("risk_rating", "Standard")),
+            "type":             _safe(customer.get("entity_type", "Individual")).capitalize(),
+            "jurisdiction":     jur,
+            "jurisdictions":    [jur],
+            "countryOfOrigin":  _safe(customer.get("country_of_origin", jur)),
+            "dateOfBirth":      _safe(customer.get("date_of_birth", "")),
+            "accountOpenDate":  _safe(customer.get("account_open_date", "")),
+            "lastKycReview":    _safe(customer.get("last_kyc_review_date", "")),
+            "rm":               "Compliance Officer",
+            "status":           status,
+            "risk":             risk,
+            "riskScore":        score,
+            "aum":              aum_str,
+            "sla":              sla,
+            "flags":            flags,
+            "dimensions":       dimensions,
+            "rejectRules":      reject_rules,
+            "reviewRules":      review_rules,
+            "rationale":        _safe(r.get("rationale", ""))[:300],
+            "documents":        documents,
+            "ubos":             ubos,
+            "idVerifications":  id_verifications,
+            "screenings":       screenings,
         })
 
     total = len(cases)

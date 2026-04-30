@@ -39,17 +39,17 @@ function AuditView({ search, logs: propLogs }) {
         <div className="kpi">
           <div className="kpi-label"><Icon name="shield"/> Hash chain</div>
           <div className="kpi-value" style={{ color: "var(--ok)", fontSize: 24 }}>Intact</div>
-          <div className="kpi-sub">Last verified 12 min ago · {64} blocks</div>
+          <div className="kpi-sub">{rows.length} block{rows.length !== 1 ? "s" : ""} · append-only</div>
         </div>
         <div className="kpi">
-          <div className="kpi-label"><Icon name="users"/> Active sessions</div>
-          <div className="kpi-value">23</div>
-          <div className="kpi-sub">9 analysts · 4 admins · 10 RM</div>
+          <div className="kpi-label"><Icon name="users"/> Total events</div>
+          <div className="kpi-value">{rows.length}</div>
+          <div className="kpi-sub">this session</div>
         </div>
         <div className="kpi">
-          <div className="kpi-label"><Icon name="flag"/> Failed authn (24h)</div>
-          <div className="kpi-value">2</div>
-          <div className="kpi-sub">0 lockouts · 0 anomalies</div>
+          <div className="kpi-label"><Icon name="flag"/> Filtered results</div>
+          <div className="kpi-value">{filtered.length}</div>
+          <div className="kpi-sub">matching current filters</div>
         </div>
         <div className="kpi">
           <div className="kpi-label"><Icon name="audit"/> Retention</div>

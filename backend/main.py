@@ -237,7 +237,7 @@ def kyc_batch(
         except Exception as ex:
             print(f"[KYC_BATCH] evaluation error customer_id={cid!r}: {ex}")
 
-    formatted = _format_results(evaluations, customers_df)
+    formatted = _format_results(evaluations, customers_df, dfs)
     flagged = sum(1 for r in evaluations if str(r.get("disposition", "")).upper() != "PASS")
     get_logger().log("BATCH_RUN_COMPLETE", customer_id=None, details={
         "institution_id": payload.institution_id,
@@ -285,7 +285,7 @@ def kyc_customer(
         institution_id = str(customer_row.get("institution_id") or "").strip() or None
 
     result = engine.evaluate_customer(str(customer_id), institution_id=institution_id)
-    formatted = _format_results([result], customers_df)
+    formatted = _format_results([result], customers_df, dfs)
     cases = formatted.get("cases", [])
     if not cases:
         raise HTTPException(status_code=500, detail="Unable to format customer result")
@@ -460,7 +460,7 @@ def run_batch(payload: RunBatchRequest) -> Dict[str, Any]:
         except Exception as ex:
             print(f"[RUN_BATCH] skip customer_id={cid!r}: {ex}")
 
-    formatted = _format_results(evaluations, customers_df)
+    formatted = _format_results(evaluations, customers_df, dfs)
     for case in formatted.get("cases", []):
         cid = case.get("id")
         if not cid:

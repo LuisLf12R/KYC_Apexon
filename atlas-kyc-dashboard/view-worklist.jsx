@@ -44,7 +44,7 @@ function WorklistView({ onOpenCase, search, cases: propCases, kpiData, onApprove
         <div>
           <div className="eyebrow">Worklist</div>
           <h1 className="page-title">KYC case queue</h1>
-          <div className="page-sub">High Net Worth Individuals · Mon, 27 Apr 2026</div>
+          <div className="page-sub">High Net Worth Individuals · {new Date().toLocaleDateString("en-GB", { weekday: "short", day: "2-digit", month: "short", year: "numeric" })}</div>
         </div>
       </div>
 
