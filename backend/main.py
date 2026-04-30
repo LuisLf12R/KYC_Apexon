@@ -208,7 +208,6 @@ def institutions(_: Dict[str, Any] = Depends(_require_session)) -> list[dict[str
 @app.post("/api/kyc/batch", response_model=KYCBatchResponse)
 def kyc_batch(
     payload: KYCBatchRequest,
-    _: Dict[str, Any] = Depends(_require_session),
 ) -> KYCBatchResponse:
     print(f"[KYC_BATCH] institution_id={payload.institution_id!r}")
     dfs = _load_temp_dfs()
@@ -334,9 +333,8 @@ def reject_case(
 async def upload_files(
     files: List[UploadFile] = File(...),
     dataset_type: Optional[str] = None,
-    session: Dict[str, Any] = Depends(_require_session),
 ) -> UploadResponse:
-    print(f"[UPLOAD] {len(files)} file(s) from user={session.get('username')!r}")
+    print(f"[UPLOAD] {len(files)} file(s)")
     results = []
     for f in files:
         raw = await f.read()

@@ -129,12 +129,17 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
         setAuthed(false); setAuthToken(null);
       };
 
+      const handleRoleChange = (newRole) => {
+        setAuthRole(newRole);
+        localStorage.setItem("auth_role", newRole);
+      };
+
       if (!authed) return <LoginView onLogin={handleLogin}/>;
 
-      return <AuthenticatedApp role={authRole} onLogout={handleLogout}/>;
+      return <AuthenticatedApp role={authRole} onLogout={handleLogout} onRoleChange={handleRoleChange}/>;
     }
 
-    function AuthenticatedApp({ role, onLogout }) {
+    function AuthenticatedApp({ role, onLogout, onRoleChange }) {
       const [tweaks, setTweak] = useTweaks({ ...TWEAK_DEFAULTS, role });
       const [view,       setView]       = useState(role === "admin" ? "audit" : "worklist");
       const [search,     setSearch]     = useState("");
@@ -149,12 +154,9 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
         document.documentElement.setAttribute("data-density", tweaks.density);
       }, [tweaks.theme, tweaks.density]);
 
-      const loadCases = React.useCallback(async (authToken) => {
+      const loadCases = React.useCallback(async () => {
         try {
-          // Fetch first available institution then run batch
-          const instRes = await fetch(API + "/api/institutions", {
-            headers: { Authorization: `Bearer ${authToken}` },
-          });
+          const instRes = await fetch(API + "/api/institutions");
           let instId = "bank_001";
           if (instRes.ok) {
             const instList = await instRes.json();
@@ -162,7 +164,7 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
           }
           const res = await fetch(API + "/api/kyc/batch", {
             method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ institution_id: instId }),
           });
           if (res.ok) {
@@ -194,9 +196,7 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
 
       // Reload cases whenever the worklist view becomes active
       useEffect(() => {
-        if (view === "worklist") {
-          loadCases(localStorage.getItem("auth_token"));
-        }
+        if (view === "worklist") loadCases();
       }, [view, loadCases]);
 
       // Reload audit log whenever the audit view becomes active
@@ -211,7 +211,7 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
           headers: { Authorization: `Bearer ${tok}` },
         }).then(res => {
           if (!res.ok) { console.error("Approve failed", res.status); return; }
-          return loadCases(tok);
+          return loadCases();
         }).catch(err => console.error("Approve error:", err));
       }, [loadCases, API]);
 
@@ -222,7 +222,7 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
           headers: { Authorization: `Bearer ${tok}` },
         }).then(res => {
           if (!res.ok) { console.error("Reject failed", res.status); return; }
-          return loadCases(tok);
+          return loadCases();
         }).catch(err => console.error("Reject error:", err));
       }, [loadCases, API]);
 
@@ -245,10 +245,15 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
         system:   ["Administration", "System information"],
       };
 
+      const handleSidebarRoleChange = (newRole) => {
+        if (onRoleChange) onRoleChange(newRole);
+        setView(newRole === "admin" ? "audit" : "worklist");
+      };
+
       return (
         <div className="app" data-sidebar={tweaks.sidebar} data-role={role}>
           <Sidebar active={view} onNav={handleNav} collapsed={tweaks.sidebar === "collapsed"}
-                   role={role} onRoleChange={onLogout}/>
+                   role={role} onRoleChange={handleSidebarRoleChange}/>
           <div className="main">
             <Topbar title="" crumbs={crumbsByView[view]} search={search} setSearch={setSearch}
                     role={role} view={view}/>
