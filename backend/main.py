@@ -70,6 +70,7 @@ app.add_middleware(
 )
 
 @app.get("/", response_class=HTMLResponse)
+@app.head("/")
 def banker_dashboard() -> HTMLResponse:
     print("[DASHBOARD] render banker html")
     html = build_banker_html({"sidecarUrl": API_BASE_URL})
