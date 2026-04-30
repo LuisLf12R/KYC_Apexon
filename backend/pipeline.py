@@ -54,17 +54,38 @@ def _detect_dataset_type(df: pd.DataFrame, filename: str) -> str:
     """Heuristic dataset type detection from column names and filename."""
     cols = set(df.columns)
     fname = filename.lower()
-
-    if "screening" in fname or "aml" in fname or cols & {"screening_id", "hit_count", "pep_flag"}:
+    
+    # Phase 1: Filename-based detection (highest priority)
+    # Check for explicit dataset type keywords in filename first
+    if "customer" in fname:
+        return "customers"
+    if "screen" in fname and "screening" not in fname:
+        # If filename has "screen" but not "screening", likely a transaction
+        return "screenings"  
+    if "screening" in fname:
         return "screenings"
-    if "transaction" in fname or "txn" in fname or cols & {"transaction_id", "transaction_amount"}:
+    if "transaction" in fname or "txn" in fname:
         return "transactions"
-    if "document" in fname or "proof" in fname or cols & {"document_id", "document_type", "expiry_date"}:
+    if "document" in fname or "proof" in fname:
         return "documents"
-    if "beneficial" in fname or "ubo" in fname or "ownership" in fname or cols & {"beneficial_owner", "ownership_pct"}:
+    if "beneficial" in fname or "ubo" in fname or "ownership" in fname:
         return "beneficial_ownership"
-    if "verification" in fname or "id_ver" in fname or cols & {"verification_id", "id_number"}:
+    if "verification" in fname or "id_ver" in fname or "id_verification" in fname:
         return "id_verifications"
+    
+    # Phase 2: Column-based fingerprinting (fallback)
+    if cols & {"screening_id", "hit_count", "pep_flag"}:
+        return "screenings"
+    if cols & {"transaction_id", "transaction_amount"}:
+        return "transactions"
+    if cols & {"document_id", "document_type", "expiry_date"}:
+        return "documents"
+    if cols & {"beneficial_owner", "ownership_pct"}:
+        return "beneficial_ownership"
+    if cols & {"verification_id", "id_number"}:
+        return "id_verifications"
+    
+    # Phase 3: Default fallback
     return "customers"
 
 

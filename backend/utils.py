@@ -24,6 +24,8 @@ def _load_temp_dfs() -> Dict[str, pd.DataFrame]:
         "beneficial_ownership_clean.csv": "beneficial_ownership",
     }
     dfs: Dict[str, pd.DataFrame] = {}
+    
+    # Load known files first
     for fname, key in name_map.items():
         p = _TEMP_DIR / fname
         if p.exists():
@@ -31,6 +33,26 @@ def _load_temp_dfs() -> Dict[str, pd.DataFrame]:
                 dfs[key] = pd.read_csv(p)
             except Exception as ex:
                 log.warning("Could not load %s: %s", fname, ex)
+    
+    # Scan for additional *_clean.csv files not in the fixed list
+    for p in _TEMP_DIR.glob("*_clean.csv"):
+        if p.name not in name_map:
+            try:
+                # Extract dataset type from filename stem
+                key = p.stem.replace("_clean", "")
+                dfs[key] = pd.read_csv(p)
+                log.info("Loaded additional dataset from %s as %s", p.name, key)
+            except Exception as ex:
+                log.warning("Could not load additional file %s: %s", p.name, ex)
+    
+    # Fallback: If no customers dataset found, look for any dataset with customer_id column
+    if "customers" not in dfs:
+        for key, df in dfs.items():
+            if "customer_id" in df.columns:
+                dfs["customers"] = df
+                log.info("Promoted %s dataset as customers (found customer_id column)", key)
+                break
+    
     return dfs
 
 

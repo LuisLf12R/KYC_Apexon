@@ -29,12 +29,15 @@ function BatchView({ onBatchComplete }) {
       .catch(() => {});
   }, [token]);
 
-  const uploadFile = useCallback(async (file) => {
+const uploadFile = useCallback(async (file, forcedType = null) => {
     const id = `f_${Date.now()}_${Math.random()}`;
-    setFiles(prev => [...prev, { id, name: file.name, size: file.size, status: "uploading", rows: 0, datasetType: null, message: "" }]);
+    setFiles(prev => [...prev, { id, name: file.name, size: file.size, status: "uploading", rows: 0, datasetType: null, message: "", rawFile: file }]);
 
     const form = new FormData();
     form.append("files", file);
+    if (forcedType) {
+      form.append("dataset_type", forcedType);
+    }
     try {
       const res = await fetch(_BATCH_API + "/api/upload", {
         method: "POST",
@@ -194,7 +197,44 @@ function BatchView({ onBatchComplete }) {
                     </div>
                   </td>
                   <td className="mono" style={{ fontSize: 12, color: "var(--ink-3)" }}>{prettySize(f.size)}</td>
-                  <td style={{ fontSize: 12 }}>{f.datasetType || "—"}</td>
+                  <td style={{ fontSize: 12 }}>
+                    {f.status === "uploading" ? (
+                      <span>Processing...</span>
+                    ) : (
+                      <select
+                        value={f.datasetType || ""}
+                        onChange={e => {
+                          // Update the dataset type in the UI (but don't re-upload)
+                          setFiles(prev => prev.map(file => 
+                            file.id === f.id ? { ...file, datasetType: e.target.value } : file
+                          ));
+                          // If user changed the type, re-upload with the new type
+                          if (f.rawFile && e.target.value) {
+                            uploadFile(f.rawFile, e.target.value);
+                          }
+                        }}
+                        style={{
+                          height: 26, 
+                          padding: "0 8px", 
+                          border: "1px solid var(--line)",
+                          borderRadius: 4, 
+                          background: "var(--bg)",
+                          fontSize: 12,
+                          color: "var(--ink)",
+                          cursor: "pointer",
+                          minWidth: 120,
+                        }}
+                      >
+                        <option value="">Auto-detect</option>
+                        <option value="customers">Customers</option>
+                        <option value="screenings">Screenings</option>
+                        <option value="id_verifications">ID Verifications</option>
+                        <option value="transactions">Transactions</option>
+                        <option value="documents">Documents</option>
+                        <option value="beneficial_ownership">Beneficial Ownership</option>
+                      </select>
+                    )}
+                  </td>
                   <td className="mono tnum">{f.rows > 0 ? f.rows.toLocaleString() : "—"}</td>
                   <td>
                     {f.status === "uploading" && <span className="badge b-accent"><span className="dot pulse"/>uploading</span>}
