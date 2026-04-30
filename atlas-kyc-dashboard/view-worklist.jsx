@@ -7,7 +7,11 @@
 function fmtAum(v) {
   const n = parseFloat(v);
   if (!v || isNaN(n) || n === 0) return "—";
-  return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "M";
+  if (n >= 1e12) return "$" + (n / 1e12).toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "T";
+  if (n >= 1e9)  return "$" + (n / 1e9).toLocaleString("en-US",  { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "B";
+  if (n >= 1e6)  return "$" + (n / 1e6).toLocaleString("en-US",  { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "M";
+  if (n >= 1e3)  return "$" + (n / 1e3).toLocaleString("en-US",  { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "K";
+  return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 }
 
 function WorklistView({ onOpenCase, cases: propCases, kpiData, onApprove, onReject }) {

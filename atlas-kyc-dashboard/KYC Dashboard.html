@@ -75,7 +75,8 @@
       useEffect(() => {
         if (view !== "audit") return;
         const token = localStorage.getItem("auth_token") || "";
-        fetch("/api/audit", { headers: { Authorization: `Bearer ${token}` } })
+        const apiBase = (window.__CONFIG__ || {}).apiUrl || "";
+        fetch(apiBase + "/api/audit", { headers: { Authorization: `Bearer ${token}` } })
           .then(r => r.ok ? r.json() : { logs: [] })
           .then(data => setAuditLogs(Array.isArray(data.logs) ? data.logs : []))
           .catch(() => setAuditLogs([]));
@@ -110,7 +111,7 @@
                 {view === "worklist"  && <WorklistView  search={search} onOpenCase={openCase}/>}
                 {view === "rm"        && <RMView        search={search} onOpenCase={openCase}/>}
                 {view === "case"      && <CaseDetail    caseData={activeCase || MOCK.cases[0]} onBack={back} panels={panels} setPanels={() => {}}/>}
-                {view === "batch"     && <BatchView/>}
+                {view === "batch"     && <BatchView     onBatchComplete={() => setAuditLogs(null)}/>}
                 {view === "audit"     && <AuditView     search={search} logs={auditLogs}/>}
                 {view === "ruleset"   && <RulesetView/>}
                 {view === "system"    && <SystemView/>}

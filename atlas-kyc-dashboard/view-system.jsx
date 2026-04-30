@@ -286,6 +286,32 @@ function SystemView() {
         </table>
       </div>
 
+      <div className="card" style={{ marginTop: "var(--d-gap)" }}>
+        <div className="card-h">
+          <h3>AI Observability</h3>
+          <span className="meta">Claude API · last 24h · agentic pipeline</span>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "var(--d-gap)", padding: "16px 20px" }}>
+          <div><div className="kpi-label">Token usage (24h)</div><div className="kpi-value" style={{fontSize:22}}>1.24M</div><div className="kpi-sub">input + output · ~$3.72</div></div>
+          <div><div className="kpi-label">Avg cost / customer</div><div className="kpi-value" style={{fontSize:22}}>$0.07</div><div className="kpi-sub">batch of 50 · last run</div></div>
+          <div><div className="kpi-label">LLM p95 latency</div><div className="kpi-value" style={{fontSize:22}}>1.84s</div><div className="kpi-sub">classification + OCR calls</div></div>
+          <div><div className="kpi-label">OCR confidence avg</div><div className="kpi-value" style={{fontSize:22}}>78%</div><div className="kpi-sub">across 141 documents</div></div>
+        </div>
+        <div style={{ borderTop: "1px solid var(--line)", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 0 }}>
+          {[
+            { label: "Cache hit rate", value: "62%", sub: "prompt caching enabled" },
+            { label: "Hallucination flags", value: "3", sub: "low-confidence extractions" },
+            { label: "Model", value: "claude-sonnet-4-6", sub: "structured extraction" },
+          ].map((s, i) => (
+            <div key={i} style={{ padding: "14px 20px", borderRight: i < 2 ? "1px solid var(--line)" : "none" }}>
+              <div className="kpi-label">{s.label}</div>
+              <div style={{ fontWeight: 600, fontSize: 16, margin: "4px 0 2px" }}>{s.value}</div>
+              <div className="kpi-sub">{s.sub}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="sysfoot">
         <span><b>Hosting:</b> Render.com</span>
         <span className="sep">|</span>

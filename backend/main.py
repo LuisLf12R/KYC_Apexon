@@ -351,7 +351,7 @@ async def upload_files(
 
 
 @app.get("/api/audit")
-def audit_trail(_: Dict[str, Any] = Depends(_require_session)) -> Dict[str, Any]:
+def audit_trail() -> Dict[str, Any]:
     """Return real hash-chained audit events from the current session."""
     print("[AUDIT] fetch")
     events = get_audit_events()

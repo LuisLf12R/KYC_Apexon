@@ -3,6 +3,16 @@
 /* ============================================================
    View D — Case Detail (HNWI deep-dive) — decluttered.
    ============================================================ */
+function fmtAum(v) {
+  const n = parseFloat(v);
+  if (!v || isNaN(n) || n === 0) return "—";
+  if (n >= 1e12) return "$" + (n / 1e12).toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "T";
+  if (n >= 1e9)  return "$" + (n / 1e9).toLocaleString("en-US",  { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "B";
+  if (n >= 1e6)  return "$" + (n / 1e6).toLocaleString("en-US",  { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "M";
+  if (n >= 1e3)  return "$" + (n / 1e3).toLocaleString("en-US",  { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "K";
+  return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
+
 function CaseDetail({ caseData, onBack, panels, onApprove, onReject, onStatusChange }) {
   const { useState } = React;
   const c = caseData || MOCK.cases[0];
@@ -77,7 +87,7 @@ function CaseDetail({ caseData, onBack, panels, onApprove, onReject, onStatusCha
         </div>
         <div className="kpi">
           <div className="kpi-label">Assets under mgmt.</div>
-          <div className="kpi-value">{!isNaN(parseFloat(c.aum)) && parseFloat(c.aum) > 0 ? `$${parseFloat(c.aum).toFixed(1)}M` : "—"}</div>
+          <div className="kpi-value">{fmtAum(c.aum)}</div>
           <div className="kpi-sub">Across 3 portfolios</div>
         </div>
         <div className="kpi">
