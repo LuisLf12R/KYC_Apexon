@@ -142,7 +142,7 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
     function AuthenticatedApp({ role, onLogout, onRoleChange }) {
       const [tweaks, setTweak] = useTweaks({ ...TWEAK_DEFAULTS, role });
       const [view,       setView]       = useState(role === "admin" ? "audit" : "worklist");
-      const [search,     setSearch]     = useState("");
+      const [search,     setSearch]     = useState(""); // kept for view-level use
       const [activeCase, setActiveCase] = useState(null);
       const [summary,    setSummary]    = useState({});
       const [cases,      setCases]      = useState(null);
@@ -193,10 +193,21 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
         }
       }, [API]);
 
+      const logEvent = React.useCallback(async (action, description, customerId, details) => {
+        try {
+          await fetch(API + "/api/audit/log", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action, description, customer_id: customerId || null, details: details || {} }),
+          });
+        } catch (_) {}
+      }, []);
+
       const handleNav = React.useCallback((newView) => {
         if (newView === "audit") loadAudit();
         setView(newView);
-      }, [loadAudit]);
+        logEvent("NAV_" + newView.toUpperCase(), `Navigated to ${newView}`);
+      }, [loadAudit, logEvent]);
 
       // Reload cases whenever the worklist view becomes active
       useEffect(() => {
@@ -207,6 +218,11 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
       useEffect(() => {
         if (view === "audit") loadAudit();
       }, [view, loadAudit]);
+
+      const handleStatusChange = React.useCallback((caseId, newStatus) => {
+        setCases(prev => prev ? prev.map(c => c.id === caseId ? { ...c, status: newStatus } : c) : prev);
+        logEvent("STATUS_CHANGE", `Status changed to ${newStatus} for ${caseId}`, caseId, { new_status: newStatus });
+      }, [logEvent]);
 
       const handleApprove = React.useCallback((caseId) => {
         const tok = localStorage.getItem("auth_token");
@@ -230,7 +246,11 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
         }).catch(err => console.error("Reject error:", err));
       }, [loadCases, API]);
 
-      const openCase = (c) => { setActiveCase(c); setView("case"); };
+      const openCase = (c) => {
+        setActiveCase(c);
+        setView("case");
+        logEvent("VIEW_CASE", `Viewed case for ${c.client}`, c.id, { client: c.client, risk: c.risk, tier: c.tier });
+      };
       const back = () => setView("worklist");
 
       const panels = {
@@ -259,20 +279,18 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
           <Sidebar active={view} onNav={handleNav} collapsed={tweaks.sidebar === "collapsed"}
                    role={role} onRoleChange={handleSidebarRoleChange} casesCount={cases ? cases.length : null}/>
           <div className="main">
-            <Topbar title="" crumbs={crumbsByView[view]} search={search} setSearch={setSearch}
-                    role={role} view={view}/>
+            <Topbar title="" crumbs={crumbsByView[view]} role={role} view={view}/>
             <div className="content">
               <div className="content-wide">
                 {view === "worklist" && (
                   <WorklistView
-                    search={search}
                     onOpenCase={openCase}
                     cases={cases}
                     kpiData={Object.keys(kpis).length ? kpis : null}
                   />
                 )}
-                {view === "rm"       && <RMView        search={search} cases={cases} onOpenCase={openCase}/>}
-                {view === "case"     && <CaseDetail    caseData={activeCase || MOCK.cases[0]} onBack={back} panels={panels} setPanels={()=>{}} onApprove={handleApprove} onReject={handleReject}/>}
+                {view === "rm"       && <RMView cases={cases} onOpenCase={openCase}/>}
+                {view === "case"     && <CaseDetail    caseData={activeCase || MOCK.cases[0]} onBack={back} panels={panels} setPanels={()=>{}} onApprove={handleApprove} onReject={handleReject} onStatusChange={handleStatusChange}/>}
                 {view === "batch" && (
                   <BatchView onBatchComplete={(newCases, newSummary) => {
                     setCases(newCases);
@@ -280,7 +298,7 @@ def build_unified_dashboard_html(config: Dict[str, Any]) -> str:
                     setView("worklist");
                   }}/>
                 )}
-                {view === "audit" && <AuditView search={search} logs={auditLogs}/>}
+                {view === "audit" && <AuditView search="" logs={auditLogs}/>}
                 {view === "ruleset"  && <RulesetView/>}
                 {view === "system"   && <SystemView/>}
               </div>

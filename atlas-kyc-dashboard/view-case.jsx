@@ -3,10 +3,21 @@
 /* ============================================================
    View D — Case Detail (HNWI deep-dive) — decluttered.
    ============================================================ */
-function CaseDetail({ caseData, onBack, panels, onApprove, onReject }) {
+function CaseDetail({ caseData, onBack, panels, onApprove, onReject, onStatusChange }) {
   const { useState } = React;
   const c = caseData || MOCK.cases[0];
   const [tab, setTab] = useState("reconcile");
+
+  const switchTab = (newTab) => {
+    setTab(newTab);
+    try {
+      fetch("/api/audit/log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "CASE_TAB_SWITCH", description: `Switched to ${newTab} tab`, customer_id: c.id, details: { tab: newTab } }),
+      });
+    } catch (_) {}
+  };
   const [note, setNote] = useState("");
   const [decision, setDecision] = useState(null);
   const [signoffA, setSignoffA] = useState(false);
@@ -22,6 +33,7 @@ function CaseDetail({ caseData, onBack, panels, onApprove, onReject }) {
     setResolvedStatus(newStatus);
     setStatusSaved(true);
     setTimeout(() => setStatusSaved(false), 3000);
+    if (onStatusChange) onStatusChange(c.id, newStatus);
     if (newStatus === "Cleared" && onApprove) onApprove(c.id);
     else if (newStatus === "Escalated" && onReject) onReject(c.id);
   };
@@ -65,7 +77,7 @@ function CaseDetail({ caseData, onBack, panels, onApprove, onReject }) {
         </div>
         <div className="kpi">
           <div className="kpi-label">Assets under mgmt.</div>
-          <div className="kpi-value">${c.aum}M</div>
+          <div className="kpi-value">{!isNaN(parseFloat(c.aum)) && parseFloat(c.aum) > 0 ? `$${parseFloat(c.aum).toFixed(1)}M` : "—"}</div>
           <div className="kpi-sub">Across 3 portfolios</div>
         </div>
         <div className="kpi">
@@ -76,14 +88,14 @@ function CaseDetail({ caseData, onBack, panels, onApprove, onReject }) {
       </div>
 
       <div className="tabs tabs-priority">
-        <button className="tab-primary" aria-current={tab === "reconcile"} onClick={() => setTab("reconcile")}>
+        <button className="tab-primary" aria-current={tab === "reconcile"} onClick={() => switchTab("reconcile")}>
           <Icon name="check"/> Reconcile &amp; status
           <span className="tab-pill">3 to review</span>
         </button>
         <span className="tabs-divider"/>
-        <button className="tab-secondary" aria-current={tab === "overview"} onClick={() => setTab("overview")}>Overview</button>
-        <button className="tab-secondary" aria-current={tab === "ubo"} onClick={() => setTab("ubo")}>Ownership</button>
-        <button className="tab-secondary" aria-current={tab === "documents"} onClick={() => setTab("documents")}>Documents</button>
+        <button className="tab-secondary" aria-current={tab === "overview"} onClick={() => switchTab("overview")}>Overview</button>
+        <button className="tab-secondary" aria-current={tab === "ubo"} onClick={() => switchTab("ubo")}>Ownership</button>
+        <button className="tab-secondary" aria-current={tab === "documents"} onClick={() => switchTab("documents")}>Documents</button>
       </div>
 
       <div className="detail-grid">
@@ -248,38 +260,46 @@ function DocPreviewModal({ doc, onClose }) {
           </div>
         </div>
 
-        <div style={{ background: "var(--bg-sunken)", padding: "36px 24px", textAlign: "center", borderBottom: "1px solid var(--line)" }}>
-          <div style={{ width: 72, height: 90, margin: "0 auto 14px", background: "var(--bg)", borderRadius: 6, border: "1px solid var(--line)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.06)" }}>
-            <Icon name="file" size={28}/>
+        <div style={{ background: "var(--bg-sunken)", padding: "20px 22px", borderBottom: "1px solid var(--line)" }}>
+          <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+            <div style={{ width: 52, height: 66, background: "var(--bg)", borderRadius: 6, border: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.06)", flexShrink: 0 }}>
+              <Icon name="file" size={24}/>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink-1)" }}>{doc.name || doc.type || "Document"}</div>
+              {doc.type && <div style={{ fontSize: 12, color: "var(--ink-4)", marginTop: 2 }}>{doc.type}</div>}
+              <div style={{ fontSize: 12, color: "var(--ink-5)", marginTop: 8, display: "flex", alignItems: "center", gap: 5 }}>
+                <Icon name="shield" size={11}/> Stored securely in document vault
+              </div>
+            </div>
           </div>
-          <div style={{ fontSize: 13, fontWeight: 500, color: "var(--ink-2)" }}>{doc.name || doc.type || "Document"}</div>
-          <div style={{ fontSize: 12, color: "var(--ink-5)", marginTop: 4 }}>Stored securely in document vault · full preview requires vault access</div>
-        </div>
-
-        <div style={{ padding: "20px 22px" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 24px", fontSize: 13 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 24px", fontSize: 13, marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
             {doc.type      && <div><span style={{ color: "var(--ink-4)" }}>Type </span><b>{doc.type}</b></div>}
             {doc.issuer    && <div><span style={{ color: "var(--ink-4)" }}>Issuer </span><b>{doc.issuer}</b></div>}
             {doc.issueDate && <div><span style={{ color: "var(--ink-4)" }}>Issued </span><b>{doc.issueDate}</b></div>}
             {doc.expiry    && <div><span style={{ color: "var(--ink-4)" }}>Expires </span><b>{doc.expiry}</b></div>}
+            {!doc.type && !doc.issuer && !doc.issueDate && !doc.expiry && (
+              <div style={{ gridColumn: "span 2", color: "var(--ink-5)", fontSize: 12 }}>No additional metadata available for this document.</div>
+            )}
           </div>
-          {doc.confidence != null && (
-            <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
-              <div style={{ fontSize: 12, color: "var(--ink-4)", marginBottom: 8 }}>OCR confidence</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{ flex: 1, height: 8, background: "var(--line)", borderRadius: 4, overflow: "hidden" }}>
-                  <div style={{ height: "100%", width: `${doc.confidence}%`, background: doc.confidence >= 90 ? "var(--ok)" : doc.confidence >= 70 ? "oklch(58% 0.14 75)" : "var(--bad)", borderRadius: 4 }}/>
-                </div>
-                <span style={{ fontWeight: 700, fontSize: 14, minWidth: 36 }}>{doc.confidence}%</span>
-              </div>
-              <div style={{ fontSize: 11.5, color: "var(--ink-5)", marginTop: 6 }}>
-                {doc.confidence >= 90 ? "High confidence · all fields extracted and verified" :
-                 doc.confidence >= 70 ? "Medium confidence · manual review recommended" :
-                 "Low confidence · document may require re-submission"}
-              </div>
-            </div>
-          )}
         </div>
+
+        {doc.confidence != null && (
+          <div style={{ padding: "16px 22px" }}>
+            <div style={{ fontSize: 12, color: "var(--ink-4)", marginBottom: 8 }}>OCR confidence</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ flex: 1, height: 8, background: "var(--line)", borderRadius: 4, overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${doc.confidence}%`, background: doc.confidence >= 90 ? "var(--ok)" : doc.confidence >= 70 ? "oklch(58% 0.14 75)" : "var(--bad)", borderRadius: 4 }}/>
+              </div>
+              <span style={{ fontWeight: 700, fontSize: 14, minWidth: 36 }}>{doc.confidence}%</span>
+            </div>
+            <div style={{ fontSize: 11.5, color: "var(--ink-5)", marginTop: 6 }}>
+              {doc.confidence >= 90 ? "High confidence · all fields extracted and verified" :
+               doc.confidence >= 70 ? "Medium confidence · manual review recommended" :
+               "Low confidence · document may require re-submission"}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

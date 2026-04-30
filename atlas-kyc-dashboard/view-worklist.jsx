@@ -4,9 +4,10 @@
    View A — Compliance Worklist (case queue)
    Decluttered: 3 KPIs, simpler table, no bottom-of-page noise.
    ============================================================ */
-function WorklistView({ onOpenCase, search, cases: propCases, kpiData, onApprove, onReject }) {
+function WorklistView({ onOpenCase, cases: propCases, kpiData, onApprove, onReject }) {
   const { useState, useMemo } = React;
   const [filter, setFilter] = useState("all"); // all | needs-me | overdue | high
+  const [search, setSearch] = useState("");
 
   const source = propCases || MOCK.cases;
 
@@ -70,6 +71,11 @@ function WorklistView({ onOpenCase, search, cases: propCases, kpiData, onApprove
             <button key={c.v} className="chip" data-active={filter === c.v}
               onClick={() => setFilter(c.v)}>{c.l}</button>
           ))}
+        </div>
+        <div className="search" role="search" style={{ marginLeft: "auto" }}>
+          <Icon name="search" aria-hidden="true"/>
+          <input placeholder="Search clients, case IDs, RMs…" value={search} onChange={e => setSearch(e.target.value)} style={{ minWidth: 220 }}/>
+          {search && <button style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", color: "var(--ink-4)" }} onClick={() => setSearch("")}><Icon name="x" size={12}/></button>}
         </div>
       </div>
 

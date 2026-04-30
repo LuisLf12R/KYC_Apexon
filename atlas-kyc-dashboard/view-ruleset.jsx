@@ -5,10 +5,33 @@
    Active ruleset JSON viewer + changelog + dual-approval override flow
    ============================================================ */
 function RulesetView() {
-  const { useState } = React;
+  const { useState, useEffect } = React;
   const [tab, setTab] = useState("active");
-  const [draft, setDraft] = useState(MOCK.ruleset.activeJson);
   const [showOverride, setShowOverride] = useState(false);
+  const [rulesData, setRulesData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/ruleset")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { setRulesData(d); setLoading(false); })
+      .catch(() => setLoading(false));
+    try {
+      fetch("/api/audit/log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "NAV_RULESET", description: "Opened Ruleset & policy view" }),
+      });
+    } catch (_) {}
+  }, []);
+
+  const activeVersion = rulesData ? (rulesData.version || "kyc-rules-v2.1") : "kyc-rules-v2.1";
+  const effectiveDate = rulesData ? (rulesData.effective_date || "2026-01-01") : "2026-01-01";
+  const jsonText = rulesData ? JSON.stringify(rulesData, null, 2) : (loading ? "Loading…" : "{}");
+  const jurisdictions = rulesData ? Object.values(rulesData.jurisdictions || {}) : [];
+  const hardRejectRules = rulesData ? (rulesData.hard_reject_rules || []) : [];
+  const reviewRules = rulesData ? (rulesData.review_rules || []) : [];
+  const totalRules = hardRejectRules.length + reviewRules.length;
 
   return (
     <div>
@@ -23,7 +46,7 @@ function RulesetView() {
             <span style={{ fontSize: 11.5, color: "var(--ink-4)" }}>Active file</span>
             <span className="mono" style={{ fontSize: 13, fontWeight: 500 }}>kyc_rules_v2.0.json</span>
           </div>
-          <button className="btn" style={{ whiteSpace: "nowrap" }}><Icon name="refresh"/> Reload file</button>
+          <button className="btn" style={{ whiteSpace: "nowrap" }} onClick={() => { setLoading(true); fetch("/api/ruleset").then(r=>r.ok?r.json():null).then(d=>{setRulesData(d);setLoading(false);}).catch(()=>setLoading(false)); }}><Icon name="refresh"/> Reload file</button>
           <button className="btn primary" style={{ whiteSpace: "nowrap" }} onClick={() => setShowOverride(true)}><Icon name="plus"/> Propose change</button>
         </div>
       </div>
@@ -33,17 +56,21 @@ function RulesetView() {
         <div className="rs-stat">
           <span className="eyebrow">Active version</span>
           <div className="row-flex" style={{ gap: 8, marginTop: 4 }}>
-            <span className="badge b-accent mono">kyc-rules-v2.1</span>
+            <span className="badge b-accent mono">{activeVersion}</span>
             <span className="badge b-ok"><span className="dot"/>Production</span>
           </div>
         </div>
         <div className="rs-stat">
           <span className="eyebrow">Effective</span>
-          <div className="mono" style={{ fontSize: 13, marginTop: 4 }}>2026-01-01</div>
+          <div className="mono" style={{ fontSize: 13, marginTop: 4 }}>{effectiveDate}</div>
         </div>
         <div className="rs-stat">
           <span className="eyebrow">Last change</span>
-          <div className="mono" style={{ fontSize: 13, marginTop: 4 }}>2026-04-19 · NYU RegTech</div>
+          <div className="mono" style={{ fontSize: 13, marginTop: 4 }}>
+            {rulesData && rulesData.changelog && rulesData.changelog[0]
+              ? `${rulesData.changelog[0].date} · ${rulesData.changelog[0].reviewed_by || rulesData.changelog[0].author}`
+              : "2026-04-19 · NYU RegTech"}
+          </div>
         </div>
         <div className="rs-stat">
           <span className="eyebrow">Pending approvals</span>
@@ -55,7 +82,7 @@ function RulesetView() {
         <div className="rs-stat">
           <span className="eyebrow">Validation</span>
           <div className="row-flex" style={{ gap: 6, marginTop: 4, color: "var(--ok)", fontSize: 12.5, fontWeight: 500 }}>
-            <Icon name="check"/> 142 rules · 8 jurisdictions · OK
+            <Icon name="check"/> {totalRules > 0 ? `${totalRules} rules · ${jurisdictions.length} jurisdictions · OK` : "142 rules · 8 jurisdictions · OK"}
           </div>
         </div>
       </div>
@@ -68,17 +95,36 @@ function RulesetView() {
         <button onClick={() => setTab("history")} aria-current={tab === "history"}>Override log</button>
       </div>
 
-      {tab === "active" && <RulesetActive draft={draft} setDraft={setDraft} onPropose={() => setShowOverride(true)}/>}
-      {tab === "changelog" && <RulesetChangelog/>}
+      {tab === "active"    && <RulesetActive jsonText={jsonText} jurisdictions={jurisdictions} hardRejectRules={hardRejectRules} reviewRules={reviewRules} loading={loading} onPropose={() => setShowOverride(true)}/>}
+      {tab === "changelog" && <RulesetChangelog items={rulesData && rulesData.changelog ? rulesData.changelog : null}/>}
       {tab === "approvals" && <RulesetApprovals/>}
-      {tab === "history" && <RulesetOverrideLog/>}
+      {tab === "history"   && <RulesetOverrideLog/>}
 
       {showOverride && <OverrideModal onClose={() => setShowOverride(false)}/>}
     </div>
   );
 }
 
-function RulesetActive({ draft, setDraft, onPropose }) {
+function RulesetActive({ jsonText, jurisdictions, hardRejectRules, reviewRules, loading, onPropose }) {
+  const JURISDICTION_NOTES = {
+    USA: "Reg-K · OFAC SDN", GBR: "60-day doc expiry", EU: "180-day rescreen",
+    CHE: "180-day rescreen", SGP: "MAS 30-day velocity", HKG: "SFC 10% UBO",
+    AUS: "AUSTRAC TTR", CHN: "Deferred post-v1", CAN: "FINTRAC", UAE: "CBUAE", IND: "RBI",
+  };
+  const jList = jurisdictions.length > 0
+    ? jurisdictions.map(j => ({
+        code: j.jurisdiction_code,
+        note: JURISDICTION_NOTES[j.jurisdiction_code] || (j.regulators || []).join(", "),
+        count: Object.keys(j.dimension_overrides || {}).length + (j.additional_hard_reject_rules || []).length + (j.additional_review_rules || []).length,
+        deferred: j.jurisdiction_code === "CHN",
+      }))
+    : [
+        { code: "USA", note: "Reg-K · OFAC SDN", count: 38 }, { code: "GBR", note: "60-day doc expiry", count: 22 },
+        { code: "EU",  note: "180-day rescreen",  count: 19 }, { code: "CHE", note: "180-day rescreen",  count: 17 },
+        { code: "SGP", note: "MAS 30-day velocity", count: 14 }, { code: "HKG", note: "SFC 10% UBO",   count: 16 },
+        { code: "AUS", note: "AUSTRAC TTR", count: 11 }, { code: "CHN", note: "Deferred post-v1", count: 0, deferred: true },
+      ];
+
   return (
     <div className="ruleset-grid">
       <div className="card">
@@ -91,14 +137,19 @@ function RulesetActive({ draft, setDraft, onPropose }) {
         </div>
         <div className="json-editor">
           <div className="json-gutter">
-            {Array.from({ length: draft.split("\n").length }, (_, i) => <div key={i}>{i + 1}</div>)}
+            {jsonText.split("\n").map((_, i) => <div key={i}>{i + 1}</div>)}
           </div>
-          <pre className="json-body" dangerouslySetInnerHTML={{ __html: highlightJson(draft) }}/>
+          {loading
+            ? <pre className="json-body" style={{ color: "var(--ink-4)" }}>Loading ruleset…</pre>
+            : <pre className="json-body" dangerouslySetInnerHTML={{ __html: highlightJson(jsonText) }}/>
+          }
         </div>
         <div className="ruleset-foot">
           <div className="row-flex" style={{ gap: 8 }}>
             <button className="btn"><Icon name="check"/> Validate draft</button>
-            <span style={{ fontSize: 12, color: "var(--ink-4)" }}>142 rules · 0 errors · 2 warnings</span>
+            <span style={{ fontSize: 12, color: "var(--ink-4)" }}>
+              {hardRejectRules.length + reviewRules.length} rules · 0 errors · 2 warnings
+            </span>
           </div>
           <div className="row-flex" style={{ gap: 8 }}>
             <button className="btn ghost">Discard</button>
@@ -109,26 +160,37 @@ function RulesetActive({ draft, setDraft, onPropose }) {
 
       <aside className="col-flex" style={{ gap: 16 }}>
         <div className="card">
-          <div className="card-h"><h3>Jurisdiction overlays</h3><span className="meta">8 active</span></div>
+          <div className="card-h"><h3>Jurisdiction overlays</h3><span className="meta">{jList.length} active</span></div>
           <ul className="overlay-list">
-            {[
-              { code: "USA", note: "Reg-K · OFAC SDN", count: 38 },
-              { code: "GBR", note: "60-day doc expiry", count: 22 },
-              { code: "EU",  note: "180-day rescreen",  count: 19 },
-              { code: "CHE", note: "180-day rescreen",  count: 17 },
-              { code: "SGP", note: "MAS 30-day velocity", count: 14 },
-              { code: "HKG", note: "SFC 10% UBO",     count: 16 },
-              { code: "AUS", note: "AUSTRAC TTR",     count: 11 },
-              { code: "CHN", note: "Deferred post-v1", count: 0,  deferred: true },
-            ].map(j => (
+            {jList.map(j => (
               <li key={j.code}>
                 <span className="mono ovl-code">{j.code}</span>
                 <span className="ovl-note">{j.note}</span>
-                <span className={`badge ${j.deferred ? "b-mute" : "b-info"} mono`} style={{ fontSize: 10.5 }}>{j.deferred ? "deferred" : `${j.count} rules`}</span>
+                <span className={`badge ${j.deferred ? "b-mute" : "b-info"} mono`} style={{ fontSize: 10.5 }}>
+                  {j.deferred ? "deferred" : j.count > 0 ? `${j.count} overrides` : "base rules"}
+                </span>
               </li>
             ))}
           </ul>
         </div>
+
+        {(hardRejectRules.length > 0 || reviewRules.length > 0) && (
+          <div className="card">
+            <div className="card-h"><h3>Rule summary</h3><span className="meta">from loaded ruleset</span></div>
+            <div className="card-pad">
+              <div className="meter-row">
+                <span>Hard reject</span>
+                <div className="meter"><i style={{ width: `${Math.min(hardRejectRules.length * 20, 100)}%`, background: "var(--bad)" }}/></div>
+                <b className="mono">{hardRejectRules.length}</b>
+              </div>
+              <div className="meter-row">
+                <span>Review triggers</span>
+                <div className="meter"><i style={{ width: `${Math.min(reviewRules.length * 10, 100)}%` }}/></div>
+                <b className="mono">{reviewRules.length}</b>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="card">
           <div className="card-h"><h3>Active in queue</h3><span className="meta">last 24h</span></div>
@@ -143,23 +205,27 @@ function RulesetActive({ draft, setDraft, onPropose }) {
   );
 }
 
-function RulesetChangelog() {
-  const items = [
-    { v: "v2.1", date: "2026-04-19", author: "NYU RegTech", change: "Phase 3: jurisdiction-aware ruleset. Eight jurisdiction overlays added: USA, GBR, EU, CHE, SGP, HKG, AUS. HKG SFC 10% UBO threshold; SGP MAS 30-day velocity window; EU/CHE 180-day rescreening interval; GBR 60-day doc expiry warning. China deferred post-v1.", state: "active" },
-    { v: "v2.0", date: "2026-03-02", author: "NYU RegTech", change: "Baseline lifted from v1.1. Introduced FATF Recommendations and Wolfsberg Private Banking Principles as foundation. Added structured risk-tiering matrix.", state: "superseded" },
-    { v: "v1.1", date: "2026-01-15", author: "Compliance WG", change: "Added adverse media weighting, refined PEP exposure decay (12-month half-life). Introduced UBO 25% disclosure threshold per FATF R10.", state: "superseded" },
-    { v: "v1.0", date: "2025-11-08", author: "Compliance WG", change: "Initial production ruleset. AML, sanctions, PEP and basic KYC checks. Single-jurisdiction (US-only).", state: "superseded" },
+function RulesetChangelog({ items }) {
+  const fallback = [
+    { version: "v2.1", date: "2026-04-19", author: "NYU RegTech", change: "Phase 3: jurisdiction-aware ruleset. Eight jurisdiction overlays added: USA, GBR, EU, CHE, SGP, HKG, AUS. HKG SFC 10% UBO threshold; SGP MAS 30-day velocity window; EU/CHE 180-day rescreening interval; GBR 60-day doc expiry warning. China deferred post-v1.", state: "active" },
+    { version: "v2.0", date: "2026-03-02", author: "NYU RegTech", change: "Baseline lifted from v1.1. Introduced FATF Recommendations and Wolfsberg Private Banking Principles as foundation. Added structured risk-tiering matrix.", state: "superseded" },
+    { version: "v1.1", date: "2026-01-15", author: "Compliance WG", change: "Added adverse media weighting, refined PEP exposure decay (12-month half-life). Introduced UBO 25% disclosure threshold per FATF R10.", state: "superseded" },
+    { version: "v1.0", date: "2025-11-08", author: "Compliance WG", change: "Initial production ruleset. AML, sanctions, PEP and basic KYC checks. Single-jurisdiction (US-only).", state: "superseded" },
   ];
+  const rows = items && items.length > 0
+    ? items.map((it, idx) => ({ version: it.version, date: it.date, author: it.reviewed_by || it.author, change: it.change, state: idx === 0 ? "active" : "superseded" }))
+    : fallback;
+
   return (
     <div className="card">
-      <div className="card-h"><h3>Changelog</h3><span className="meta">4 versions · most recent first</span></div>
-      {items.map((it, i) => (
+      <div className="card-h"><h3>Changelog</h3><span className="meta">{rows.length} versions · most recent first</span></div>
+      {rows.map((it, i) => (
         <div key={i} className="changelog-item">
           <div className="changelog-l">
             <div className="row-flex" style={{ gap: 8 }}>
-              <span className="badge b-accent mono">{it.v}</span>
-              {it.state === "active" && <span className="badge b-ok"><span className="dot"/>active</span>}
-              {it.state === "superseded" && <span className="badge b-mute">superseded</span>}
+              <span className="badge b-accent mono">{it.version}</span>
+              {it.state === "active"      && <span className="badge b-ok"><span className="dot"/>active</span>}
+              {it.state === "superseded"  && <span className="badge b-mute">superseded</span>}
             </div>
             <div className="mono" style={{ fontSize: 12, color: "var(--ink-4)", marginTop: 6 }}>{it.date}</div>
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>by {it.author}</div>

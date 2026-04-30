@@ -3,9 +3,144 @@
 /* ============================================================
    System Information — admin view
    ============================================================ */
+
+const PROMPT_CONTENT = {
+  "KYC-SCREEN-01": `You are a KYC compliance analyst. Given a customer record and their AML/PEP screening results, perform a structured risk assessment.
+
+INPUT:
+- customer_id: {{customer_id}}
+- full_name: {{full_name}}
+- jurisdiction: {{jurisdiction}}
+- screening_status: {{screening_status}}
+- screening_date: {{screening_date}}
+- pep_match: {{pep_match}}
+- sanctions_match: {{sanctions_match}}
+- adverse_media: {{adverse_media}}
+
+TASK:
+1. Identify any hard-reject conditions (confirmed sanctions match, unmitigated high-risk jurisdiction).
+2. Identify any review-trigger conditions (unresolved match, stale screening > 365 days).
+3. Summarise findings in ≤ 3 sentences.
+4. Return a structured JSON with: { "disposition": "PASS|REVIEW|REJECT", "triggers": [...], "summary": "..." }
+
+Rules:
+- Never speculate beyond the data provided.
+- Use FATF Recommendation 6 for sanctions and Rec 12 for PEPs.
+- Output must be valid JSON only. No preamble or explanation outside the JSON block.`,
+
+  "KYC-SUMM-01": `You are a KYC case summariser for a Private Wealth compliance team. Generate a concise case summary for analyst review.
+
+INPUT:
+- case_id: {{case_id}}
+- client_name: {{client_name}}
+- risk_tier: {{risk_tier}}
+- risk_score: {{risk_score}}/100
+- disposition: {{disposition}}
+- flags: {{flags}}
+- dimensions: {{dimensions_json}}
+- account_open_date: {{account_open_date}}
+- last_kyc_review: {{last_kyc_review}}
+
+TASK:
+Produce a structured case summary with these sections:
+1. Risk summary (2 sentences max)
+2. Key findings — bullet list of active flags
+3. Recommended next action — one of: Approve, Request docs, Escalate, EDD
+
+Constraints:
+- Maximum 150 words total.
+- Do not include personally identifiable information beyond client name and case ID.
+- Tone: professional, regulatory-grade.
+- Output format: plain text, not JSON.`,
+
+  "KYC-FLAG-01": `You are a KYC compliance reasoning engine. Explain why a specific KYC flag was raised for an analyst who must decide whether to clear or escalate.
+
+INPUT:
+- flag_type: {{flag_type}}
+- flag_value: {{flag_value}}
+- customer_jurisdiction: {{jurisdiction}}
+- risk_tier: {{risk_tier}}
+- applicable_rule_ids: {{rule_ids}}
+- policy_reference: {{policy_reference}}
+
+TASK:
+1. State which rule was triggered and why (cite rule_id and policy_reference).
+2. Explain what evidence the analyst should collect to clear this flag.
+3. State the escalation path if the flag cannot be cleared within 5 business days.
+
+Format: numbered list, max 200 words.
+Do not fabricate evidence or assume data not provided.`,
+};
+
+function PromptModal({ prompt, onClose }) {
+  const content = PROMPT_CONTENT[prompt.id] || `Prompt content for ${prompt.id} is not available in this environment.`;
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}
+         onClick={onClose}>
+      <div style={{ background: "var(--bg)", borderRadius: "var(--radius-lg)", width: 680, maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.22)", overflow: "hidden" }}
+           onClick={e => e.stopPropagation()}>
+        <div style={{ padding: "18px 22px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <span className="badge b-ok mono" style={{ fontSize: 11 }}>{prompt.id}</span>
+              <span className="mono" style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{prompt.v} ({prompt.date})</span>
+            </div>
+            <div style={{ fontWeight: 600, fontSize: 14.5 }}>{prompt.desc}</div>
+          </div>
+          <button className="btn ghost" onClick={onClose} style={{ padding: "0 6px" }}><Icon name="x"/></button>
+        </div>
+        <div style={{ padding: "20px 22px", overflowY: "auto", flex: 1 }}>
+          <div style={{ fontSize: 12, color: "var(--ink-4)", marginBottom: 10, display: "flex", gap: 16 }}>
+            <span><Icon name="bolt"/> {prompt.calls} calls (24h)</span>
+            <span><Icon name="clock"/> p95 {prompt.lat}</span>
+            <span>Model: claude-haiku-4-5-20251001</span>
+          </div>
+          <pre style={{ fontSize: 12.5, lineHeight: 1.7, fontFamily: "var(--font-mono)", background: "var(--bg-sunken)", padding: "16px 18px", borderRadius: 8, border: "1px solid var(--line)", whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, color: "var(--ink-2)" }}>
+            {content}
+          </pre>
+        </div>
+        <div style={{ padding: "14px 22px", borderTop: "1px solid var(--line)", display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button className="btn ghost"><Icon name="download"/> Export</button>
+          <button className="btn" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SystemView() {
+  const { useState, useEffect } = React;
+  const [sysInfo, setSysInfo] = useState(null);
+  const [promptModal, setPromptModal] = useState(null);
+
+  useEffect(() => {
+    fetch("/api/system/info")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setSysInfo(d))
+      .catch(() => {});
+    try {
+      fetch("/api/audit/log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "NAV_SYSTEM", description: "Opened System information view" }),
+      });
+    } catch (_) {}
+  }, []);
+
+  const dsEntries = sysInfo && sysInfo.datasets && Object.keys(sysInfo.datasets).length > 0
+    ? Object.entries(sysInfo.datasets).map(([name, rows]) => ({
+        name: name.charAt(0).toUpperCase() + name.slice(1),
+        kind: "CSV · uploaded batch",
+        n: rows.toLocaleString(),
+        refreshed: "Session",
+        status: "ok",
+      }))
+    : MOCK.datasets;
+
   return (
     <div>
+      {promptModal && <PromptModal prompt={promptModal} onClose={() => setPromptModal(null)}/>}
+
       <div className="page-h">
         <div>
           <div className="eyebrow">Administration</div>
@@ -13,7 +148,7 @@ function SystemView() {
           <div className="page-sub">Runtime, datasets, prompts, integrations and security posture for the KYC tool. Read-only — changes go through change management.</div>
         </div>
         <div className="row-flex">
-          <button className="btn"><Icon name="refresh"/> Refresh</button>
+          <button className="btn" onClick={() => fetch("/api/system/info").then(r=>r.ok?r.json():null).then(d=>setSysInfo(d)).catch(()=>{})}><Icon name="refresh"/> Refresh</button>
           <button className="btn"><Icon name="download"/> Export status</button>
         </div>
       </div>
@@ -30,21 +165,24 @@ function SystemView() {
       <div className="split-1-1">
         {/* Datasets */}
         <div className="card">
-          <div className="card-h"><h3>Datasets</h3><span className="meta">7 sources · 4 live</span></div>
+          <div className="card-h">
+            <h3>Datasets</h3>
+            <span className="meta">{dsEntries.length} sources · {dsEntries.filter(d => d.status === "ok").length} live</span>
+          </div>
           <table className="tbl">
             <thead>
               <tr><th>Source</th><th style={{ width: 120 }}>Records</th><th style={{ width: 130 }}>Refreshed</th><th style={{ width: 90 }}>Status</th></tr>
             </thead>
             <tbody>
-              {MOCK.datasets.map((d, i) => (
+              {dsEntries.map((d, i) => (
                 <tr key={i}>
                   <td><b style={{ fontWeight: 500 }}>{d.name}</b><div style={{ fontSize: 11.5, color: "var(--ink-4)" }}>{d.kind}</div></td>
                   <td className="mono">{d.n}</td>
                   <td className="mono" style={{ fontSize: 12, color: "var(--ink-3)" }}>{d.refreshed}</td>
                   <td>
-                    {d.status === "ok" && <span className="badge b-ok"><span className="dot"/>live</span>}
+                    {d.status === "ok"   && <span className="badge b-ok"><span className="dot"/>live</span>}
                     {d.status === "warn" && <span className="badge b-warn"><span className="dot"/>stale</span>}
-                    {d.status === "off" && <span className="badge b-mute">off</span>}
+                    {d.status === "off"  && <span className="badge b-mute">off</span>}
                   </td>
                 </tr>
               ))}
@@ -66,7 +204,11 @@ function SystemView() {
                 <div className="row-flex" style={{ marginTop: 10, gap: 14, fontSize: 12, color: "var(--ink-4)" }}>
                   <span><Icon name="bolt"/> {p.calls} calls (24h)</span>
                   <span><Icon name="clock"/> p95 {p.lat}</span>
-                  <span style={{ marginLeft: "auto" }}><a className="lnk">View prompt</a> · <a className="lnk">Diff</a></span>
+                  <span style={{ marginLeft: "auto" }}>
+                    <button className="lnk" style={{ background: "none", border: "none", cursor: "pointer", padding: 0, font: "inherit", color: "var(--accent)" }} onClick={() => setPromptModal(p)}>View prompt</button>
+                    {" · "}
+                    <button className="lnk" style={{ background: "none", border: "none", cursor: "pointer", padding: 0, font: "inherit", color: "var(--accent)" }} onClick={() => setPromptModal({ ...p, _showDiff: true })}>Diff</button>
+                  </span>
                 </div>
               </li>
             ))}
@@ -80,13 +222,14 @@ function SystemView() {
           <div className="card-h"><h3>Runtime</h3><span className="meta">production · us-east</span></div>
           <div className="kv-grid">
             <div><span>Hosting</span><b>Render.com · Starter plan</b></div>
-            <div><span>Framework</span><b>FastAPI 0.115 / Python 3.12</b></div>
+            <div><span>Framework</span><b>FastAPI {sysInfo ? sysInfo.fastapi_version : "0.115"} / Python {sysInfo ? sysInfo.python_version : "3.12"}</b></div>
             <div><span>Active ruleset</span><b className="mono"><span className="badge b-accent mono" style={{ fontSize: 10.5 }}>kyc-rules-v2.1</span></b></div>
             <div><span>Live URL</span><b>kyc-apexon.onrender.com</b></div>
             <div><span>Build</span><b className="mono">eda192f · 2026-04-30</b></div>
-            <div><span>Replicas</span><b>1 / 1 healthy</b></div>
+            <div><span>Active sessions</span><b>{sysInfo ? sysInfo.active_sessions : "—"}</b></div>
             <div><span>Storage</span><b>tempfile (session-scoped)</b></div>
             <div><span>Auth</span><b>In-memory sessions (RBAC)</b></div>
+            {sysInfo && sysInfo.hostname && <div><span>Host</span><b className="mono">{sysInfo.hostname}</b></div>}
           </div>
         </div>
 
@@ -146,7 +289,7 @@ function SystemView() {
       <div className="sysfoot">
         <span><b>Hosting:</b> Render.com</span>
         <span className="sep">|</span>
-        <span><b>Framework:</b> FastAPI / Python 3.12</span>
+        <span><b>Framework:</b> FastAPI {sysInfo ? sysInfo.fastapi_version : "0.115"} / Python {sysInfo ? sysInfo.python_version : "3.12"}</span>
         <span className="sep">|</span>
         <span><b>Ruleset:</b> <span className="badge b-ok mono" style={{ fontSize: 10.5 }}>kyc-rules-v2.1</span></span>
         <span className="sep">|</span>

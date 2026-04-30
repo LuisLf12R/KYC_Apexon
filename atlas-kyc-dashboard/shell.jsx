@@ -65,16 +65,10 @@ function Sidebar({ active, onNav, collapsed, role, onRoleChange, casesCount }) {
 /* ============================================================
    Topbar
    ============================================================ */
-function Topbar({ title, crumbs, search, setSearch, role, view }) {
+function Topbar({ title, crumbs, role, view }) {
   const adminViews = new Set(["audit", "ruleset", "system"]);
   const isAdmin = role === "admin";
   const inAdmin = adminViews.has(view);
-  const placeholder = inAdmin
-    ? (view === "audit" ? "Search events, users, hashes…" :
-       view === "ruleset" ? "Search rules, jurisdictions, versions…" :
-       "Search datasets, prompts, integrations…")
-    : view === "batch" ? "Search files in current batch…"
-    : "Search clients, case IDs, RMs…";
   return (
     <div className="topbar">
       <div className="crumbs">
@@ -87,12 +81,6 @@ function Topbar({ title, crumbs, search, setSearch, role, view }) {
         {isAdmin && <span className="role-tag"><Icon name="shield" size={11}/> Admin</span>}
       </div>
       <div className="tb-spacer"/>
-      <div className="search" role="search">
-        <Icon name="search" aria-hidden="true"/>
-        <label htmlFor="global-search" className="sr-only">{placeholder}</label>
-        <input id="global-search" placeholder={placeholder} value={search} onChange={e => setSearch(e.target.value)} />
-        <kbd aria-hidden="true">⌘K</kbd>
-      </div>
       {!inAdmin && view !== "batch" && <>
         <button className="tb-btn" aria-label="Open filters"><Icon name="filter" aria-hidden="true"/> Filters</button>
         <button className="tb-btn" aria-label="Export view"><Icon name="download" aria-hidden="true"/> Export</button>

@@ -22,6 +22,7 @@ from kyc_dashboard.banker_html import build_banker_html
 from kyc_engine.engine import KYCComplianceEngine
 
 DATA_DIR = Path(tempfile.gettempdir()) / "kyc_data_clean"
+RULES_DIR = Path(__file__).parent.parent / "rules"
 API_BASE_URL = os.getenv("API_BASE_URL", "")
 
 
@@ -383,9 +384,12 @@ def audit_trail(_: Dict[str, Any] = Depends(_require_session)) -> Dict[str, Any]
 def _action_group(action: str) -> str:
     if action in ("LOGIN", "LOGOUT"):
         return "auth"
-    if action in ("APPROVE", "REJECT", "BATCH_RUN_COMPLETE"):
+    if action in ("APPROVE", "REJECT", "BATCH_RUN_COMPLETE", "CLEAR_APPROVED", "CLEAR_REJECTED",
+                  "STATUS_CHANGE", "VIEW_CASE", "CASE_TAB_SWITCH"):
         return "case"
-    if action in ("FILE_UPLOAD",):
+    if "RULESET" in action:
+        return "ruleset"
+    if action in ("FILE_UPLOAD", "EXPORT") or action.startswith("NAV_"):
         return "system"
     return "system"
 
@@ -395,6 +399,7 @@ def _format_audit_description(event: dict) -> str:
     action  = event.get("action_type", "")
     user    = event.get("username", "")
     cid     = event.get("customer_id")
+    desc    = details.get("description", "")
     if action == "LOGIN":
         return f"{user} authenticated"
     if action == "LOGOUT":
@@ -403,9 +408,65 @@ def _format_audit_description(event: dict) -> str:
         return f"Batch complete — {details.get('total', 0)} customers, {details.get('flagged', 0)} flagged"
     if action == "FILE_UPLOAD":
         return f"Uploaded {details.get('filename', '')} ({details.get('rows', 0)} rows, type={details.get('dataset_type', '')})"
+    if action == "STATUS_CHANGE":
+        return desc or f"Status changed to {details.get('new_status', '?')} for {cid or 'unknown'}"
+    if action == "VIEW_CASE":
+        return desc or f"Viewed case {cid or '?'}"
+    if action == "CASE_TAB_SWITCH":
+        return desc or f"Switched to {details.get('tab', '?')} tab on case {cid or '?'}"
+    if action.startswith("NAV_"):
+        return desc or f"Navigated to {action[4:].lower()}"
+    if action == "EXPORT":
+        return desc or f"Exported {details.get('type', 'data')}"
+    if desc:
+        return desc
     if cid:
         return f"{action} on customer {cid}"
     return action
+
+class AuditEventRequest(BaseModel):
+    action: str
+    description: str = ""
+    customer_id: Optional[str] = None
+    details: Dict[str, Any] = {}
+
+
+@app.post("/api/audit/log")
+def log_audit_event(payload: AuditEventRequest) -> Dict[str, str]:
+    """Accept client-side UI events and append them to the session audit trail."""
+    get_logger().log(
+        payload.action,
+        customer_id=payload.customer_id or None,
+        details={"description": payload.description, **payload.details},
+    )
+    return {"ok": "true"}
+
+
+@app.get("/api/system/info")
+def system_info() -> Dict[str, Any]:
+    import sys
+    import platform
+    import fastapi as _fa
+    dfs = _load_temp_dfs()
+    return {
+        "python_version": sys.version.split()[0],
+        "fastapi_version": _fa.__version__,
+        "platform": platform.system(),
+        "hostname": platform.node(),
+        "active_sessions": len(SESSIONS),
+        "datasets": {k: len(df) for k, df in dfs.items()},
+    }
+
+
+@app.get("/api/ruleset")
+def get_ruleset() -> Dict[str, Any]:
+    """Return the active KYC ruleset JSON from the rules directory."""
+    for fname in ("kyc_rules_v2.0.json", "kyc_rules_v1.1.json", "kyc_rules_v1.0.json"):
+        candidate = RULES_DIR / fname
+        if candidate.exists():
+            return json.loads(candidate.read_text(encoding="utf-8"))
+    raise HTTPException(status_code=404, detail="No ruleset file found in rules/")
+
 
 class RunBatchRequest(BaseModel):
     institution_id: Optional[str] = None

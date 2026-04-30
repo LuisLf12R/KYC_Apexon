@@ -3,9 +3,10 @@
 /* ============================================================
    View C — RM Client Book
    ============================================================ */
-function RMView({ search, cases: propCases, onOpenCase }) {
+function RMView({ cases: propCases, onOpenCase }) {
   const { useState, useMemo } = React;
   const [tier, setTier] = useState("all");
+  const [search, setSearch] = useState("");
 
   const allClients = propCases && propCases.length > 0 ? propCases : MOCK.cases.slice(0, 6);
 
@@ -35,7 +36,11 @@ function RMView({ search, cases: propCases, onOpenCase }) {
           <div className="eyebrow">A. Mercer · Senior RM</div>
           <h1 className="page-title">Client book</h1>
         </div>
-        <div/>
+        <div className="search" role="search">
+          <Icon name="search" aria-hidden="true"/>
+          <input placeholder="Search clients…" value={search} onChange={e => setSearch(e.target.value)} style={{ minWidth: 200 }}/>
+          {search && <button style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", color: "var(--ink-4)" }} onClick={() => setSearch("")}><Icon name="x" size={12}/></button>}
+        </div>
       </div>
 
       <div className="kpi-strip" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
