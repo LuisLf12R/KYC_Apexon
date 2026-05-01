@@ -68,9 +68,9 @@ def _harmonize_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _detect_dataset_type(df: pd.DataFrame, filename: str) -> str:
+def _detect_dataset_type(df, filename: str) -> str:
     """Heuristic dataset type detection from column names and filename."""
-    cols = set(df.columns)
+    cols = set(df.columns) if df is not None else set()
     fname = filename.lower()
     
     # Phase 1: Filename-based detection (highest priority)
@@ -243,7 +243,7 @@ def process_file(
             resolved_type = dataset_type or _detect_dataset_type(df, filename)
         elif ext in unstructured_exts:
             raw_text = _run_ocr(file_bytes, filename)
-            resolved_type = dataset_type or "customers"
+            resolved_type = dataset_type or _detect_dataset_type(None, filename)
             df = _llm_structure(raw_text, resolved_type, filename)
             df = _harmonize_columns(df)
         else:
