@@ -64,6 +64,8 @@ SESSIONS: Dict[str, Dict[str, Any]] = {}
 # In-memory approval overrides: customer_id → "approved" | "rejected"
 # Ephemeral — clears on server restart (acceptable for demo).
 APPROVALS: Dict[str, str] = {}
+# Last batch results — persisted in memory so the frontend can re-fetch after navigation
+_LAST_BATCH: Dict[str, Any] = {}
 
 app = FastAPI(title="KYC Backend API", version="0.1.0")
 
@@ -259,10 +261,16 @@ def kyc_batch(
         elif override == "rejected":
             case["status"] = "Escalated"
             case["sla"]    = {"tone": "bad", "label": "Rejected"}
-    return KYCBatchResponse(
-        results=formatted.get("cases", []),
-        summary={"total": len(evaluations), "flagged": flagged},
-    )
+    cases = formatted.get("cases", [])
+    summary = {"total": len(evaluations), "flagged": flagged}
+    _LAST_BATCH.update({"results": cases, "summary": summary})
+    return KYCBatchResponse(results=cases, summary=summary)
+
+
+@app.get("/api/batch-results")
+def get_batch_results():
+    """Return the most recent batch evaluation results (no auth — dashboard reload use)."""
+    return _LAST_BATCH or {"results": [], "summary": {"total": 0, "flagged": 0}}
 
 
 @app.get("/api/kyc/customer/{customer_id}", response_model=KYCCustomerResponse)
