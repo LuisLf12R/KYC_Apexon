@@ -32,7 +32,7 @@ from kyc_engine.ruleset import get_active_ruleset_version, reset_ruleset_cache
 from rules.schema.ruleset import RulesetManifest
 
 
-_RULESET_PATH = Path(__file__).resolve().parents[2] / "rules" / "kyc_rules_v2.0.json"
+_RULESET_PATH = Path(__file__).resolve().parents[2] / "rules" / "kyc_rules_v2.1.json"
 
 _SNAPSHOT_FIELDS = [
     "overall_score", "disposition",

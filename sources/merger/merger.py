@@ -4,11 +4,11 @@ sources/merger/merger.py
 Staged-overlay → live-ruleset merge tooling.
 
 Hard constraints (architectural decisions §3, §6, §10):
-- Merger NEVER writes to kyc_rules_v2.0.json without a named, non-null reviewer.
+- Merger NEVER writes to kyc_rules_v2.1.json without a named, non-null reviewer.
 - _dry_run=True validates and returns MergeResult without touching disk.
 - Merger loads raw JSON dicts, mutates in place, validates the full
   RulesetManifest round-trip, then writes back — no partial writes.
-- Merger is the ONLY code path that writes to kyc_rules_v2.0.json.
+- Merger is the ONLY code path that writes to kyc_rules_v2.1.json.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from rules.schema.ruleset import ChangelogEntry, RulesetManifest
 
 # ── Paths (overridable in tests via arguments) ─────────────────────────────────
 
-_LIVE_RULESET = Path("rules/kyc_rules_v2.0.json")
+_LIVE_RULESET = Path("rules/kyc_rules_v2.1.json")
 _STAGING_DIR = Path("rules/staging")
 
 
@@ -90,7 +90,7 @@ def load_staged_overlay(
 # ── Live ruleset I/O ───────────────────────────────────────────────────────────
 
 def load_live_ruleset_dict(ruleset_path: Path = _LIVE_RULESET) -> Dict[str, Any]:
-    """Load kyc_rules_v2.0.json as a raw dict (preserves all fields including reviewed_by)."""
+    """Load kyc_rules_v2.1.json as a raw dict (preserves all fields including reviewed_by)."""
     if not ruleset_path.exists():
         raise MergeError(f"Live ruleset not found at {ruleset_path}")
     return json.loads(ruleset_path.read_text(encoding="utf-8"))

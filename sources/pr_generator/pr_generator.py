@@ -4,12 +4,12 @@ PR generator for ruleset overlay changes.
 Flow
 ----
 1. load_staged_overlays()  — read all rules/staging/*.json (skip PR_DRAFT.md)
-2. load_live_ruleset()     — read kyc_rules_v2.0.json as raw dict
+2. load_live_ruleset()     — read kyc_rules_v2.1.json as raw dict
 3. diff_overlays()         — classify each staged overlay as new|modified|unchanged
 4. run_regression_gate()   — run pytest, capture pass/fail counts
 5. emit_pr_description()   — write rules/staging/PR_DRAFT.md
 
-The generator never writes to kyc_rules_v2.0.json.
+The generator never writes to kyc_rules_v2.1.json.
 Merge is performed manually by the human reviewer after approving the PR.
 """
 from __future__ import annotations
@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from rules.schema import JurisdictionOverlay
 
 _STAGING_DIR = Path(__file__).parent.parent.parent / "rules" / "staging"
-_LIVE_RULESET = Path(__file__).parent.parent.parent / "rules" / "kyc_rules_v2.0.json"
+_LIVE_RULESET = Path(__file__).parent.parent.parent / "rules" / "kyc_rules_v2.1.json"
 _PR_DRAFT = _STAGING_DIR / "PR_DRAFT.md"
 
 
@@ -44,7 +44,7 @@ def load_staged_overlays() -> List[JurisdictionOverlay]:
 
 
 def load_live_ruleset() -> Dict[str, Any]:
-    """Load kyc_rules_v2.0.json as a raw dict."""
+    """Load kyc_rules_v2.1.json as a raw dict."""
     return json.loads(_LIVE_RULESET.read_text(encoding="utf-8"))
 
 
@@ -243,7 +243,7 @@ def emit_pr_description(
         "",
         "1. Review each overlay above against the source regulatory text.",
         "2. Confirm regression gate shows ✅ PASSED.",
-        "3. Merge staged overlays into `rules/kyc_rules_v2.0.json` "
+        "3. Merge staged overlays into `rules/kyc_rules_v2.1.json` "
            "under the `jurisdictions` key.",
         "4. Bump ruleset `version` field and add a `changelog` entry.",
         "5. Tag the commit: `git tag kyc-rules-vX.Y.Z`.",

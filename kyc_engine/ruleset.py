@@ -11,7 +11,7 @@ from typing import Optional
 from rules.schema.ruleset import RulesetManifest
 
 _RULESET_DIR = Path(__file__).parent.parent / "rules"
-_DEFAULT_FILENAME = "kyc_rules_v2.0.json"
+_DEFAULT_FILENAME = "kyc_rules_v2.1.json"
 
 _active_manifest: Optional[RulesetManifest] = None
 _ruleset_cache: Optional[RulesetManifest] = None

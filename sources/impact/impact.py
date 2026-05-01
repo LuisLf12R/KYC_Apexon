@@ -148,7 +148,7 @@ def compute_disposition_under_rules(
 
 # ── Main entrypoint ────────────────────────────────────────────────────────────
 
-_LIVE_RULESET = Path("rules/kyc_rules_v2.0.json")
+_LIVE_RULESET = Path("rules/kyc_rules_v2.1.json")
 
 
 def compute_impact(

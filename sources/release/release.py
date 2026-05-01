@@ -27,7 +27,7 @@ from rules.schema.ruleset import RulesetManifest
 
 # ── Default path ───────────────────────────────────────────────────────────────
 
-_LIVE_RULESET = Path("rules/kyc_rules_v2.0.json")
+_LIVE_RULESET = Path("rules/kyc_rules_v2.1.json")
 
 # ── Version prefix expected in all ruleset version strings ────────────────────
 
