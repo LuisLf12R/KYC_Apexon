@@ -56,7 +56,10 @@ class SourceOfWealthDimension:
                 return self._error_result(customer_id, f"Customer {customer_id} not found")
 
             customer = cust_row.iloc[0]
+            # Accept source_of_wealth as alias for sow_declared (CSV uses the former)
             sow_declared = customer.get("sow_declared")
+            if pd.isna(sow_declared) or str(sow_declared).strip() == "":
+                sow_declared = customer.get("source_of_wealth")
 
             findings: List[str] = []
 

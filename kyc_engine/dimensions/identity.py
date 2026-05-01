@@ -111,22 +111,26 @@ class IdentityVerificationDimension(BaseDimension):
         try:
             customers = data['customers']
             id_verifications = data['id_verifications']
-            
+
+            # Dataset not uploaded — don't penalise; mark as not provided (neutral)
+            if id_verifications is None or (isinstance(id_verifications, pd.DataFrame) and id_verifications.empty):
+                return self._not_provided_result(customer_id, "id_verifications")
+
             # Get customer record
             customer = customers[customers['customer_id'] == customer_id]
             if customer.empty:
                 return self._no_customer_error(customer_id)
-            
+
             customer = customer.iloc[0]
-            
+
             # Get ID verification records for this customer
             id_records = id_verifications[id_verifications['customer_id'] == customer_id]
-            
+
             # Perform evaluations
             findings = []
             passed = True
             compliance_status = 'COMPLIANT_PRIMARY_VERIFIED'
-            
+
             # [1] Check if customer has any identity documents
             if id_records.empty:
                 findings.append('[FAIL] No identity documents found')
@@ -306,6 +310,20 @@ class IdentityVerificationDimension(BaseDimension):
         # Exact match or substring match (allows for middle names)
         return c_name in i_name or i_name in c_name
     
+    def _not_provided_result(self, customer_id: str, dataset: str) -> Dict:
+        """Neutral result when the dataset was not uploaded at all."""
+        return {
+            'customer_id': customer_id,
+            'dimension': 'IdentityVerification',
+            'passed': True,
+            'status': 'Not Provided',
+            'score': 70,
+            'findings': [f'[INFO] {dataset} dataset not uploaded — dimension skipped'],
+            'evaluation_details': {'compliance_status': 'DATA_NOT_PROVIDED'},
+            'remediation_required': False,
+            'next_review_date': self.evaluation_date.strftime('%Y-%m-%d'),
+        }
+
     def _no_customer_error(self, customer_id: str) -> Dict:
         """Return error result for missing customer."""
         return {

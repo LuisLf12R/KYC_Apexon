@@ -55,8 +55,9 @@ class DataQualityDimension:
     # PoA freshness SLA (3-6 months)
     POA_FRESHNESS_SLA_DAYS = 90  # 3 months standard
     
-    # Screening coverage SLA (daily batch)
-    SCREENING_SLA_DAYS = 1  # Must be screened within 1 day
+    # Screening data freshness SLA — DQ checks data presence, not re-screening frequency.
+    # Re-screening frequency (90/180/365 days risk-based) is enforced by the AML dimension.
+    SCREENING_SLA_DAYS = 365  # Flag as [WARN] only, not [CRITICAL], if data is >1 year stale
     
     # UBO verification SLA (aligned with customer master)
     UBO_SLA_DAYS = 365  # Aligned with risk-based cycles
@@ -358,20 +359,20 @@ class DataQualityDimension:
                 findings.append('[CRITICAL] Missing screening result')
                 score -= 20
         
-        # Check screening freshness (1-day SLA)
+        # Check screening data staleness (re-screening frequency is the AML dimension's job)
         latest_screening = cust_screenings['screening_date'].max()
         if pd.notna(latest_screening):
             latest_screening = pd.to_datetime(latest_screening)
             days_since = (self.evaluation_date - latest_screening).days
-            
+
             if days_since > self.SCREENING_SLA_DAYS:
                 findings.append(
-                    f'[CRITICAL] Screening coverage drift: {days_since} days overdue '
-                    f'(SLA: {self.SCREENING_SLA_DAYS} day)'
+                    f'[WARN] Screening data stale: {days_since} days old '
+                    f'(threshold: {self.SCREENING_SLA_DAYS} days)'
                 )
-                score -= 25
+                score -= 15
             else:
-                findings.append(f'[OK] Screening current ({days_since} days old)')
+                findings.append(f'[OK] Screening data present ({days_since} days old)')
         
         return max(0, score), findings
     

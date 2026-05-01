@@ -146,7 +146,7 @@ class AMLScreeningDimension:
             )
 
             score = self._compute_score(screening_evaluation, rescreening_evaluation, hit_evaluation)
-            aml_status = self._compute_aml_status(screening_evaluation, hit_evaluation)
+            aml_status = self._compute_aml_status(screening_evaluation, hit_evaluation, rescreening_evaluation)
             aml_hit_status = (
                 hit_evaluation["resolution_status"]
                 if hit_evaluation and hit_evaluation.get("resolution_status")
@@ -405,8 +405,11 @@ class AMLScreeningDimension:
             return 80
         return 60  # resolved but unknown status
 
-    def _compute_aml_status(self, screening_eval: Dict, hit_eval) -> str:
+    def _compute_aml_status(self, screening_eval: Dict, hit_eval, rescreening_eval: Dict = None) -> str:
         """Return a canonical aml_status string for the engine."""
+        # Overdue rescreening — report as stale_screening so RV-003 fires
+        if rescreening_eval and rescreening_eval.get("overdue"):
+            return "stale_screening"
         if screening_eval["screening_status"] in ("NO_HIT", "NO_MATCH"):
             return "no_match"
         if hit_eval is None:

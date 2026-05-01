@@ -55,6 +55,11 @@ class KYCComplianceEngine:
         self.beneficial_owners = self._load_df("beneficial_ownership_clean.csv")
         self.ubo = self.beneficial_owners
 
+        # Anchor evaluation date to the latest date in the dataset.
+        # This prevents time-based checks (AML rescreening, DQ freshness) from
+        # flagging all customers when running against data collected in the past.
+        self._evaluation_date = self._compute_evaluation_date()
+
         p = self._manifest.dimension_parameters
         self._dimensions = {
             "identity": IdentityVerificationDimension(p.identity),
@@ -72,6 +77,43 @@ class KYCComplianceEngine:
             return pd.read_csv(self.data_clean_dir / filename)
         except (FileNotFoundError, pd.errors.EmptyDataError):
             return pd.DataFrame()
+
+    def _compute_evaluation_date(self) -> datetime:
+        """Return the latest date found in the loaded datasets.
+
+        Anchors all time-based compliance checks (AML rescreening intervals,
+        DQ freshness SLAs) to when the data was collected rather than today,
+        preventing wholesale flagging of customers in historical/demo datasets.
+        """
+        # Only scan "event" dates (when something happened), not expiry/validity dates.
+        # Expiry dates represent future document validity and would push evaluation_date
+        # far into the future, making all screenings appear massively overdue.
+        date_cols_by_df: List[tuple] = [
+            (self.screenings,        ["screening_date"]),
+            (self.id_verifications,  ["verification_date"]),
+            (self.transactions,      ["transaction_date", "last_txn_date"]),
+            (self.documents,         ["upload_date"]),
+            (self.customers,         ["onboarding_date"]),
+        ]
+        latest = None
+        for df, cols in date_cols_by_df:
+            if df is None or df.empty:
+                continue
+            for col in cols:
+                if col not in df.columns:
+                    continue
+                try:
+                    parsed = pd.to_datetime(df[col], errors="coerce").dropna()
+                    if parsed.empty:
+                        continue
+                    col_max = parsed.max()
+                    if latest is None or col_max > latest:
+                        latest = col_max
+                except Exception:
+                    pass
+        if latest is not None:
+            return latest.to_pydatetime()
+        return datetime.now()
 
     def _load_all_data(self, customer_id: str) -> dict:
         # P7-A/D: use pre-loaded instance attributes — no per-call disk reads.
@@ -268,11 +310,11 @@ class KYCComplianceEngine:
         )
 
         identity_result = IdentityVerificationDimension(identity_params).evaluate(customer_id, data)
-        screening_result = AMLScreeningDimension(aml_params).evaluate(customer_id, data)
+        screening_result = AMLScreeningDimension(aml_params, evaluation_date=self._evaluation_date).evaluate(customer_id, data)
         ubo_result = BeneficialOwnershipDimension(ubo_params).evaluate(customer_id, data)
         txn_result = AccountActivityDimension(tx_params).evaluate(customer_id, data)
         doc_result = ProofOfAddressDimension(doc_params).evaluate(customer_id, data)
-        dq_result = DataQualityDimension(dq_params).evaluate(customer_id, data)
+        dq_result = DataQualityDimension(dq_params, evaluation_date=self._evaluation_date).evaluate(customer_id, data)
         sow_result = SourceOfWealthDimension(sow_params).evaluate(customer_id, data)
         crs_result = CRSFATCADimension(crs_params).evaluate(customer_id, data)
 

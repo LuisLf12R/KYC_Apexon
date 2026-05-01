@@ -108,13 +108,18 @@ function PromptModal({ prompt, onClose }) {
 
 function SystemView() {
   const { useState, useEffect } = React;
-  const [sysInfo, setSysInfo] = useState(null);
+  const [sysInfo, setSysInfo]   = useState(null);
+  const [aiObs,   setAiObs]    = useState(null);
   const [promptModal, setPromptModal] = useState(null);
 
   useEffect(() => {
     fetch("/api/system/info")
       .then(r => r.ok ? r.json() : null)
       .then(d => setSysInfo(d))
+      .catch(() => {});
+    fetch("/api/ai-observability")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setAiObs(d))
       .catch(() => {});
     try {
       fetch("/api/audit/log", {
@@ -288,29 +293,81 @@ function SystemView() {
         <div className="card-h">
           <h3>AI Observability</h3>
           <span className="meta" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            Claude API · last 24h · agentic pipeline
-            <span className="badge b-warn" style={{ fontSize: 10, fontWeight: 500 }}>Estimated · demo data</span>
+            Claude API + Google Vision · {aiObs && aiObs.has_data ? "session totals" : "50-customer estimate"}
+            {aiObs && aiObs.has_data
+              ? <span className="badge b-ok"  style={{ fontSize: 10, fontWeight: 500 }}>Live data</span>
+              : <span className="badge b-warn" style={{ fontSize: 10, fontWeight: 500 }}>Estimated · demo data</span>
+            }
           </span>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "var(--d-gap)", padding: "16px 20px" }}>
-          <div><div className="kpi-label">Token usage (24h)</div><div className="kpi-value" style={{fontSize:22}}>1.24M</div><div className="kpi-sub">input + output · ~$3.72</div></div>
-          <div><div className="kpi-label">Avg cost / customer</div><div className="kpi-value" style={{fontSize:22}}>$0.07</div><div className="kpi-sub">batch of 50 · last run</div></div>
-          <div><div className="kpi-label">LLM p95 latency</div><div className="kpi-value" style={{fontSize:22}}>1.84s</div><div className="kpi-sub">classification + OCR calls</div></div>
-          <div><div className="kpi-label">OCR confidence avg</div><div className="kpi-value" style={{fontSize:22}}>78%</div><div className="kpi-sub">across 141 documents</div></div>
-        </div>
-        <div style={{ borderTop: "1px solid var(--line)", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 0 }}>
-          {[
-            { label: "Cache hit rate", value: "62%", sub: "prompt caching enabled" },
-            { label: "Hallucination flags", value: "3", sub: "low-confidence extractions" },
-            { label: "Model", value: "claude-sonnet-4-6", sub: "structured extraction" },
-          ].map((s, i) => (
-            <div key={i} style={{ padding: "14px 20px", borderRight: i < 2 ? "1px solid var(--line)" : "none" }}>
-              <div className="kpi-label">{s.label}</div>
-              <div style={{ fontWeight: 600, fontSize: 16, margin: "4px 0 2px" }}>{s.value}</div>
-              <div className="kpi-sub">{s.sub}</div>
-            </div>
-          ))}
-        </div>
+        {(() => {
+          const live = aiObs && aiObs.has_data;
+          const D = {
+            tokens:        live ? (aiObs.claude && aiObs.claude.total_tokens >= 1000 ? (aiObs.claude.total_tokens/1000).toFixed(1)+"K" : (aiObs.claude ? aiObs.claude.total_tokens : 0)) : "127K",
+            tokensSub:     live ? `in ${aiObs.claude ? aiObs.claude.input_tokens : 0} · out ${aiObs.claude ? aiObs.claude.output_tokens : 0}` : "24h rolling · input + output",
+            costPerDoc:    live ? `$${aiObs.cost_per_doc_usd}` : "$0.02",
+            costPerDocSub: live ? `${aiObs.docs_processed} doc${aiObs.docs_processed !== 1 ? "s" : ""} · $${aiObs.total_cost_usd} total` : "141 docs · $0.99 est. total",
+            claudeP95:     live ? (aiObs.claude && aiObs.claude.p95_latency_ms ? (aiObs.claude.p95_latency_ms/1000).toFixed(2)+"s" : "—") : "1.84s",
+            visionP95:     live ? (aiObs.vision && aiObs.vision.p95_latency_ms ? (aiObs.vision.p95_latency_ms/1000).toFixed(2)+"s" : "—") : "0.92s",
+            cacheHit:      live ? (aiObs.claude && aiObs.claude.cache_hit_rate != null ? aiObs.claude.cache_hit_rate+"%" : "0%") : "0%",
+            ocrAvg:        live ? (aiObs.vision && aiObs.vision.avg_confidence != null ? aiObs.vision.avg_confidence+"%" : "—") : "78%",
+            lowConf:       live ? (aiObs.vision && aiObs.vision.low_confidence_flags != null ? aiObs.vision.low_confidence_flags : "—") : 3,
+            claudeCalls:   live ? (aiObs.claude ? aiObs.claude.calls : 0) : 141,
+            claudeModel:   live ? (aiObs.claude ? aiObs.claude.model : "claude-sonnet-4-6") : "claude-sonnet-4-6",
+            visionCalls:   live ? (aiObs.vision ? aiObs.vision.calls : 0) : 141,
+            claudeCost:    live ? `$${aiObs.claude ? aiObs.claude.cost_usd : 0}` : "$0.85",
+            visionCost:    live ? `$${aiObs.vision ? aiObs.vision.cost_usd : 0}` : "$0.14",
+          };
+          return (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "var(--d-gap)", padding: "16px 20px" }}>
+                <div>
+                  <div className="kpi-label">Token usage (24h)</div>
+                  <div className="kpi-value" style={{fontSize:22}}>{D.tokens}</div>
+                  <div className="kpi-sub">{D.tokensSub}</div>
+                </div>
+                <div>
+                  <div className="kpi-label">Avg cost / document</div>
+                  <div className="kpi-value" style={{fontSize:22}}>{D.costPerDoc}</div>
+                  <div className="kpi-sub">{D.costPerDocSub}</div>
+                </div>
+                <div>
+                  <div className="kpi-label">Claude p95 latency</div>
+                  <div className="kpi-value" style={{fontSize:22}}>{D.claudeP95}</div>
+                  <div className="kpi-sub">structured extraction</div>
+                </div>
+                <div>
+                  <div className="kpi-label">Vision p95 latency</div>
+                  <div className="kpi-value" style={{fontSize:22}}>{D.visionP95}</div>
+                  <div className="kpi-sub">Google Vision OCR</div>
+                </div>
+              </div>
+              <div style={{ borderTop: "1px solid var(--line)", display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 0 }}>
+                {[
+                  { label: "Claude calls",         value: D.claudeCalls,  sub: `model: ${D.claudeModel}` },
+                  { label: "Vision calls",          value: D.visionCalls,  sub: "document-text-detection" },
+                  { label: "Claude cost",           value: D.claudeCost,   sub: `Vision: ${D.visionCost}` },
+                  { label: "Prompt cache hit rate", value: D.cacheHit,     sub: live ? "this session" : "enable caching → ~60% est." },
+                  { label: "OCR avg confidence",    value: D.ocrAvg,       sub: "across all docs" },
+                  { label: "Low-conf flags",        value: D.lowConf,      sub: "< 70% · needs review" },
+                ].map((s, i) => (
+                  <div key={i} style={{ padding: "14px 20px", borderRight: i < 5 ? "1px solid var(--line)" : "none" }}>
+                    <div className="kpi-label">{s.label}</div>
+                    <div style={{ fontWeight: 600, fontSize: 16, margin: "4px 0 2px" }}>{s.value}</div>
+                    <div className="kpi-sub">{s.sub}</div>
+                  </div>
+                ))}
+              </div>
+              {!live && (
+                <div style={{ borderTop: "1px solid var(--line)", padding: "10px 20px", fontSize: 12, color: "var(--ink-4)", display: "flex", alignItems: "center", gap: 6 }}>
+                  <Icon name="info" size={12}/>
+                  Demo estimates based on 50 customers × ~2.8 docs each at claude-sonnet-4-6 pricing.
+                  Upload documents to replace with live telemetry.
+                </div>
+              )}
+            </>
+          );
+        })()}
       </div>
 
       <div className="sysfoot">

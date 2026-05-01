@@ -243,18 +243,28 @@ function UBOGraph({ subject, ini, ubos }) {
 }
 
 function DocPreviewModal({ doc, onClose }) {
+  const { useState } = React;
+  const [imgError, setImgError] = useState(false);
   const statusTone = (s) => {
     const sl = (s || "").toLowerCase();
     if (sl === "verified" || sl === "valid" || sl === "reviewed") return "ok";
     if (sl === "outstanding" || sl === "expired") return "bad";
     return "warn";
   };
+  const fname = doc.name || "";
+  const ext = fname.split(".").pop().toLowerCase();
+  const isPdf = ext === "pdf";
+  const isImg = ["png","jpg","jpeg","gif","webp"].includes(ext);
+  const previewUrl = fname ? `/api/documents/preview/${encodeURIComponent(fname)}` : null;
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}
          onClick={onClose}>
-      <div style={{ background: "var(--bg)", borderRadius: "var(--radius-lg)", width: 520, boxShadow: "0 20px 60px rgba(0,0,0,0.22)", overflow: "hidden" }}
+      <div style={{ background: "var(--bg)", borderRadius: "var(--radius-lg)", width: 620, maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.22)", overflow: "hidden" }}
            onClick={e => e.stopPropagation()}>
-        <div style={{ padding: "18px 22px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+
+        {/* Header */}
+        <div style={{ padding: "18px 22px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ width: 36, height: 36, borderRadius: 10, background: "var(--bg-sunken)", display: "grid", placeItems: "center" }}>
               <Icon name="file" size={18}/>
@@ -270,32 +280,42 @@ function DocPreviewModal({ doc, onClose }) {
           </div>
         </div>
 
-        <div style={{ background: "var(--bg-sunken)", padding: "20px 22px", borderBottom: "1px solid var(--line)" }}>
-          <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
-            <div style={{ width: 52, height: 66, background: "var(--bg)", borderRadius: 6, border: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.06)", flexShrink: 0 }}>
-              <Icon name="file" size={24}/>
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink-1)" }}>{doc.name || doc.type || "Document"}</div>
-              {doc.type && <div style={{ fontSize: 12, color: "var(--ink-4)", marginTop: 2 }}>{doc.type}</div>}
-              <div style={{ fontSize: 12, color: "var(--ink-5)", marginTop: 8, display: "flex", alignItems: "center", gap: 5 }}>
-                <Icon name="shield" size={11}/> Stored securely in document vault
-              </div>
-            </div>
+        {/* Document preview */}
+        {previewUrl && !imgError && (
+          <div style={{ background: "#1a1a1a", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 260, maxHeight: 400, overflow: "hidden", flexShrink: 0 }}>
+            {isPdf ? (
+              <embed src={previewUrl} type="application/pdf" style={{ width: "100%", height: 380, border: "none" }}/>
+            ) : isImg ? (
+              <img src={previewUrl} alt={fname} onError={() => setImgError(true)}
+                   style={{ maxWidth: "100%", maxHeight: 380, objectFit: "contain", display: "block" }}/>
+            ) : null}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 24px", fontSize: 13, marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
+        )}
+        {previewUrl && imgError && (
+          <div style={{ background: "var(--bg-sunken)", padding: "20px 22px", textAlign: "center", color: "var(--ink-4)", fontSize: 13 }}>
+            Preview unavailable — document not in vault (uploaded before this server session)
+          </div>
+        )}
+
+        {/* Metadata */}
+        <div style={{ background: "var(--bg-sunken)", padding: "16px 22px", borderTop: "1px solid var(--line)", borderBottom: "1px solid var(--line)", flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--ink-5)", marginBottom: 12 }}>
+            <Icon name="shield" size={11}/> Stored securely in document vault
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 24px", fontSize: 13 }}>
             {doc.type      && <div><span style={{ color: "var(--ink-4)" }}>Type </span><b>{doc.type}</b></div>}
             {doc.issuer    && <div><span style={{ color: "var(--ink-4)" }}>Issuer </span><b>{doc.issuer}</b></div>}
             {doc.issueDate && <div><span style={{ color: "var(--ink-4)" }}>Issued </span><b>{doc.issueDate}</b></div>}
             {doc.expiry    && <div><span style={{ color: "var(--ink-4)" }}>Expires </span><b>{doc.expiry}</b></div>}
             {!doc.type && !doc.issuer && !doc.issueDate && !doc.expiry && (
-              <div style={{ gridColumn: "span 2", color: "var(--ink-5)", fontSize: 12 }}>No additional metadata available for this document.</div>
+              <div style={{ gridColumn: "span 2", color: "var(--ink-5)", fontSize: 12 }}>No additional metadata available.</div>
             )}
           </div>
         </div>
 
+        {/* OCR confidence */}
         {doc.confidence != null && (
-          <div style={{ padding: "16px 22px" }}>
+          <div style={{ padding: "14px 22px", flexShrink: 0 }}>
             <div style={{ fontSize: 12, color: "var(--ink-4)", marginBottom: 8 }}>OCR confidence</div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <div style={{ flex: 1, height: 8, background: "var(--line)", borderRadius: 4, overflow: "hidden" }}>

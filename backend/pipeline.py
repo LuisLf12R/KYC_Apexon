@@ -36,7 +36,7 @@ COLUMN_ALIASES: Dict[str, str] = {
     "dob": "date_of_birth", "birth_date": "date_of_birth",
     "nationality": "jurisdiction", "country": "jurisdiction",
     "institution": "institution_id",
-    "screen_id": "screening_id", "screening_result": "result",
+    "screen_id": "screening_id",
     "doc_id": "document_id", "doc_type": "document_type",
     "txn_id": "transaction_id", "tx_id": "transaction_id",
     "amount": "transaction_amount", "value": "transaction_amount",
@@ -46,7 +46,25 @@ COLUMN_ALIASES: Dict[str, str] = {
 def _harmonize_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Lowercase + strip all column names, apply known aliases."""
     df.columns = [c.strip().lower().replace(" ", "_").replace("-", "_") for c in df.columns]
-    df.rename(columns={k: v for k, v in COLUMN_ALIASES.items() if k in df.columns}, inplace=True)
+    # Deduplicate column names that collide after lowercasing (e.g. LLM returns "Name" and "name")
+    seen: Dict[str, int] = {}
+    deduped = []
+    for col in df.columns:
+        if col in seen:
+            seen[col] += 1
+            deduped.append(f"{col}_{seen[col]}")
+        else:
+            seen[col] = 0
+            deduped.append(col)
+    df.columns = deduped
+    existing = set(df.columns)
+    # Only rename if the alias source exists AND the target doesn't already exist
+    rename_map = {
+        k: v for k, v in COLUMN_ALIASES.items()
+        if k in existing and v not in existing
+    }
+    if rename_map:
+        df.rename(columns=rename_map, inplace=True)
     return df
 
 
@@ -66,7 +84,7 @@ def _detect_dataset_type(df: pd.DataFrame, filename: str) -> str:
         return "screenings"
     if "transaction" in fname or "txn" in fname:
         return "transactions"
-    if "document" in fname or "proof" in fname:
+    if "document" in fname or "proof" in fname or "utility" in fname or "bill" in fname or "bank_statement" in fname or "statement" in fname or "passport" in fname:
         return "documents"
     if "beneficial" in fname or "ubo" in fname or "ownership" in fname:
         return "beneficial_ownership"
@@ -91,6 +109,9 @@ def _detect_dataset_type(df: pd.DataFrame, filename: str) -> str:
 
 def _run_ocr(file_bytes: bytes, filename: str) -> str:
     """Extract text from image/PDF. Uses Google Vision for images, pdfminer for PDFs."""
+    import time as _time
+    from backend.ai_observability import get_tracker
+
     ext = Path(filename).suffix.lower()
 
     if ext == ".pdf":
@@ -105,9 +126,12 @@ def _run_ocr(file_bytes: bytes, filename: str) -> str:
 
     from google.cloud import vision as gv
     client = gv.ImageAnnotatorClient()
+    t0 = _time.perf_counter()
     resp = client.document_text_detection(image=gv.Image(content=file_bytes))
+    latency_ms = (_time.perf_counter() - t0) * 1000
     if resp.error.message:
         raise RuntimeError(f"Vision API error: {resp.error.message}")
+    get_tracker().track_vision(latency_ms=latency_ms, doc_type=filename)
     return resp.full_text_annotation.text if resp.full_text_annotation else ""
 
 
@@ -129,8 +153,12 @@ def _pdf_pdfplumber(data: bytes) -> str:
 
 def _llm_structure(raw_text: str, dataset_type: str, filename: str) -> pd.DataFrame:
     """Ask Claude to turn OCR text into a JSON array of KYC records."""
+    import time as _time
     import anthropic as ac
+    from backend.ai_observability import get_tracker
+
     client = ac.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    model = "claude-opus-4-20250514"
 
     system = (
         "You are a KYC data extraction assistant. "
@@ -141,12 +169,15 @@ def _llm_structure(raw_text: str, dataset_type: str, filename: str) -> pd.DataFr
         f"Dataset type: {dataset_type}\nFilename: {filename}\n\n"
         f"Extract all records and return as a JSON array:\n{raw_text[:8000]}"
     )
+    t0 = _time.perf_counter()
     resp = client.messages.create(
-        model="claude-opus-4-20250514",
+        model=model,
         max_tokens=4096,
         system=system,
         messages=[{"role": "user", "content": user}],
     )
+    latency_ms = (_time.perf_counter() - t0) * 1000
+    get_tracker().track_claude(model=model, usage=resp.usage, latency_ms=latency_ms, doc_type=filename)
     raw = resp.content[0].text.strip()
     raw = re.sub(r"^```[a-zA-Z]*\n?", "", raw)
     raw = re.sub(r"\n?```$", "", raw).strip()
@@ -181,6 +212,10 @@ def _save(df: pd.DataFrame, dataset_type: str) -> Path:
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
     fname = DATASET_FILES.get(dataset_type, f"{dataset_type}_clean.csv")
     dest = TEMP_DIR / fname
+    # Stringify list/dict cells — drop_duplicates() can't hash them
+    for col in df.columns:
+        if df[col].apply(lambda x: isinstance(x, (list, dict))).any():
+            df[col] = df[col].apply(lambda x: json.dumps(x) if isinstance(x, (list, dict)) else x)
     if dest.exists():
         existing = pd.read_csv(dest)
         df = pd.concat([existing, df], ignore_index=True).drop_duplicates()

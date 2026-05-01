@@ -88,24 +88,35 @@ class AccountActivityDimension:
         try:
             customers_df = data['customers']
             transactions_df = data['transactions']
-            
+
+            # Dataset not uploaded — don't penalise; mark as not provided (neutral)
+            if transactions_df is None or (isinstance(transactions_df, pd.DataFrame) and transactions_df.empty):
+                return self._not_provided_result(customer_id)
+
             # Get customer record
             customer = customers_df[customers_df['customer_id'] == customer_id]
             if customer.empty:
                 return self._error_result(customer_id, f"Customer {customer_id} not found")
-            
+
             customer = customer.iloc[0]
             risk_rating = customer['risk_rating']
             jurisdiction = customer.get('jurisdiction', 'UNKNOWN')
-            
+
+            # Normalise date column — accept transaction_date / txn_date as aliases for last_txn_date
+            if 'last_txn_date' not in transactions_df.columns:
+                for alias in ('transaction_date', 'txn_date', 'date'):
+                    if alias in transactions_df.columns:
+                        transactions_df = transactions_df.rename(columns={alias: 'last_txn_date'})
+                        break
+
             # Get customer's transaction records
             customer_txns = transactions_df[transactions_df['customer_id'] == customer_id].copy()
-            
+
             if customer_txns.empty:
                 return self._no_transactions_result(customer_id, risk_rating, jurisdiction)
-            
+
             # Parse dates
-            customer_txns['last_txn_date'] = pd.to_datetime(customer_txns['last_txn_date'])
+            customer_txns['last_txn_date'] = pd.to_datetime(customer_txns['last_txn_date'], errors='coerce')
             
             # Get most recent transaction
             last_txn_date = customer_txns['last_txn_date'].max()
@@ -422,6 +433,20 @@ class AccountActivityDimension:
         
         return findings
     
+    def _not_provided_result(self, customer_id: str) -> Dict[str, Any]:
+        """Neutral result when the transactions dataset was not uploaded at all."""
+        return {
+            'customer_id': customer_id,
+            'dimension': 'Account Activity',
+            'passed': True,
+            'status': 'Not Provided',
+            'score': 70,
+            'evaluation_details': {'activity_status': 'data_not_provided'},
+            'findings': ['[INFO] transactions dataset not uploaded — dimension skipped'],
+            'remediation_required': False,
+            'next_review_date': self.evaluation_date.date().isoformat(),
+        }
+
     def _no_transactions_result(self, customer_id: str, risk_rating: str, jurisdiction: str) -> Dict[str, Any]:
         """Generate result for customer with no transaction records."""
         return {

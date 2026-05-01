@@ -14,6 +14,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from backend.ai_observability import get_tracker as get_ai_tracker
 from backend.audit_state import get_logger, reinit_logger, get_audit_events
 from backend.pipeline import process_file
 from backend.utils import _format_results, _get_institutions, _load_temp_dfs
@@ -24,6 +25,9 @@ from kyc_engine.engine import KYCComplianceEngine
 DATA_DIR = Path(tempfile.gettempdir()) / "kyc_data_clean"
 RULES_DIR = Path(__file__).parent.parent / "rules"
 API_BASE_URL = os.getenv("API_BASE_URL", "")
+
+# In-memory document vault: filename → (bytes, mime_type)
+_DOC_VAULT: Dict[str, tuple] = {}
 
 
 def _load_users() -> Dict[str, Dict[str, Any]]:
@@ -341,7 +345,11 @@ async def upload_files(
     results = []
     for f in files:
         raw = await f.read()
-        result = process_file(raw, f.filename or "upload", dataset_type or None)
+        fname = f.filename or "upload"
+        ext = Path(fname).suffix.lower()
+        mime = "application/pdf" if ext == ".pdf" else f"image/{ext.lstrip('.')}" if ext in {".png",".jpg",".jpeg",".gif"} else "application/octet-stream"
+        _DOC_VAULT[fname] = (raw, mime)
+        result = process_file(raw, fname, dataset_type or None)
         results.append(UploadResult(**result))
         print(f"[UPLOAD] {f.filename!r} → {result['status']} ({result['rows']} rows)")
     for result in results:
@@ -462,6 +470,23 @@ def system_info() -> Dict[str, Any]:
         "active_sessions": len(SESSIONS),
         "datasets": {k: len(df) for k, df in dfs.items()},
     }
+
+
+@app.get("/api/documents/preview/{filename:path}")
+def document_preview(filename: str):
+    """Serve raw bytes for a previously uploaded document (image or PDF)."""
+    from fastapi.responses import Response
+    entry = _DOC_VAULT.get(filename)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Document not found in vault")
+    raw, mime = entry
+    return Response(content=raw, media_type=mime)
+
+
+@app.get("/api/ai-observability")
+def ai_observability() -> Dict[str, Any]:
+    """Return real Claude + Google Vision usage metrics accumulated since server start."""
+    return get_ai_tracker().get_summary()
 
 
 @app.get("/api/ruleset")

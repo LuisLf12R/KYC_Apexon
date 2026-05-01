@@ -103,7 +103,11 @@ class ProofOfAddressDimension:
         try:
             customers = data['customers']
             documents = data['documents']
-            
+
+            # Dataset not uploaded — don't penalise; mark as not provided (neutral)
+            if documents is None or (isinstance(documents, pd.DataFrame) and documents.empty):
+                return self._not_provided_result(customer_id, "documents")
+
             customer = customers[customers['customer_id'] == customer_id]
             if customer.empty:
                 return self._no_customer_error(customer_id)
@@ -224,6 +228,20 @@ class ProofOfAddressDimension:
         
         return documents[0] if documents else None
     
+    def _not_provided_result(self, customer_id: str, dataset: str) -> Dict:
+        """Neutral result when the dataset was not uploaded at all."""
+        return {
+            'customer_id': customer_id,
+            'dimension': 'ProofOfAddressDimension',
+            'passed': True,
+            'status': 'Not Provided',
+            'score': 70,
+            'findings': [f'[INFO] {dataset} dataset not uploaded — dimension skipped'],
+            'evaluation_details': {'compliance_status': 'DATA_NOT_PROVIDED'},
+            'remediation_required': False,
+            'next_review_date': self.evaluation_date.strftime('%Y-%m-%d'),
+        }
+
     def _no_customer_error(self, customer_id: str) -> Dict:
         """Return error result for missing customer."""
         return {
