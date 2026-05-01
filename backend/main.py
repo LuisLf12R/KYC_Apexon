@@ -12,6 +12,7 @@ import pandas as pd
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from backend.ai_observability import get_tracker as get_ai_tracker
@@ -73,10 +74,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/")
-@app.head("/")
-def root():
-    return RedirectResponse(url="/admin", status_code=302)
+@app.get("/admin")
+def admin_redirect():
+    return RedirectResponse(url="/", status_code=302)
 
 
 
@@ -558,6 +558,9 @@ def run_batch(payload: RunBatchRequest) -> Dict[str, Any]:
             case["sla"] = {"tone": "bad", "label": "Rejected"}
     return {"ok": True, **formatted}
 
+
+_DASHBOARD_DIR = Path(__file__).parent.parent / "atlas-kyc-dashboard"
+app.mount("/", StaticFiles(directory=_DASHBOARD_DIR, html=True), name="frontend")
 
 if __name__ == "__main__":
     import uvicorn
