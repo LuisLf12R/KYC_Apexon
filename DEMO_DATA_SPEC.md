@@ -6,7 +6,7 @@ Hand this file to any LLM (Qwen, Gemini, GPT-4, etc.) with the instruction:
 
 ## What to produce
 Six CSV files. All customers must share IDs across files (customer_id is the join key).
-Use **8–12 customers** per batch. Target outcome mix: **~60% PASS · ~25% REVIEW · ~15% REJECT**.
+Use **50 customers** per batch. Target outcome mix: **~60% PASS · ~25% REVIEW · ~15% REJECT**.
 Create the actual documents not just code, do it in a zip folder to download
 
 Use today's date as the reference point. Keep all screening/verification/upload dates within the last 90 days. Keep document expiry dates 1–6 years in the future (except for REJECT customers — give them expired or rejected docs).
