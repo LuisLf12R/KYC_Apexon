@@ -18,8 +18,7 @@ from backend.ai_observability import get_tracker as get_ai_tracker
 from backend.audit_state import get_logger, reinit_logger, get_audit_events
 from backend.pipeline import process_file
 from backend.utils import _format_results, _get_institutions, _load_temp_dfs
-from kyc_dashboard.admin_html import build_unified_dashboard_html
-from kyc_dashboard.banker_html import build_banker_html
+
 from kyc_engine.engine import KYCComplianceEngine
 
 DATA_DIR = Path(tempfile.gettempdir()) / "kyc_data_clean"
@@ -78,13 +77,6 @@ app.add_middleware(
 @app.head("/")
 def root():
     return RedirectResponse(url="/admin", status_code=302)
-
-
-@app.get("/admin", response_class=HTMLResponse)
-def admin_dashboard() -> HTMLResponse:
-    print("[DASHBOARD] render unified admin dashboard")
-    html = build_unified_dashboard_html({"apiUrl": API_BASE_URL})
-    return HTMLResponse(content=html, media_type="text/html")
 
 
 

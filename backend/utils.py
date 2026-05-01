@@ -8,7 +8,21 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
-from kyc_dashboard.sidecar import _as_float, _safe
+
+# ── Pure data helpers ──────────────────────────────────────────────────────────
+
+def _safe(v: Any, default: str = "—") -> str:
+    if v is None or (isinstance(v, float) and v != v):
+        return default
+    s = str(v).strip()
+    return s if s else default
+
+
+def _as_float(v: Any) -> float:
+    try:
+        return float(v)
+    except Exception:
+        return 0.0
 
 log = logging.getLogger(__name__)
 _TEMP_DIR = Path(tempfile.gettempdir()) / "kyc_data_clean"
