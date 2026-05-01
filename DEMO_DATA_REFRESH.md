@@ -1,9 +1,15 @@
 # Demo Data Refresh Kit
 **Use 5 minutes before the demo.** Copy each block into a new `.csv` file, upload all 6 via Batch upload, then hit Run batch.
 
-- Customer IDs: `KYC-0051` → `KYC-0058`
-- Expected results: **5 PASS · 2 REVIEW · 1 REJECT**
+- Customer IDs: `KYC-0051` → `KYC-0059`
+- Expected results: **5 PASS · 2 REVIEW · 1 REJECT** (Ivan Lee starts as REVIEW — passport missing)
 - Batch date: today
+- Passport image: `~/Downloads/passport_KYC-0059_Ivan_Lee.png`
+
+### Demo flow for document reconciliation (live in the room)
+1. Upload all 6 CSVs → Run batch → Ivan Lee appears in Worklist as **REVIEW** (missing passport)
+2. Go to Batch upload → drop `passport_KYC-0059_Ivan_Lee.png` → it auto-detects as Documents
+3. Go back to Worklist → re-run batch → Ivan Lee upgrades to **PASS**
 
 ---
 
@@ -19,6 +25,7 @@ KYC-0055,Isabelle Fontaine,FR,INDIVIDUAL,WEALTH,LOW,2025-09-30,445000,A. Mercer,
 KYC-0056,Viktor Drakov,RU,INDIVIDUAL,WEALTH,HIGH,2023-12-01,3200000,A. Mercer,FALSE,TRUE,RU,1968-07-17,RU,INVESTMENT,RU10293847,NON_COMPLIANT,NOT_APPLICABLE
 KYC-0057,Haruki Tanaka,JP,INDIVIDUAL,UHNW,LOW,2025-06-14,8700000,A. Mercer,FALSE,FALSE,JP,1975-09-05,JP,INVESTMENT,JP93847561,COMPLIANT,NOT_APPLICABLE
 KYC-0058,Carla Mendez Ortega,MX,INDIVIDUAL,WEALTH,MEDIUM,2024-10-08,1100000,A. Mercer,FALSE,FALSE,MX,1988-04-23,MX,EMPLOYMENT,MX47382910,COMPLIANT,NOT_APPLICABLE
+KYC-0059,Ivan Lee,US,INDIVIDUAL,UHNW,LOW,2025-03-17,4750000,A. Mercer,FALSE,FALSE,US,1988-03-12,US,INVESTMENT,US84729103,COMPLIANT,COMPLIANT
 ```
 
 ---
@@ -35,6 +42,7 @@ KYC-0055,2026-04-10,NO_MATCH,LOW,CLEARED,2026-04-10,,0,
 KYC-0056,2026-02-14,CONFIRMED_MATCH,HIGH,ESCALATED,,Viktor Drakovitch,95,OFAC-SDN
 KYC-0057,2026-04-20,NO_MATCH,LOW,CLEARED,2026-04-20,,0,
 KYC-0058,2026-03-31,POSSIBLE_MATCH,MEDIUM,UNDER_REVIEW,,C. Mendez,63,PEP-LATAM
+KYC-0059,2026-04-25,NO_MATCH,LOW,CLEARED,2026-04-25,,0,
 ```
 
 ---
@@ -60,6 +68,8 @@ KYC-0057,2026-04-11,INVESTMENT,3100000,JPY,JP,FALSE,TXN-5014,ONLINE
 KYC-0057,2026-04-25,WIRE_TRANSFER,620000,USD,US,FALSE,TXN-5015,ONLINE
 KYC-0058,2026-03-14,DEPOSIT,55000,USD,MX,FALSE,TXN-5016,ONLINE
 KYC-0058,2026-04-17,WIRE_TRANSFER,210000,USD,US,FALSE,TXN-5017,ONLINE
+KYC-0059,2026-04-03,INVESTMENT,1800000,USD,US,FALSE,TXN-5018,ONLINE
+KYC-0059,2026-04-22,WIRE_TRANSFER,340000,USD,CH,FALSE,TXN-5019,BRANCH
 ```
 
 ---
@@ -84,7 +94,10 @@ KYC-0057,PASSPORT,DOC-5013,2026-04-21,VERIFIED,haruki_passport.pdf,JP,2032-09-05
 KYC-0057,PROOF_OF_ADDRESS,DOC-5014,2026-04-21,VERIFIED,haruki_utility.pdf,JP,2026-09-01
 KYC-0058,PASSPORT,DOC-5015,2026-04-16,VERIFIED,carla_passport.pdf,MX,2028-04-23
 KYC-0058,PROOF_OF_ADDRESS,DOC-5016,2026-04-16,VERIFIED,carla_address.pdf,MX,2026-08-01
+KYC-0059,PROOF_OF_ADDRESS,DOC-5017,2026-04-25,VERIFIED,ivan_lee_utility.pdf,US,2026-10-01
 ```
+
+> **Note:** Ivan Lee has NO passport row here — that's intentional. His passport is uploaded separately as `passport_KYC-0059_Ivan_Lee.png` to demonstrate the document reconciliation flow.
 
 ---
 
@@ -100,6 +113,7 @@ KYC-0055,PASSPORT,2026-04-19,2030-11-02,BIOMETRIC,Isabelle Fontaine
 KYC-0056,PASSPORT,2026-03-01,2025-07-17,MANUAL,Viktor Drakov
 KYC-0057,PASSPORT,2026-04-21,2032-09-05,BIOMETRIC,Haruki Tanaka
 KYC-0058,PASSPORT,2026-04-16,2028-04-23,BIOMETRIC,Carla Mendez Ortega
+KYC-0059,PROOF_OF_ADDRESS,2026-04-25,2026-10-01,MANUAL,Ivan Lee
 ```
 
 ---
@@ -113,6 +127,8 @@ KYC-0054,Chen Wei,1958-09-22,SG,72,CEO,FALSE,FALSE,SG,2026-04-22,1,72,DIRECT
 KYC-0054,Linda Huang,1963-02-17,SG,28,CFO,FALSE,FALSE,SG,2026-04-22,1,28,DIRECT
 KYC-0056,Viktor Drakov,1968-07-17,RU,100,SOLE_OWNER,FALSE,TRUE,RU,2026-03-01,1,100,DIRECT
 ```
+
+> Ivan Lee is INDIVIDUAL — no beneficial ownership row needed.
 
 ---
 
@@ -128,3 +144,4 @@ KYC-0056,Viktor Drakov,1968-07-17,RU,100,SOLE_OWNER,FALSE,TRUE,RU,2026-03-01,1,1
 | Viktor Drakov | 🔴 REJECT | Sanctions flag, CONFIRMED_MATCH, expired docs, suspicious txns to Iran |
 | Haruki Tanaka | ✅ PASS | Clean UHNW, biometric verified |
 | Carla Mendez Ortega | 🟡 REVIEW | Unresolved PEP-LATAM match, MEDIUM risk |
+| Ivan Lee | 🟡 REVIEW → ✅ PASS | Missing passport on first run; upload `passport_KYC-0059_Ivan_Lee.png` then re-run to resolve |
